@@ -18,6 +18,8 @@ Qwixbox is an installer for a full VoIP PBX stack on Debian 13: Kamailio (public
 
 Steps read their configuration from `/etc/qwixbox/config.env` via `load_config`, and reference repo files through `$REPO_DIR` (set by `lib/common.sh`). Earlier versions cloned this repo onto the target to find `resources/`, which meant a local edit did nothing until pushed — that is gone; the local checkout is used directly.
 
+**`docs/design/` describes features that do not exist.** It is salvaged design work from the archived v1 repo (see `docs/v1-retrospective.md`), kept so those features are cheap to start — not a description of the system. Do not read a table sketch there as something that is in `schema.ts`, and do not treat those documents as a contract: they are notes, and the code wins. `docs/roadmap.md` marks what is actually built.
+
 The operator-facing material lives in `README.md`: per-provider provisioning (GCP, EC2, Vultr), the port list, the feature-code table, the post-install checklist, and a step table mirroring `install.sh`'s `STEPS` array — keep that table in sync when adding a step, and do not restate any of it here. `portal/api/README.md` and `portal/web/README.md` are untouched `bun init` / Vite-template scaffolding and carry no project information.
 
 ### Topology this assumes
