@@ -14,7 +14,7 @@
  *     --name "Acme Corp" --slug acme --domain acme.example.com --owner admin@acme.test
  */
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { member, organization, tenantSettings, user } from "../db/schema";
 import { rebuildTenant } from "../services/cache";
@@ -66,7 +66,13 @@ if (!existing) {
   console.log(`  organization ${slug} already exists (${orgId})`);
 }
 
-const membership = await db.query.member.findFirst({ where: eq(member.organizationId, orgId) });
+/* Scoped by organization AND user. Scoping by organization alone meant that once the tenant had
+   any member, a later run naming a different --owner was silently skipped: no error, no message,
+   and the operator reasonably concluded it had worked. A tenant was therefore permanently one
+   person. Use add-tenant-user.ts to give anyone else access, with a role. */
+const membership = await db.query.member.findFirst({
+  where: and(eq(member.organizationId, orgId), eq(member.userId, owner.id)),
+});
 if (!membership) {
   await db.insert(member).values({
     id: randomUUID(),
@@ -76,6 +82,8 @@ if (!membership) {
     createdAt: new Date(),
   });
   console.log(`  ${ownerEmail} is owner`);
+} else {
+  console.log(`  ${ownerEmail} is already ${membership.role}`);
 }
 
 await db

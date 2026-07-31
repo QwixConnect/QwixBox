@@ -86,8 +86,7 @@ log(ok and "notice" or "warning",
      Deliberately fire-and-forget with a short timeout: the caller has already hung up by the
      time this runs, and the TIFF is safely on disk either way. An API outage must not turn a
      received fax into a lost one - the file is on disk and reconcilable. ]]
-local api = os.getenv("QWIXBOX_API_BASE") or "http://127.0.0.1:3000"
-local secret = os.getenv("QWIXBOX_FS_GATEWAY_SECRET") or ""
+local qwixbox = require "qwixbox"
 
 local payload = string.format(
   '{"callUuid":"%s","domain":"%s","did":"%s","callerNumber":"%s","callerName":"%s",' ..
@@ -96,14 +95,9 @@ local payload = string.format(
   tonumber(pages) or 0, ok and "received" or "failed",
   tostring(result_text):gsub('"', ""), remote_id:gsub('"', ""))
 
-local curl = freeswitch.API()
-local cmd = string.format(
-  "%s/fs/fax -m 5 -X POST -H 'Content-Type: application/json' -u 'fs:%s' -d '%s'",
-  api, secret, payload:gsub("'", ""))
-
-local sent, err = pcall(function() return curl:execute("curl", cmd) end)
+local sent, reply = qwixbox.api_post("/fs/fax", (payload:gsub("'", "")))
 if not sent then
-  log("err", "could not report fax to the API (%s) - TIFF is on disk at %s", tostring(err), tiff)
+  log("err", "could not report fax to the API (%s) - TIFF is on disk at %s", tostring(reply), tiff)
 end
 
 session:hangup("NORMAL_CLEARING")

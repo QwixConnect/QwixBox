@@ -50,6 +50,39 @@ end
 
 local MAX_DEPTH = 10
 
+--[[ POST JSON to the API, authenticated as the FreeSWITCH gateway.
+
+     This exists because mod_curl's `curl` API is NOT the curl command line, and the difference
+     is silent. Its grammar is:
+
+       curl <url> (headers|json|content-type <type>|connect-timeout <s>|timeout <s>
+                  |append_headers <name:value>|insecure|secure|proxy <url>) (get|post|put|delete <data>)
+
+     Flags like -X, -H, -u and -d are simply not understood - they were parsed as part of the
+     URL, no Authorization header was sent, and the request went out as a GET. Every feature code
+     (*72, *90, DND) and every fax notification failed with "unauthorized", and only the log said
+     so. Anything calling the API from Lua must go through here.
+
+     The secret travels in X-Gateway-Secret rather than Basic because `append_headers` splits on
+     whitespace, so "Authorization:Basic <b64>" cannot survive the parser - it returns
+     "-ERR no reply". A header value with no space can.
+
+     The payload must contain no spaces for the same reason. Callers build compact JSON. ]]
+function M.api_post(path, payload)
+  local base = os.getenv("QWIXBOX_API_BASE") or "http://127.0.0.1:3000"
+  local secret = os.getenv("QWIXBOX_FS_GATEWAY_SECRET") or ""
+
+  local cmd = string.format(
+    "%s%s content-type application/json append_headers X-Gateway-Secret:%s timeout 5 post %s",
+    base, path, secret, payload)
+
+  local ok, reply = pcall(function() return freeswitch.API():execute("curl", cmd) end)
+  if not ok then
+    return false, tostring(reply)
+  end
+  return (reply and reply:find('"ok"%s*:%s*true') ~= nil), reply
+end
+
 function M.go(session, domain, dtype, did, depth)
   depth = (depth or 0) + 1
   if depth > MAX_DEPTH then
@@ -88,10 +121,28 @@ function M.go(session, domain, dtype, did, depth)
     session:execute("lua", string.format("fax_receive.lua %s %s", domain, tostring(did)))
 
   elseif dtype == "external" then
-    -- A literal number, routed like any outbound call - back out through Kamailio's egress.
-    local egress = os.getenv("QWIXBOX_KAM_EGRESS") or "127.0.0.1:5070"
-    session:execute("set", "hangup_after_bridge=true")
-    session:execute("bridge", string.format("sofia/external/%s@%s", tostring(did), egress))
+    --[[ An external number IS an outbound call, so it has to go through outbound route matching:
+         the pattern, the strip/prepend translation, and the trunk that decision selects.
+
+         This used to bridge straight to Kamailio's egress port. That skipped all of it - no
+         route was matched, so no X-Trunk-Target header was set, so Kamailio had no carrier to
+         relay to and answered 404. Every call forwarded to an external number was dropped, which
+         is all three forwarding kinds and any IVR option pointing at an outside line.
+
+         Transferring re-enters the dialplan, where xml_handler does the matching exactly as it
+         does for a number dialled from a handset. One code path for outbound, not two.
+
+         The hop count travels in a channel variable because a transfer starts the dialplan over
+         and argv is not carried across it - without this, A forwarding to B forwarding back to A
+         would loop until something else broke. ]]
+    session:execute("set", "qwixbox_depth=" .. tostring(depth))
+    local context = session:getVariable("context")
+    if not context or context == "" then
+      M.log("qwixbox", "err", "no context on the channel - cannot route %s externally", tostring(did))
+      session:hangup("EXCHANGE_ROUTING_ERROR")
+      return
+    end
+    session:execute("transfer", string.format("%s XML %s", tostring(did), context))
 
   elseif dtype == "hangup" then
     session:hangup("NORMAL_CLEARING")

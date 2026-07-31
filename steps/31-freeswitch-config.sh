@@ -50,7 +50,14 @@ CDR_SPOOL="${CDR_SPOOL:-$PREFIX/log/xml_cdr}"
 ###   mod_xml_curl - the XML gateway; this is the fallback binding. Without it the whole
 ###                  fall-through tier is inert and a Redis miss resolves to nothing.
 ###   mod_curl     - an HTTP client for Lua and the dialplan. Not a fallback for anything.
-FS_AUTOLOAD_ADD="mod_opus mod_lua mod_hiredis mod_pgsql mod_spandsp mod_voicemail mod_curl mod_xml_curl mod_xml_cdr"
+###   mod_say_en   - renders numbers, dates and times as speech. Every voicemail and IVR prompt
+###                  goes through it, so without it "you have 3 new messages" cannot be spoken.
+###   mod_tone_stream - provides the silence_stream:// and tone_stream:// file formats. Our own
+###                  scripts use them in four places (ivr.lua's pre-greeting pause and default
+###                  greeting, feature_code.lua's pause and confirmation tone, and the fax
+###                  answer delay), and without it each one logs
+###                  "Invalid file format [silence_stream]" and plays nothing.
+FS_AUTOLOAD_ADD="mod_opus mod_lua mod_hiredis mod_pgsql mod_spandsp mod_voicemail mod_curl mod_xml_curl mod_xml_cdr mod_say_en mod_tone_stream"
 
 ### --- Event socket -----------------------------------------------------------------------
 
@@ -151,7 +158,19 @@ deploy_template "$TPL/autoload_configs/xml_curl.conf.xml" \
 
 ### --- Autoload ------------------------------------------------------------------------------
 
+### Load ORDER is load-bearing, not cosmetic. Both mod_lua and mod_xml_curl bind themselves as
+### XML search handlers when they load, FreeSWITCH consults bindings in registration order, and
+### the first non-empty answer wins. So whichever loads first is the primary tier.
+###
+### This inserted each module immediately after the marker, which reverses the list: mod_xml_curl
+### is declared after mod_lua and therefore ended up ABOVE it in the file. The result was the
+### opposite of the intended design - the API answered every lookup, extension.lua never ran (so
+### DND, call forwarding, call waiting and voicemail treatment were all skipped), and the Redis
+### tier that exists to keep call setup off the network was bypassed on every call.
+###
+### Fixed by collecting the modules and inserting them once, in declared order.
 FS_AUTOLOAD_CONF="$CONF/autoload_configs/modules.conf.xml"
+pending=""
 for mod_name in $FS_AUTOLOAD_ADD; do
   if [ ! -f "$PREFIX/mod/${mod_name}.so" ]; then
     warn "${mod_name}.so was not built - skipping autoload"
@@ -167,10 +186,56 @@ for mod_name in $FS_AUTOLOAD_ADD; do
     install -m 0644 -o freeswitch -g freeswitch "$src_conf" "$CONF/autoload_configs/$conf_name"
     info "Installed $conf_name from the vanilla config"
   fi
-  sed -i "s|<!-- Codec Interfaces -->|<!-- Codec Interfaces -->\n    <load module=\"${mod_name}\"/>|" \
-    "$FS_AUTOLOAD_CONF"
-  info "Autoloaded ${mod_name}"
+  pending="${pending}    <load module=\"${mod_name}\"/>\n"
+  info "Autoloading ${mod_name}"
 done
+
+if [ -n "$pending" ]; then
+  ### The trailing \n is already on the last entry, so the marker line is put back first and the
+  ### block follows it in the order declared above.
+  sed -i "s|<!-- Codec Interfaces -->|<!-- Codec Interfaces -->\n${pending%\\n}|" "$FS_AUTOLOAD_CONF"
+fi
+
+### The whole point of the ordering above, asserted rather than assumed. A silent inversion here
+### is invisible until someone notices that call forwarding does nothing.
+lua_line="$(grep -n '<load module="mod_lua"/>' "$FS_AUTOLOAD_CONF" | cut -d: -f1)"
+curl_line="$(grep -n '<load module="mod_xml_curl"/>' "$FS_AUTOLOAD_CONF" | cut -d: -f1)"
+if [ -n "$lua_line" ] && [ -n "$curl_line" ] && [ "$lua_line" -gt "$curl_line" ]; then
+  die "mod_xml_curl loads before mod_lua - the API would answer every lookup and extension.lua would never run."
+fi
+
+### --- Language and phrase files ---------------------------------------------------------------
+###
+### The minimal config ships no lang/ tree and no <section name="languages"> at all, so every
+### prompt fails with "Open of languages and phrases failed" - voicemail cannot say "you have
+### three new messages" and an IVR cannot read anything back. The sound files were installed by
+### 30-freeswitch.sh; these are the XML macros that decide which of them to play and in what
+### order, and they only exist in the vanilla tree.
+###
+### en only. Each language is ~100KB of XML parsed at startup, and a prompt in a language with no
+### matching sound files installed is worse than the English one.
+VANILLA_LANG="/usr/src/freeswitch/conf/vanilla/lang/en"
+if [ -d "$VANILLA_LANG" ]; then
+  if [ ! -d "$CONF/lang/en" ]; then
+    install -d -m 0755 -o freeswitch -g freeswitch "$CONF/lang"
+    cp -a "$VANILLA_LANG" "$CONF/lang/en"
+    chown -R freeswitch:freeswitch "$CONF/lang"
+    info "Installed en language and phrase files"
+  else
+    ok "Language files already present"
+  fi
+
+  ### The include is what actually makes them load. Added to freeswitch.xml rather than deployed
+  ### as a template because that file is generated by `make config-minimal` and carries the
+  ### other section declarations.
+  if ! grep -q 'section name="languages"' "$CONF/freeswitch.xml"; then
+    sed -i 's|</document>|  <section name="languages" description="Language Management">\n    <X-PRE-PROCESS cmd="include" data="lang/en/*.xml"/>\n  </section>\n\n</document>|' \
+      "$CONF/freeswitch.xml"
+    info "Added the languages section to freeswitch.xml"
+  fi
+else
+  warn "No vanilla lang/en tree at $VANILLA_LANG - voicemail and IVR prompts will not play."
+fi
 
 chown -R freeswitch:freeswitch "$CONF"
 

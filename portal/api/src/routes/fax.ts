@@ -19,6 +19,12 @@ export const faxHook = new Hono();
 faxHook.use("*", async (c, next) => {
   const expected = process.env.FS_XML_GATEWAY_SECRET;
   if (!expected) return c.text("FS_XML_GATEWAY_SECRET is not configured", 500);
+  /* X-Gateway-Secret is what the Lua scripts send: mod_curl's `append_headers` splits on
+     whitespace, so it cannot carry "Authorization: Basic <b64>". mod_xml_curl sends real Basic
+     auth, so both are accepted. */
+  const direct = c.req.header("X-Gateway-Secret");
+  if (direct === expected) return next();
+
   const header = c.req.header("Authorization") ?? "";
   const [scheme, encoded] = header.split(" ");
   if (scheme !== "Basic" || !encoded) return c.text("Unauthorized", 401);

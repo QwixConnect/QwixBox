@@ -238,12 +238,12 @@ export async function cacheInboundRoutes(organizationId: string): Promise<void> 
 
   // Bounded key space, so one key per DID is fine and gives Lua an O(1) lookup.
   await Promise.all(
-    rows.map((r) =>
+    rows.map(async (r) =>
       safeSet(
         keys.did(tenant.sipDomain, r.didPattern),
         JSON.stringify({
           destinationType: r.destinationType,
-          destinationId: r.destinationId,
+          destinationId: await resolveDestinationId(r.destinationType, r.destinationId),
         }),
       ),
     ),
@@ -282,6 +282,38 @@ export async function cacheTenantSettings(organizationId: string): Promise<void>
  * dead air the caller can hear.
  * ------------------------------------------------------------------------------------ */
 
+/**
+ * Rewrites a destination pair into what the call-time scripts can actually use.
+ *
+ * Every other destination type is addressed by its own id - `ivr.lua` looks up
+ * `qwixbox:ivr:<domain>:<id>`, `ring_group.lua` looks up `qwixbox:rg:<domain>:<id>`. An
+ * **extension** is the exception: `extension.lua` takes a NUMBER, because that is what
+ * `qwixbox:call:<domain>:<number>`, `bridge user/<number>@<domain>` and the voicemail mailbox
+ * are all keyed by. Caching the extension's UUID meant `extension.lua <uuid>`, which found no
+ * call-handling row, could not bridge, and offered voicemail on a mailbox named after a UUID.
+ *
+ * It went unnoticed because the mod_xml_curl fallback in routes/fs-xml.ts does this same
+ * resolution in SQL and answers correctly - so an inbound DID worked while the identical
+ * destination behind an IVR option or a ring-group failover did not.
+ *
+ * Done here, once, rather than in each of the five writers below: a destination pair is
+ * cached in five places and they must agree.
+ */
+async function resolveDestinationId(
+  type: string | null,
+  id: string | null,
+): Promise<string | null> {
+  if (type !== "extension" || !id) return id;
+
+  const target = await db.query.extension.findFirst({ where: eq(extension.id, id) });
+  if (target) return target.number;
+
+  /* Already a number (the portal may send one directly), or the extension was deleted. Passing
+     it through unchanged keeps the old behaviour rather than silently dropping the destination;
+     the script logs a miss, which is the visible failure we want. */
+  return id;
+}
+
 export async function cacheRingGroups(organizationId: string): Promise<void> {
   const tenant = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.organizationId, organizationId),
@@ -313,7 +345,7 @@ export async function cacheRingGroups(organizationId: string): Promise<void> {
         strategy: group.strategy,
         ringTimeoutSec: group.ringTimeoutSec,
         failoverType: group.failoverType,
-        failoverId: group.failoverId,
+        failoverId: await resolveDestinationId(group.failoverType, group.failoverId),
         // Disabled extensions are filtered here rather than in Lua: a disabled member should
         // not even be attempted, and doing it at cache time keeps the call path simple.
         members: members
@@ -369,10 +401,15 @@ export async function cacheIvrMenus(organizationId: string): Promise<void> {
         timeoutSec: menu.timeoutSec,
         maxRetries: menu.maxRetries,
         timeoutType: menu.timeoutType,
-        timeoutId: menu.timeoutId,
+        timeoutId: await resolveDestinationId(menu.timeoutType, menu.timeoutId),
         // Keyed by digit so Lua can look up in one step rather than scanning.
         options: Object.fromEntries(
-          options.map((o) => [o.digit, { type: o.destinationType, id: o.destinationId }]),
+          await Promise.all(
+            options.map(async (o) => [
+              o.digit,
+              { type: o.destinationType, id: await resolveDestinationId(o.destinationType, o.destinationId) },
+            ]),
+          ),
         ),
       }),
     );
@@ -403,9 +440,9 @@ export async function cacheTimeConditions(organizationId: string): Promise<void>
         timezone: cond.timezone,
         rules: cond.rules,
         matchType: cond.matchType,
-        matchId: cond.matchId,
+        matchId: await resolveDestinationId(cond.matchType, cond.matchId),
         noMatchType: cond.noMatchType,
-        noMatchId: cond.noMatchId,
+        noMatchId: await resolveDestinationId(cond.noMatchType, cond.noMatchId),
       }),
     );
   }

@@ -39,6 +39,9 @@ Both are cheap to close and everything else is guesswork until they are. Do them
 
 ## Blockers
 
+Step-by-step instructions for items 1 and 6 are in
+**[testing-on-real-hardware.md](testing-on-real-hardware.md)**.
+
 ### 1. Register a real softphone and make a real call
 
 Point a softphone (Zoiper, Linphone, a desk phone) at the server, register extension 1001,
@@ -52,31 +55,37 @@ invalidates the assumptions the rest rests on.
 Then repeat over the internet rather than loopback — the NAT and `advertise` handling in the
 Kamailio config has never seen a real remote endpoint.
 
-### 2. Verify the call features that already have code
+### ~~2. Verify the call features that already have code~~ — done, and four bugs fixed
 
-`ring_group.lua`, `ivr.lua`, `time_condition.lua` and `fax_receive.lua` are written, deployed,
-and have never been executed. So are the feature codes (`*97`, `*72`, DND). They may work; that
-is not the same as working. Each needs one call through it.
+Ring groups, IVR, time conditions and the forwarding feature codes are now verified by placing
+calls. Getting there required fixing four things that had never worked:
 
-Voicemail specifically: **the fallback when the callee is unregistered is unverified.** Kamailio
-returns `480 Temporarily Unavailable` as designed, but the loopback harness used for the call
-tests tears the caller down before `extension.lua`'s treatment runs. Needs a real inbound leg.
+- **The XML tiers were the wrong way round.** The autoload sed reversed the module list, so
+  `mod_xml_curl` loaded before `mod_lua` and the API answered every lookup — `extension.lua` never
+  ran, meaning DND, forwarding, call waiting and voicemail treatment were all skipped, and the
+  Redis cache was bypassed on every call.
+- **No language files.** The minimal config ships no `lang/` tree and no `languages` section, and
+  neither `mod_say_en` nor `mod_tone_stream` autoloads — so every prompt and every tone failed.
+- **`mod_curl` is not the curl command line.** The feature-code and fax notifications were built
+  with `-X/-H/-u/-d`, which it ignores, so they went out as unauthenticated GETs and always
+  returned `unauthorized`.
+- **Extension destinations cached the UUID, not the number**, so an IVR option or ring-group
+  failover pointing at an extension resolved to nothing (inbound DIDs worked, because the API
+  resolves it in SQL — the two tiers disagreed).
+- **`external` destinations skipped outbound routing**, so every call forwarded to an outside
+  number was dropped by Kamailio with no trunk selected.
 
-### 3. A second user per tenant
+Still open here: **voicemail has been reached and answered but no message has been recorded or
+delivered**, and IVR **DTMF selection** is untested — both need real audio, so they fold into
+item 1. The unregistered-callee fallback also still needs a real inbound leg; Kamailio returns
+`480` as designed, but the loopback harness tears the caller down before the treatment runs.
 
-`provision-tenant.ts` queries membership by organization only:
+### ~~3. A second user per tenant~~ — done
 
-```ts
-const membership = await db.query.member.findFirst({ where: eq(member.organizationId, orgId) });
-if (!membership) { /* insert */ }
-```
-
-So once any member exists, a second `--owner` is **silently ignored** — no error, no message, and
-the operator reasonably concludes it worked. Today a tenant is permanently one user, and that
-user is an owner; the `admin`/`member`/`viewer` roles in `auth.ts` cannot be assigned to anyone.
-
-Fix the query to scope by user as well, and add a way to invite or add a user with a chosen role.
-Small change, and nothing multi-user works without it.
+`provision-tenant.ts` queried membership by organization alone, so a second `--owner` was
+silently ignored and a tenant was permanently one user. It is now scoped by user, and
+`add-tenant-user.ts` adds or re-roles someone on an existing tenant. Verified end to end: a user
+added as `viewer` is refused a write (403) where the owner passes to validation (400).
 
 ### 4. Emergency calling
 

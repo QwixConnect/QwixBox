@@ -78,17 +78,10 @@ else
   encoded = '"' .. change.value .. '"'
 end
 
-local api = os.getenv("QWIXBOX_API_BASE") or "http://127.0.0.1:3000"
-local secret = os.getenv("QWIXBOX_FS_GATEWAY_SECRET") or ""
 local payload = string.format('{"domain":"%s","number":"%s","%s":%s}',
   domain, user, change.field, encoded)
 
-local cmd = string.format(
-  "%s/fs/feature -m 5 -X POST -H 'Content-Type: application/json' -u 'fs:%s' -d '%s'",
-  api, secret, payload)
-
-local ok, reply = pcall(function() return freeswitch.API():execute("curl", cmd) end)
-local applied = ok and reply and reply:find('"ok"%s*:%s*true') ~= nil
+local applied, reply = qwixbox.api_post("/fs/feature", payload)
 
 if applied then
   qwixbox.log("feature", "info", "%s@%s: %s -> %s", user, domain, change.field, tostring(change.value))

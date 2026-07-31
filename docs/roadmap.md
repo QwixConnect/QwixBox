@@ -26,12 +26,12 @@ them. "Deployed" is not evidence.
 | # | Area | Status | Notes |
 |---|---|---|---|
 | 1 | Multi-tenancy & administration | **Working** | Tenant = better-auth organization; `requireTenant` refuses an unscoped request |
-| 2 | User management & authentication | **Working** | better-auth, RBAC via `createAccessControl`, no self-service registration by design |
+| 2 | User management & authentication | **Working** | better-auth, RBAC via `createAccessControl`, no self-service registration by design. Multiple users per tenant via `add-tenant-user.ts`, with the role enforced (a viewer is refused writes) |
 | 3 | Extension & device management | **Partial** | Extensions work; one credential set per extension. Multi-device in [backlog](design/backlog.md) |
 | 4 | Dialplan & call routing | **Working** | Extension-to-extension, inbound DID and outbound-to-carrier all verified by placing calls |
-| 5 | Call features | **Untested** | Ring groups, time conditions and feature codes are written and deployed; none has been executed. No MoH management or parking |
-| 6 | Voicemail | **Untested** | `mod_voicemail` configured and voicemail-to-email wired; no message has been left or delivered. The unregistered-callee fallback is specifically unverified |
-| 7 | IVR | **Untested** | Menus, options and loop-depth limiting are written; no call has traversed one |
+| 5 | Call features | **Working** | Ring groups (simultaneous fan-out + failover), time conditions and the forwarding/DND feature codes all verified by placing calls. No MoH management or parking |
+| 6 | Voicemail | **Partial** | Reached and answered (`*97`, ring-group failover) with prompts loading; no message has been left or delivered to email, and that needs real audio |
+| 7 | IVR | **Partial** | A call traverses the menu and the timeout destination is honoured; DTMF selection needs a real endpoint |
 | 8 | Conference rooms | **Not started** | [backlog](design/backlog.md) |
 | 9 | Call centre / contact centre | **Schema only** | A bare `queue` table. The big one — [design](design/call-centre.md) |
 | 10 | CDR & reporting | **Partial** | CDR ingest wired; no call has produced one yet, and no reporting beyond a call list |

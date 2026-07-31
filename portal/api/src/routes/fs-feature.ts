@@ -27,6 +27,14 @@ fsFeature.use("*", async (c, next) => {
   const expected = process.env.FS_XML_GATEWAY_SECRET;
   if (!expected) return c.json({ ok: false, error: "not configured" }, 500);
 
+  /* Two accepted forms, because the two callers cannot both send the same one.
+     mod_xml_curl builds real Basic auth from its gateway-credentials config. mod_curl - which
+     the Lua scripts use - cannot: its `append_headers` splits on whitespace, so
+     "Authorization:Basic <b64>" never survives the parser. Hence a header whose value has no
+     space in it. Same secret, same comparison, just a different envelope. */
+  const direct = c.req.header("X-Gateway-Secret");
+  if (direct && safeEqual(direct, expected)) return next();
+
   const header = c.req.header("Authorization") ?? "";
   const [scheme, encoded] = header.split(" ");
   if (scheme !== "Basic" || !encoded) return c.json({ ok: false, error: "unauthorized" }, 401);

@@ -11,7 +11,11 @@
 
 local qwixbox = require "qwixbox"
 
-local domain, number, depth = argv[1], argv[2], tonumber(argv[3] or "0")
+--[[ The hop count survives a transfer in a channel variable: qwixbox.go's external branch
+     transfers back into the dialplan, which starts argv over. Without picking it up here, a
+     forwarding loop between two extensions would never hit MAX_DEPTH. ]]
+local domain, number = argv[1], argv[2]
+local depth = tonumber(argv[3] or "") or tonumber(session:getVariable("qwixbox_depth") or "") or 0
 
 if not session or not session:ready() then return end
 if not domain or not number then
