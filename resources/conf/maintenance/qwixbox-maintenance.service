@@ -1,0 +1,13 @@
+[Unit]
+# Managed by the Qwixbox installer.
+Description=Qwixbox scheduled maintenance
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/qwixbox-maintenance
+EnvironmentFile=-/etc/qwixbox/config.env
+Nice=15
+IOSchedulingClass=idle
+StandardOutput=journal
+SyslogIdentifier=qwixbox-maintenance

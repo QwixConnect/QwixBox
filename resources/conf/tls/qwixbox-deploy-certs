@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Managed by the VoIP PBX installer. Run by certbot after every successful renewal.
+# Managed by the Qwixbox installer. Run by certbot after every successful renewal.
 set -euo pipefail
 FQDN="@PBX_FQDN@"
 SRC="/etc/letsencrypt/live/$FQDN"
-DST="/etc/voip-pbx/tls"
+DST="/etc/qwixbox/tls"
 
 [ -d "$SRC" ] || exit 0
 
@@ -20,4 +20,4 @@ systemctl reload nginx     2>/dev/null || true
 systemctl is-active --quiet kamailio   && systemctl reload kamailio   2>/dev/null || true
 systemctl is-active --quiet freeswitch && /usr/local/freeswitch/bin/fs_cli -x "reloadxml" >/dev/null 2>&1 || true
 
-logger -t voip-deploy-certs "Deployed renewed certificate for $FQDN"
+logger -t qwixbox-deploy-certs "Deployed renewed certificate for $FQDN"

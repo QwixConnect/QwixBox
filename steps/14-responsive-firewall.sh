@@ -31,12 +31,12 @@ command -v nft >/dev/null || die "nftables is not installed - run 11-firewall.sh
 ### the two declarations of `table inet filter` into one.
 ###
 ### Consequence to be aware of: re-running 11-firewall.sh flushes the ruleset and empties these
-### sets. That is survivable - voip-fw-sync repopulates within its 2 minute period, and the
+### sets. That is survivable - qwixbox-fw-sync repopulates within its 2 minute period, and the
 ### tiered rules degrade to rate-limiting everyone rather than failing open.
-deploy_template "$TPL/voip-responsive.nft" /etc/nftables.d/voip-responsive.nft || true
+deploy_template "$TPL/qwixbox-responsive.nft" /etc/nftables.d/qwixbox-responsive.nft || true
 
 install -d -m 0755 /etc/nftables.d
-nft -f /etc/nftables.d/voip-responsive.nft || die "Failed to create the responsive sets."
+nft -f /etc/nftables.d/qwixbox-responsive.nft || die "Failed to create the responsive sets."
 
 ### Load the sets before the main ruleset so the filter chain can reference them.
 if ! grep -q 'include "/etc/nftables.d/\*.nft"' /etc/nftables.conf; then
@@ -91,19 +91,19 @@ ok "Responsive SIP rules active"
 
 ### Kamailio holds the authoritative list of who is registered, in the location table. Sync
 ### reads it and mirrors the source addresses into the nftables set.
-deploy_template "$TPL/voip-fw-sync" /usr/local/sbin/voip-fw-sync 0750 || true
+deploy_template "$TPL/qwixbox-fw-sync" /usr/local/sbin/qwixbox-fw-sync 0750 || true
 
-deploy_template "$TPL/voip-fw-sync.service" /etc/systemd/system/voip-fw-sync.service || true
+deploy_template "$TPL/qwixbox-fw-sync.service" /etc/systemd/system/qwixbox-fw-sync.service || true
 
 ### Sync interval must be comfortably shorter than the set timeout, or a still-registered
 ### endpoint drops out of the set between runs and gets rate limited for no reason.
-deploy_template "$TPL/voip-fw-sync.timer" /etc/systemd/system/voip-fw-sync.timer || true
+deploy_template "$TPL/qwixbox-fw-sync.timer" /etc/systemd/system/qwixbox-fw-sync.timer || true
 
 systemctl daemon-reload
-systemctl enable --now voip-fw-sync.timer >/dev/null 2>&1 || true
+systemctl enable --now qwixbox-fw-sync.timer >/dev/null 2>&1 || true
 
 if pg_db_exists kamailio 2>/dev/null; then
-  /usr/local/sbin/voip-fw-sync 2>&1 | sed 's/^/  /' || true
+  /usr/local/sbin/qwixbox-fw-sync 2>&1 | sed 's/^/  /' || true
 else
   warn "The kamailio database does not exist yet - sync starts working after 33-kamailio-config.sh."
 fi

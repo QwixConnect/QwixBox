@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Managed by the VoIP PBX installer.
+# Managed by the Qwixbox installer.
 # Mirrors Kamailio's registered contacts into the nftables sip_known set.
 set -uo pipefail
 
 # shellcheck disable=SC1091
-[ -f /etc/voip-pbx/config.env ] && . /etc/voip-pbx/config.env
+[ -f /etc/qwixbox/config.env ] && . /etc/qwixbox/config.env
 
 known=0
 
@@ -42,5 +42,5 @@ if command -v psql >/dev/null 2>&1; then
     )
 fi
 
-logger -t voip-fw-sync "synced ${known} registered, ${trusted} trusted SIP sources"
+logger -t qwixbox-fw-sync "synced ${known} registered, ${trusted} trusted SIP sources"
 echo "synced ${known} registered, ${trusted} trusted SIP sources"

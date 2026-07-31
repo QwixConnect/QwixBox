@@ -1,0 +1,11 @@
+# Managed by the Qwixbox installer.
+#
+# Debian's opendkim reads this on top of /etc/opendkim.conf. Leaving SOCKET set here would
+# override the Socket directive in opendkim.conf and put the socket back outside Postfix's
+# chroot, where Postfix cannot reach it - so it is set to the same path rather than left to
+# the package default.
+RUNDIR=/run/opendkim
+SOCKET="local:/var/spool/postfix/opendkim/opendkim.sock"
+USER=opendkim
+GROUP=opendkim
+PIDFILE=$RUNDIR/$NAME.pid

@@ -18,13 +18,13 @@
   Usage:  <action application="lua" data="feature_code.lua <domain> <user> <action> [value]"/>
 --]]
 
-local voip = require "voip"
+local qwixbox = require "qwixbox"
 
 local domain, user, what, value = argv[1], argv[2], argv[3], argv[4]
 
 if not session or not session:ready() then return end
 if not domain or not user or not what then
-  voip.log("feature", "err", "usage: feature_code.lua <domain> <user> <action> [value]")
+  qwixbox.log("feature", "err", "usage: feature_code.lua <domain> <user> <action> [value]")
   session:hangup("NORMAL_TEMPORARY_FAILURE")
   return
 end
@@ -37,7 +37,7 @@ session:execute("playback", "silence_stream://300")
      character is rejected rather than escaped - there is no legitimate forward target
      containing a quote. ]]
 if value and value ~= "" and not value:match("^[0-9*#+]+$") then
-  voip.log("feature", "warning", "%s@%s: refusing forward target %q", user, domain, value)
+  qwixbox.log("feature", "warning", "%s@%s: refusing forward target %q", user, domain, value)
   session:streamFile("ivr/ivr-that_was_an_invalid_entry.wav")
   session:hangup("NORMAL_CLEARING")
   return
@@ -56,7 +56,7 @@ local FIELDS = {
 
 local change = FIELDS[what]
 if not change then
-  voip.log("feature", "err", "unknown feature action %q", tostring(what))
+  qwixbox.log("feature", "err", "unknown feature action %q", tostring(what))
   session:hangup("NORMAL_TEMPORARY_FAILURE")
   return
 end
@@ -78,8 +78,8 @@ else
   encoded = '"' .. change.value .. '"'
 end
 
-local api = os.getenv("VOIP_API_BASE") or "http://127.0.0.1:3000"
-local secret = os.getenv("VOIP_FS_GATEWAY_SECRET") or ""
+local api = os.getenv("QWIXBOX_API_BASE") or "http://127.0.0.1:3000"
+local secret = os.getenv("QWIXBOX_FS_GATEWAY_SECRET") or ""
 local payload = string.format('{"domain":"%s","number":"%s","%s":%s}',
   domain, user, change.field, encoded)
 
@@ -91,14 +91,14 @@ local ok, reply = pcall(function() return freeswitch.API():execute("curl", cmd) 
 local applied = ok and reply and reply:find('"ok"%s*:%s*true') ~= nil
 
 if applied then
-  voip.log("feature", "info", "%s@%s: %s -> %s", user, domain, change.field, tostring(change.value))
+  qwixbox.log("feature", "info", "%s@%s: %s -> %s", user, domain, change.field, tostring(change.value))
   -- Confirmation tone rather than a spoken prompt: the vanilla sound set has no phrase for
   -- most of these, and a wrong prompt is worse than a tone the user learns.
   session:streamFile("tone_stream://%(200,100,600);%(200,100,800)")
 else
   --[[ Say so. A feature code that appears to work but did not is the kind of failure a user
        only discovers when they miss a call. ]]
-  voip.log("feature", "err", "%s@%s: %s NOT applied (%s)",
+  qwixbox.log("feature", "err", "%s@%s: %s NOT applied (%s)",
     user, domain, change.field, tostring(reply))
   session:streamFile("ivr/ivr-call_cannot_be_completed_at_this_time.wav")
 end

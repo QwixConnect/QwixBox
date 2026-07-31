@@ -1,6 +1,6 @@
 [Unit]
-# Managed by the VoIP PBX installer.
-Description=Nightly VoIP PBX backup
+# Managed by the Qwixbox installer.
+Description=Nightly Qwixbox backup
 
 [Timer]
 OnCalendar=*-*-* 03:20:00

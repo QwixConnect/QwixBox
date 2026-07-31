@@ -15,8 +15,8 @@ load_config
 TPL="$REPO_DIR/resources/conf/portal-web"
 
 SRC="$REPO_DIR/portal/web"
-WEB_ROOT="${WEB_ROOT:-/var/www/voip-portal}"
-BUILD_USER="${API_USER:-voipapi}"
+WEB_ROOT="${WEB_ROOT:-/var/www/qwixbox-portal}"
+BUILD_USER="${API_USER:-qwixbox}"
 
 [ -d "$SRC" ] || die "No portal source at $SRC."
 command -v bun >/dev/null || die "Bun is not installed - run 40-bun.sh first."
@@ -25,7 +25,7 @@ command -v bun >/dev/null || die "Bun is not installed - run 40-bun.sh first."
 
 ### Build in a scratch copy owned by an unprivileged user. Running a build as root means every
 ### postinstall script in the dependency tree runs as root too.
-BUILD_DIR="/var/tmp/voip-portal-build"
+BUILD_DIR="/var/tmp/qwixbox-portal-build"
 rm -rf "$BUILD_DIR"
 install -d -m 0755 -o "$BUILD_USER" -g "$BUILD_USER" "$BUILD_DIR"
 

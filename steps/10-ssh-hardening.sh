@@ -36,7 +36,7 @@ fi
 ### --- Config --------------------------------------------------------------------------
 
 {
-  echo "# Managed by the VoIP PBX installer."
+  echo "# Managed by the Qwixbox installer."
   echo "PermitRootLogin no"
   echo "PubkeyAuthentication yes"
   if [ "$DISABLE_PASSWORDS" -eq 1 ]; then

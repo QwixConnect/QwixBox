@@ -1,9 +1,9 @@
-# Managed by the VoIP PBX installer. Regenerated on every deploy - do not hand-edit.
+# Managed by the Qwixbox installer. Regenerated on every deploy - do not hand-edit.
 NODE_ENV=production
 PORT=@API_PORT@
 HOST=127.0.0.1
 
-DATABASE_URL=postgres://@API_USER@:@API_DB_PASSWORD@@@DB_HOST@:@DB_PORT@/voipapi
+DATABASE_URL=postgres://@API_USER@:@API_DB_PASSWORD@@@DB_HOST@:@DB_PORT@/qwixbox
 
 # Kamailio's own database, which the API projects subscribers and trunks into. A separate
 # connection from the application database by design - different schema, different owner.
@@ -25,7 +25,7 @@ AUTH_SECRET=@AUTH_SECRET@
 PBX_FQDN=@PBX_FQDN@
 PBX_SIP_DOMAIN=@PBX_SIP_DOMAIN@
 
-# Sender for fax-to-email. Matches what steps/15-mail.sh gave msmtp and what FreeSWITCH's
+# Sender for fax-to-email. Matches what steps/15-mail.sh gave Postfix and what FreeSWITCH's
 # voicemail templates use, so every notification the platform sends comes from one address that
 # SPF and DKIM can be aligned to.
 SMTP_FROM=@SMTP_FROM@

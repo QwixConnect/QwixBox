@@ -35,9 +35,16 @@ disk_gb="$(df -BG --output=avail / | tail -1 | tr -dc '0-9')"
 ### much later and more confusingly. Catch it here.
 resolved="$(getent ahostsv4 "$PBX_FQDN" 2>/dev/null | awk 'NR==1{print $1}')" || resolved=""
 if [ -z "$resolved" ]; then
-  warn "$PBX_FQDN does not resolve. Let's Encrypt (13-tls-certs.sh) will fail until it does."
+  ### Not necessarily a problem yet: 02-dns.sh creates this record when a DNS provider is
+  ### configured. Only say it is fatal when nothing downstream is going to fix it.
+  if [ "${DNS_PROVIDER:-none}" = "none" ]; then
+    warn "$PBX_FQDN does not resolve, and DNS_PROVIDER is 'none' so nothing will create it."
+    warn "  Add an A record pointing at this server, or set DNS_PROVIDER in $CONFIG_FILE."
+  else
+    info "$PBX_FQDN does not resolve yet - 02-dns.sh will create the record."
+  fi
 else
-  public_ip="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo "")"
+  public_ip="$(detect_public_ip || echo "")"
   if [ -n "$public_ip" ] && [ "$resolved" != "$public_ip" ]; then
     warn "$PBX_FQDN resolves to $resolved but this host's public IP looks like $public_ip."
     warn "Certificate issuance will fail unless that is a proxy or the DNS is still propagating."
@@ -98,13 +105,13 @@ enable_service chrony
 
 ### Defaults are tuned for a handful of TCP streams, not thousands of small UDP packets
 ### arriving every 20ms. Undersized socket buffers show up as crackling audio under load.
-deploy_template "$TPL/sysctl-90-voip.conf" /etc/sysctl.d/90-voip.conf || true
+deploy_template "$TPL/sysctl-90-qwixbox.conf" /etc/sysctl.d/90-qwixbox.conf || true
 sysctl --system >/dev/null
 ok "Kernel parameters applied"
 
 ### FreeSWITCH and Kamailio both open a lot of descriptors: one per registration, per call
 ### leg, per database handle. The 1024 default is exhausted almost immediately.
-deploy_template "$TPL/limits-90-voip.conf" /etc/security/limits.d/90-voip.conf || true
+deploy_template "$TPL/limits-90-qwixbox.conf" /etc/security/limits.d/90-qwixbox.conf || true
 ok "File descriptor limits raised"
 
 ### --- Base OS updates ------------------------------------------------------------------

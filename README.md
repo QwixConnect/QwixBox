@@ -1,4 +1,4 @@
-# VoIP PBX installer
+# Qwixbox
 
 Builds a production VoIP PBX on a fresh Debian 13 server: Kamailio as the public SIP edge,
 FreeSWITCH as the media/PBX core behind it, rtpengine for media relay, PostgreSQL and Redis
@@ -10,6 +10,10 @@ for state, and a Bun/Hono API.
 install.sh              master installer - runs the steps in order
 config.env.example      site configuration template
 lib/common.sh           shared helpers (logging, idempotency, apt, files, services)
+lib/tui.sh              whiptail wrappers and the input validators
+lib/wizard.sh           the first-run configuration wizard
+lib/detect.sh           host self-detection (public IP, FQDN, timezone, admin CIDR)
+lib/dns-cloudflare.sh   Cloudflare API - zone lookup and record upsert
 steps/                  the numbered step scripts
 resources/              systemd unit template
 resources/conf/         the config files the steps deploy, one directory per step
@@ -21,19 +25,31 @@ portal/web/             the React admin portal
 ## Quick start
 
 ```bash
-git clone https://github.com/thiru-to/freeswitch-install.git
-cd freeswitch-install
+git clone https://github.com/thiru-to/qwixbox.git
+cd qwixbox
 
-# The first run creates /etc/voip-pbx/config.env and stops so you can fill it in.
-# It exits 78 and tells you what to set - that is the expected first run, not a failure.
-sudo ./install.sh
-
-sudo editor /etc/voip-pbx/config.env    # PBX_FQDN, LETSENCRYPT_EMAIL, ADMIN_ALLOW_CIDR
+# Asks for what it needs, then installs. Detected values are pre-filled.
 sudo ./install.sh
 ```
 
-`PBX_FQDN` must already resolve to this server's public IP — Let's Encrypt validates over
-HTTP, and `00-preflight.sh` warns if it does not.
+On a terminal the first run opens a setup wizard, so there is nothing to edit by hand. It asks
+for the public hostname, a Let's Encrypt email, which addresses may reach SSH, the timezone, and
+optionally DNS and outbound mail. `sudo ./install.sh --menu` gives the same wizard plus per-step
+re-runs, status and logs.
+
+Without a terminal — CI, `nohup`, a provisioning script — nothing prompts. The first run writes
+`/etc/qwixbox/config.env`, exits **78**, and tells you what to set; fill it in and run again.
+That exit code means "waiting for configuration", not "failed".
+
+`PBX_FQDN` must resolve to this server's public IP. With `DNS_PROVIDER="cloudflare"` the
+installer creates that record itself (`02-dns.sh`); otherwise create it before you start.
+
+### Getting a certificate without port 80
+
+`ACME_CHALLENGE="http"` is the default and needs port 80 reachable from the internet. Set
+`ACME_CHALLENGE="dns"` with a Cloudflare token to validate over DNS instead — the only option
+behind a firewall that blocks 80, and the only one that can issue a wildcard. The token needs
+**Zone:Read** and **DNS:Edit**, scoped to the one zone.
 
 For a cloud instance, start at [Installing on a cloud server](#installing-on-a-cloud-server)
 instead — the provider firewall has to be opened first or the install completes and no phone
@@ -99,7 +115,7 @@ gcloud compute instances create pbx-1 \
   --machine-type=e2-standard-2 \
   --image-family=debian-13 --image-project=debian-cloud \
   --boot-disk-size=20GB --boot-disk-type=pd-balanced \
-  --tags=voip-pbx \
+  --tags=qwixbox \
   --zone=us-east1-b
 
 # Reserve the address so it survives a stop/start, then note it for DNS.
@@ -108,21 +124,21 @@ gcloud compute instances describe pbx-1 --zone=us-east1-b \
   --format='get(networkInterfaces[0].accessConfigs[0].natIP)'
 ```
 
-Firewall rules apply to the `voip-pbx` network tag:
+Firewall rules apply to the `qwixbox` network tag:
 
 ```bash
-gcloud compute firewall-rules create voip-pbx-web \
-  --allow=tcp:80,tcp:443 --target-tags=voip-pbx --direction=INGRESS
+gcloud compute firewall-rules create qwixbox-web \
+  --allow=tcp:80,tcp:443 --target-tags=qwixbox --direction=INGRESS
 
-gcloud compute firewall-rules create voip-pbx-sip \
-  --allow=udp:5060,tcp:5060,tcp:5061,tcp:8443 --target-tags=voip-pbx --direction=INGRESS
+gcloud compute firewall-rules create qwixbox-sip \
+  --allow=udp:5060,tcp:5060,tcp:5061,tcp:8443 --target-tags=qwixbox --direction=INGRESS
 
-gcloud compute firewall-rules create voip-pbx-rtp \
-  --allow=udp:16384-32768 --target-tags=voip-pbx --direction=INGRESS
+gcloud compute firewall-rules create qwixbox-rtp \
+  --allow=udp:16384-32768 --target-tags=qwixbox --direction=INGRESS
 
 # SSH from your address only. Replace with your own /32.
-gcloud compute firewall-rules create voip-pbx-ssh \
-  --allow=tcp:22 --source-ranges=203.0.113.10/32 --target-tags=voip-pbx --direction=INGRESS
+gcloud compute firewall-rules create qwixbox-ssh \
+  --allow=tcp:22 --source-ranges=203.0.113.10/32 --target-tags=qwixbox --direction=INGRESS
 ```
 
 GCP gives the instance a private address on the NIC and maps the public IP with a 1:1 NAT.
@@ -141,8 +157,8 @@ aws ec2 describe-images --owners 136693071363 \
 
 ```bash
 # Security group
-SG=$(aws ec2 create-security-group --group-name voip-pbx \
-      --description "VoIP PBX" --query GroupId --output text)
+SG=$(aws ec2 create-security-group --group-name qwixbox \
+      --description "Qwixbox VoIP PBX" --query GroupId --output text)
 
 aws ec2 authorize-security-group-ingress --group-id "$SG" --protocol tcp --port 22   --cidr 203.0.113.10/32
 aws ec2 authorize-security-group-ingress --group-id "$SG" --protocol tcp --port 80   --cidr 0.0.0.0/0
@@ -210,13 +226,13 @@ failed attempt does not burn the production rate limit.
 ssh admin@pbx.example.com          # 'admin' on AWS, your own user on GCP, 'root' on Vultr
 
 sudo apt update && sudo apt install -y git
-git clone https://github.com/thiru-to/freeswitch-install.git
-cd freeswitch-install
+git clone https://github.com/thiru-to/qwixbox.git
+cd qwixbox
 
-# First run creates /etc/voip-pbx/config.env from the template and stops.
+# First run creates /etc/qwixbox/config.env from the template and stops.
 sudo ./install.sh
 
-sudo editor /etc/voip-pbx/config.env
+sudo editor /etc/qwixbox/config.env
 ```
 
 That first run ends with `>> Waiting for configuration.` and exit code 78. **That is the
@@ -251,21 +267,31 @@ sudo ./install.sh
 ```
 
 It runs unattended from here — roughly 20–40 minutes, most of it compiling FreeSWITCH. Output
-is logged to `/var/log/voip-install/`. If it stops, fix what it reports and run the same
+is logged to `/var/log/qwixbox/`. If it stops, fix what it reports and run the same
 command again; completed steps are skipped.
 
 Leave `SMTP_HOST` empty if you have no relay yet. Voicemail and fax still work, they just do
 not send email. Add it later with:
 
 ```bash
-sudo editor /etc/voip-pbx/config.env
+sudo ./install.sh --configure          # or edit /etc/qwixbox/config.env
 sudo ./install.sh --only 15-mail.sh --force
 ```
+
+**Set `SMTP_HOST` to a relay unless you know outbound port 25 works.** Postfix delivers straight
+to recipient MX servers when it is empty, and GCP blocks port 25 egress permanently — AWS and
+Vultr block it until you ask them not to. With a relay, mail leaves over 587 and is still signed
+locally by OpenDKIM.
+
+`15-mail.sh` prints the DKIM, DMARC and SPF records to publish, or creates them for you when
+`DNS_PROVIDER="cloudflare"`. Publish them: mail signed with a key that is not in DNS fails
+verification exactly as if it were forged. Note that when you relay, the SPF record has to name
+**your relay provider's** servers — their `include:` — not this host.
 
 ### 6. Check it came up
 
 ```bash
-sudo voip-healthcheck
+sudo qwixbox-healthcheck
 sudo ./install.sh --only 99-postflight.sh
 ```
 
@@ -292,8 +318,8 @@ API directory, which has the environment file and dependencies; the git checkout
 **First**, create the account. The password is generated and printed once:
 
 ```bash
-cd /opt/voip-api
-sudo -u voipapi bun run src/cli/create-user.ts \
+cd /opt/qwixbox-api
+sudo -u qwixbox bun run src/cli/create-user.ts \
   --email you@example.com \
   --name "Your Name"
 ```
@@ -304,7 +330,7 @@ Pass `--password` to choose your own (minimum 12 characters).
 boundary, so this is deliberately a separate step:
 
 ```bash
-sudo -u voipapi bun run src/cli/provision-tenant.ts \
+sudo -u qwixbox bun run src/cli/provision-tenant.ts \
   --name "Acme Corp" \
   --slug acme \
   --domain pbx.example.com \
@@ -355,12 +381,12 @@ Adding a second person means two commands today — `create-user.ts` for the acc
 `member` row for the tenant:
 
 ```bash
-cd /opt/voip-api
-sudo -u voipapi bun run src/cli/create-user.ts --email ops@example.com --name "Ops"
+cd /opt/qwixbox-api
+sudo -u qwixbox bun run src/cli/create-user.ts --email ops@example.com --name "Ops"
 
 # There is no CLI for this yet, and re-running provision-tenant.ts will NOT add them -
 # it stops once the organization has any member. Insert the row directly:
-sudo -u postgres psql voipapi -c "
+sudo -u postgres psql qwixbox -c "
   INSERT INTO member (id, organization_id, user_id, role, created_at)
   SELECT gen_random_uuid()::text,
          (SELECT id FROM organization WHERE slug = 'acme'),
@@ -402,7 +428,7 @@ sudo ./install.sh --dry-run                  # show what would run
 
 Re-running is safe. Each step records the SHA-256 of the script that satisfied it, so a
 completed step is skipped **until that script changes** — edit a step and it re-runs by
-itself. All output is logged to `/var/log/voip-install/`.
+itself. All output is logged to `/var/log/qwixbox/`.
 
 ## Architecture
 
@@ -436,12 +462,13 @@ and mobile behind NAT.
 |------|---------|
 | `00-preflight` | Host validation, hostname, timezone, NTP, kernel/limit tuning |
 | `01-base-packages` | Tooling, CA certificates, unattended security upgrades |
+| `02-dns` | A record for `PBX_FQDN` via the DNS provider (optional) |
 | `10-ssh-hardening` | Key-only SSH (refuses to lock you out if no key exists) |
 | `11-firewall` | nftables default-deny with SIP rate limiting |
 | `12-fail2ban` | Jails for sshd, FreeSWITCH and Kamailio |
 | `13-tls-certs` | Let's Encrypt plus renewal hooks shared by all services |
 | `14-responsive-firewall` | Reputation-tiered SIP limits, learned from registrations |
-| `15-mail` | Outbound SMTP relay for voicemail-to-email and fax-to-email |
+| `15-mail` | Postfix (loopback-only) + OpenDKIM signing, and the SPF/DKIM/DMARC records |
 | `20-postgresql` | PostgreSQL from PGDG, tuned to host memory |
 | `21-redis` | Redis for mod_hiredis and API caching |
 | `22-provision-databases` | Roles and databases, least privilege |
@@ -492,7 +519,7 @@ nginx config:
 
 ```bash
 curl -s http://127.0.0.1:3000/health          # on the server
-sudo systemctl status voip-api
+sudo systemctl status qwixbox-api
 sudo ./install.sh --only 42-nginx.sh --force  # the way back
 ```
 
@@ -528,8 +555,8 @@ one field in a softphone would let anyone forward someone else's phone or read t
 ## Operations
 
 ```bash
-sudo voip-healthcheck             # service, port, certificate and disk checks
-sudo voip-backup                  # run a backup now
+sudo qwixbox-healthcheck             # service, port, certificate and disk checks
+sudo qwixbox-backup                  # run a backup now
 fs_cli                            # FreeSWITCH console
 kamctl ul show                    # current registrations
 journalctl -u kamailio -f
@@ -537,7 +564,7 @@ journalctl -u kamailio -f
 
 ## Secrets
 
-Generated on first run and stored in `/etc/voip-pbx/config.env` (mode 0600). They are never
+Generated on first run and stored in `/etc/qwixbox/config.env` (mode 0600). They are never
 rotated by a re-run — that would break every service already holding the old value. Back this
 file up: without it the database passwords are unrecoverable.
 

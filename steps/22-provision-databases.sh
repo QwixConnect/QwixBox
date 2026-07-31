@@ -47,19 +47,19 @@ create_role "kamailioro"  "$KAMAILIO_RO_DB_PASSWORD"
 create_role "$API_USER"   "$API_DB_PASSWORD"
 
 create_db "kamailio" "kamailio"
-create_db "voipapi"  "$API_USER"
+create_db "qwixbox"  "$API_USER"
 
 ### --- Privileges ------------------------------------------------------------------------
 
 ### Revoke the implicit PUBLIC grant. Without this every role on the cluster can connect to
 ### and create objects in every database, which defeats the separation above.
-for db in kamailio voipapi; do
+for db in kamailio qwixbox; do
   su - postgres -c "psql -v ON_ERROR_STOP=1 -d ${db} -c \"REVOKE ALL ON SCHEMA public FROM PUBLIC\"" >/dev/null
   su - postgres -c "psql -v ON_ERROR_STOP=1 -c \"REVOKE ALL ON DATABASE \\\"${db}\\\" FROM PUBLIC\"" >/dev/null
 done
 
 su - postgres -c "psql -v ON_ERROR_STOP=1 -d kamailio -c \"GRANT ALL ON SCHEMA public TO kamailio\"" >/dev/null
-su - postgres -c "psql -v ON_ERROR_STOP=1 -d voipapi  -c \"GRANT ALL ON SCHEMA public TO \\\"${API_USER}\\\"\"" >/dev/null
+su - postgres -c "psql -v ON_ERROR_STOP=1 -d qwixbox  -c \"GRANT ALL ON SCHEMA public TO \\\"${API_USER}\\\"\"" >/dev/null
 
 ### The read-only role gets SELECT on everything Kamailio creates, now and in future - the
 ### DEFAULT PRIVILEGES clause covers tables that 33-kamailio-config.sh has not made yet.
@@ -81,6 +81,6 @@ check_login() {
 
 check_login kamailio   "$KAMAILIO_DB_PASSWORD"    kamailio
 check_login kamailioro "$KAMAILIO_RO_DB_PASSWORD" kamailio
-check_login "$API_USER" "$API_DB_PASSWORD"        voipapi
+check_login "$API_USER" "$API_DB_PASSWORD"        qwixbox
 
 ok "Databases provisioned"

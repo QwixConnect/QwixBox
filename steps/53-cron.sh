@@ -14,16 +14,16 @@ TPL="$REPO_DIR/resources/conf/maintenance"
 CDR_KEEP_DAYS="${CDR_KEEP_DAYS:-365}"
 RECORDING_KEEP_DAYS="${RECORDING_KEEP_DAYS:-90}"
 
-deploy_template "$TPL/voip-maintenance" /usr/local/sbin/voip-maintenance 0750 || true
+deploy_template "$TPL/qwixbox-maintenance" /usr/local/sbin/qwixbox-maintenance 0750 || true
 
-deploy_template "$TPL/voip-maintenance.service" /etc/systemd/system/voip-maintenance.service || true
+deploy_template "$TPL/qwixbox-maintenance.service" /etc/systemd/system/qwixbox-maintenance.service || true
 
-deploy_template "$TPL/voip-maintenance.timer" /etc/systemd/system/voip-maintenance.timer || true
+deploy_template "$TPL/qwixbox-maintenance.timer" /etc/systemd/system/qwixbox-maintenance.timer || true
 
 systemctl daemon-reload
-systemctl enable --now voip-maintenance.timer >/dev/null 2>&1 || true
+systemctl enable --now qwixbox-maintenance.timer >/dev/null 2>&1 || true
 
 info "Scheduled timers:"
-systemctl list-timers --no-pager 'voip-*' 'certbot*' 2>/dev/null | head -6 | sed 's/^/  /' || true
+systemctl list-timers --no-pager 'qwixbox-*' 'certbot*' 2>/dev/null | head -6 | sed 's/^/  /' || true
 
 ok "Maintenance scheduled (CDR ${CDR_KEEP_DAYS}d, recordings ${RECORDING_KEEP_DAYS}d)"

@@ -1,6 +1,6 @@
 [Unit]
-# Managed by the VoIP PBX installer.
-Description=VoIP PBX API
+# Managed by the Qwixbox installer.
+Description=Qwixbox API
 After=@api_after@
 Wants=network-online.target
 @api_requires@
@@ -36,7 +36,7 @@ ReadWritePaths=@FAX_SPOOL@
 
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=voip-api
+SyslogIdentifier=qwixbox-api
 
 [Install]
 WantedBy=multi-user.target

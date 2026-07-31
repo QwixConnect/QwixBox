@@ -1,8 +1,8 @@
 /**
  * Environment, validated once at startup.
  *
- * These are written into /opt/voip-api/.env by steps/41-api-deploy.sh, which builds them from
- * /etc/voip-pbx/config.env. Failing loudly here beats a null-reference three layers deep on
+ * These are written into /opt/qwixbox-api/.env by steps/41-api-deploy.sh, which builds them from
+ * /etc/qwixbox/config.env. Failing loudly here beats a null-reference three layers deep on
  * the first call.
  */
 
@@ -11,7 +11,7 @@ function required(name: string): string {
   if (!v) {
     throw new Error(
       `Missing required environment variable ${name}. ` +
-        `The installer writes these to ${process.env.API_DIR ?? "/opt/voip-api"}/.env; ` +
+        `The installer writes these to ${process.env.API_DIR ?? "/opt/qwixbox-api"}/.env; ` +
         `for local work create portal/api/.env.`,
     );
   }

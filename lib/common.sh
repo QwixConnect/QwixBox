@@ -14,7 +14,7 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG_DIR="/etc/voip-pbx"
+CONFIG_DIR="/etc/qwixbox"
 CONFIG_FILE="$CONFIG_DIR/config.env"
 
 ### --- Output ---------------------------------------------------------------------------
@@ -82,15 +82,50 @@ random_secret() {
 }
 
 # Writes KEY="value" back into the deployed config, replacing any existing entry. This is how
-# generated secrets persist between runs.
+# generated secrets persist between runs, and how the wizard records operator input.
+#
+# Rewritten line by line rather than with `sed -i "s|^${key}=.*|...|"`. That form interpolated the
+# value into the replacement text, so a value containing the `|` delimiter, an `&` (which sed
+# expands to the whole match) or a backslash silently corrupted the file. Fine for generated
+# secrets, whose alphabet is A-Za-z0-9 - not fine once a human types an SMTP password here.
+#
+# The value is also escaped for the double-quoted context it lands in: the file is read with
+# `set -a; . "$CONFIG_FILE"`, so an unescaped $, ` or " in a password would be expanded or would
+# end the string early.
 config_set() {
-  local key="$1" value="$2"
+  local key="$1" value="$2" tmp line found=0 esc
+
+  case "$value" in
+    *$'\n'*) die "config_set: $key value contains a newline, which config.env cannot represent." ;;
+  esac
+
+  esc="${value//\\/\\\\}"   # backslash first, or it re-escapes the escapes added below
+  esc="${esc//\"/\\\"}"
+  esc="${esc//\$/\\\$}"
+  esc="${esc//\`/\\\`}"
+
   touch "$CONFIG_FILE"
-  if grep -qE "^${key}=" "$CONFIG_FILE"; then
-    sed -i "s|^${key}=.*|${key}=\"${value}\"|" "$CONFIG_FILE"
-  else
-    printf '%s="%s"\n' "$key" "$value" >> "$CONFIG_FILE"
-  fi
+  tmp="$(mktemp)"
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "$key"=*)
+        ### Only the first occurrence is rewritten; any later duplicate is dropped, so repeated
+        ### writes cannot grow a file where the last definition silently wins.
+        if [ "$found" -eq 0 ]; then
+          printf '%s="%s"\n' "$key" "$esc"
+          found=1
+        fi
+        ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done < "$CONFIG_FILE" > "$tmp"
+
+  [ "$found" -eq 1 ] || printf '%s="%s"\n' "$key" "$esc" >> "$tmp"
+
+  ### Copy the content in rather than `mv` the temp over it: that keeps the original inode, and
+  ### with it the 0600 mode this file must never lose.
+  cat "$tmp" > "$CONFIG_FILE"
+  rm -f "$tmp"
 }
 
 # Ensures a secret exists, generating it on first use. Re-running never rotates a secret -
@@ -108,7 +143,7 @@ config_ensure_secret() {
 
 load_config() {
   ### 0755, not 0750. Service users need to traverse this directory to reach material we
-  ### deliberately share with them - /etc/voip-pbx/tls, group-readable by ssl-cert. With 0750
+  ### deliberately share with them - /etc/qwixbox/tls, group-readable by ssl-cert. With 0750
   ### root:root the group permission on the files below is unreachable, and Kamailio fails to
   ### start with an opaque "Permission denied" from OpenSSL. The secret is config.env itself,
   ### which is 0600 and stays that way.
@@ -118,6 +153,18 @@ load_config() {
     chmod 0755 "$CONFIG_DIR"
   fi
 
+  ### On a terminal, offer the wizard rather than the editor. Guarded by tui_available, so every
+  ### automated run - which is all of the container verification - keeps the exit-78 path below.
+  ###
+  ### The "unconfigured" test reads the file directly rather than $PBX_FQDN: the config has not
+  ### been sourced yet at this point, so the variable is unset and would make this fire on every
+  ### single run.
+  if tui_available; then
+    if [ ! -f "$CONFIG_FILE" ] || grep -q '^PBX_FQDN="pbx.example.com"' "$CONFIG_FILE" 2>/dev/null; then
+      run_wizard || true
+    fi
+  fi
+
   if [ ! -f "$CONFIG_FILE" ]; then
     install -m 0600 "$REPO_DIR/config.env.example" "$CONFIG_FILE"
     printf '\n'
@@ -125,7 +172,8 @@ load_config() {
     printf '\n'
     printf '  This is the expected first run. Nothing is wrong - the installer needs your\n'
     printf '  site details before it can do anything useful.\n\n'
-    printf '  1. Edit the file:      sudo editor %s\n' "$CONFIG_FILE"
+    printf '  1. Run the wizard:     sudo ./install.sh --configure\n'
+    printf '     or edit the file:   sudo editor %s\n' "$CONFIG_FILE"
     printf '  2. Set at least:       PBX_FQDN, PBX_SIP_DOMAIN, LETSENCRYPT_EMAIL,\n'
     printf '                         ADMIN_ALLOW_CIDR, TIMEZONE\n'
     printf '  3. Run again:          sudo ./install.sh\n\n'
@@ -147,6 +195,20 @@ load_config() {
     needs_config "Waiting for configuration."
   fi
 }
+
+### --- Interactive configuration ---------------------------------------------------------
+###
+### Sourced last: the wizard calls config_set, require_root and die from above, and tui.sh's
+### validators are shared with the non-interactive path. Loading them here rather than from each
+### step keeps every step's single `. lib/common.sh` line unchanged.
+# shellcheck source=./detect.sh
+. "$REPO_DIR/lib/detect.sh"
+# shellcheck source=./tui.sh
+. "$REPO_DIR/lib/tui.sh"
+# shellcheck source=./wizard.sh
+. "$REPO_DIR/lib/wizard.sh"
+# shellcheck source=./dns-cloudflare.sh
+. "$REPO_DIR/lib/dns-cloudflare.sh"
 
 ### --- Roles ----------------------------------------------------------------------------
 
@@ -274,9 +336,22 @@ write_file() {
 # An unset variable aborts the step. A literal @FS_ESL_PASSWORD@ deployed into a live SIP profile
 # fails later, somewhere else, and looks like anything except a typo in a template.
 render_template() {
-  local src="$1" body name value
+  local src="$1" body name value had_patsub=0
   [ -f "$src" ] || die "Template not found: $src"
   body="$(cat "$src")"
+
+  ### bash 5.2 added `patsub_replacement`, on by default, which makes an `&` in the replacement
+  ### of ${var//pattern/replacement} expand to the text that was matched. With it on, a value
+  ### containing `&` - an SMTP password, an API token - renders as the placeholder itself:
+  ### "p|pe&s" became "p|pe@SMTP_PASSWORD@s" in a deployed sasl_passwd. Turned off for the
+  ### substitution and restored afterwards, since shopt is global.
+  ###
+  ### The `shopt -q` guard is what keeps this correct on bash < 5.2, where the option does not
+  ### exist and `&` was never special to begin with.
+  if shopt -q patsub_replacement 2>/dev/null; then
+    had_patsub=1
+    shopt -u patsub_replacement
+  fi
 
   while IFS= read -r name; do
     [ -n "$name" ] || continue
@@ -285,6 +360,8 @@ render_template() {
     eval "value=\"\${${name}}\""
     body="${body//@${name}@/$value}"
   done < <(grep -o '@[A-Za-z_][A-Za-z0-9_]*@' "$src" | tr -d '@' | sort -u)
+
+  [ "$had_patsub" -eq 1 ] && shopt -s patsub_replacement
 
   printf '%s\n' "$body"
 }

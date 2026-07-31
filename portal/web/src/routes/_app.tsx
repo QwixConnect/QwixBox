@@ -157,7 +157,7 @@ function NoTenant({ email }: { email: string }) {
         </Text>
         <Text size="sm">On the server, run:</Text>
         <Code block>
-          {`cd /opt/voip-api\nsudo -u voipapi bun run src/cli/provision-tenant.ts \\\n  --name "Acme Corp" --slug acme \\\n  --domain <sip-domain> --owner ${email}`}
+          {`cd /opt/qwixbox-api\nsudo -u qwixbox bun run src/cli/provision-tenant.ts \\\n  --name "Acme Corp" --slug acme \\\n  --domain <sip-domain> --owner ${email}`}
         </Code>
         <Text size="xs" c="dimmed">
           Then sign out and back in.
@@ -186,7 +186,7 @@ function AppLayout() {
     <AppShell header={{ height: 56 }} navbar={{ width: 220, breakpoint: "sm" }} padding="md">
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between">
-          <Title order={4}>VoIP PBX</Title>
+          <Title order={4}>Qwixbox</Title>
           <Group gap="sm">
             <HealthBadge />
             <AccountMenu />

@@ -108,10 +108,10 @@ fi
 
 ### Signing key and certificate come from an STI-CA. The certificate must be published at a
 ### public HTTPS URL (the x5u), because verifying carriers fetch it to check the signature.
-install -d -m 0750 -o root -g kamailio /etc/voip-pbx/stir
+install -d -m 0750 -o root -g kamailio /etc/qwixbox/stir
 
-SS_KEY="${STIR_SHAKEN_KEY:-/etc/voip-pbx/stir/signing.key}"
-SS_CERT="${STIR_SHAKEN_CERT:-/etc/voip-pbx/stir/signing.pem}"
+SS_KEY="${STIR_SHAKEN_KEY:-/etc/qwixbox/stir/signing.key}"
+SS_CERT="${STIR_SHAKEN_CERT:-/etc/qwixbox/stir/signing.pem}"
 
 if [ ! -f "$SS_KEY" ] || [ ! -f "$SS_CERT" ]; then
   warn "No signing material at $SS_KEY / $SS_CERT."
@@ -134,7 +134,7 @@ fi
 ### The CA bundle used to validate inbound PASSporTs. Populated with the STI-CA roots you
 ### trust; falling back to the system store is deliberately not done, because any public CA
 ### would then be able to vouch for a caller identity.
-CA_DIR="/etc/voip-pbx/stir/ca"
+CA_DIR="/etc/qwixbox/stir/ca"
 install -d -m 0755 "$CA_DIR"
 if [ -z "$(ls -A "$CA_DIR" 2>/dev/null)" ]; then
   warn "No STI-CA root certificates in $CA_DIR - inbound verification will reject everything."
@@ -142,9 +142,9 @@ if [ -z "$(ls -A "$CA_DIR" 2>/dev/null)" ]; then
 fi
 
 # shellcheck disable=SC2034  # read by name from the template
-STIR_X5U_DISPLAY="${STIR_SHAKEN_X5U:-<set STIR_SHAKEN_X5U in /etc/voip-pbx/config.env>}"
+STIR_X5U_DISPLAY="${STIR_SHAKEN_X5U:-<set STIR_SHAKEN_X5U in /etc/qwixbox/config.env>}"
 
-deploy_template "$TPL/README" /etc/voip-pbx/stir/README 0644 || true
+deploy_template "$TPL/README" /etc/qwixbox/stir/README 0644 || true
 
 ### --- Kamailio configuration fragment ---------------------------------------------------------
 

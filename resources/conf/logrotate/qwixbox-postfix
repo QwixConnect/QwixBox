@@ -1,0 +1,18 @@
+# Managed by the Qwixbox installer.
+#
+# main.cf sets maillog_file, so Postfix writes this file itself through postlogd rather than
+# going via syslog. That is why there is no rsyslog rule for it and why the postfix user owns it.
+/var/log/postfix.log {
+    monthly
+    rotate 12
+    missingok
+    notifempty
+    compress
+    delaycompress
+    # Matches what postlogd itself creates. Handing the file to postfix:postfix instead would
+    # look tidier and stop the logging after the first rotation.
+    create 0600 root root
+    postrotate
+        /usr/sbin/postfix reload >/dev/null 2>&1 || true
+    endscript
+}

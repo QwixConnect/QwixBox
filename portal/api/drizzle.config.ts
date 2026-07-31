@@ -1,8 +1,8 @@
 import { defineConfig } from "drizzle-kit";
 
 /**
- * DATABASE_URL is written into /opt/voip-api/.env by steps/41-api-deploy.sh, which builds it
- * from DB_HOST/DB_PORT in /etc/voip-pbx/config.env. For local work, put one in
+ * DATABASE_URL is written into /opt/qwixbox-api/.env by steps/41-api-deploy.sh, which builds it
+ * from DB_HOST/DB_PORT in /etc/qwixbox/config.env. For local work, put one in
  * portal/api/.env.
  */
 const url = process.env.DATABASE_URL;

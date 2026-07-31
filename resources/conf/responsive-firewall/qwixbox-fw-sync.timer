@@ -1,5 +1,5 @@
 [Unit]
-# Managed by the VoIP PBX installer.
+# Managed by the Qwixbox installer.
 Description=Refresh the responsive firewall every 2 minutes
 
 [Timer]

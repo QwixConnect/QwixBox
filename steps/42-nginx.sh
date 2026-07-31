@@ -12,14 +12,14 @@ TPL="$REPO_DIR/resources/conf/nginx"
 
 apt_install nginx
 
-WEB_ROOT="${WEB_ROOT:-/var/www/voip-portal}"
-TLS_DIR="/etc/voip-pbx/tls"
+WEB_ROOT="${WEB_ROOT:-/var/www/qwixbox-portal}"
+TLS_DIR="/etc/qwixbox/tls"
 
 ### 43-portal-web.sh publishes the built bundle here. Create a placeholder so nginx has a
 ### valid root on a first run where the portal has not been built yet.
 if [ ! -d "$WEB_ROOT" ]; then
   install -d -m 0755 "$WEB_ROOT"
-  printf '<!doctype html><title>VoIP PBX</title><p>Portal not built yet - run 43-portal-web.sh.\n' \
+  printf '<!doctype html><title>Qwixbox</title><p>Portal not built yet - run 43-portal-web.sh.\n' \
     > "$WEB_ROOT/index.html"
 fi
 if [ ! -f "$TLS_DIR/fullchain.pem" ]; then
@@ -49,7 +49,7 @@ done
 
 deploy_template "$TPL/conf.d/00-hardening.conf" /etc/nginx/conf.d/00-hardening.conf || true
 
-deploy_template "$TPL/sites-available/voip-api" /etc/nginx/sites-available/voip-api || true
+deploy_template "$TPL/sites-available/qwixbox-api" /etc/nginx/sites-available/qwixbox-api || true
 
 ### Debian ships proxy_params, but not with WebSocket upgrade handling - which SIP over WSS
 ### and any realtime API endpoint both need.
@@ -58,7 +58,7 @@ deploy_template "$TPL/proxy_params" /etc/nginx/proxy_params || true
 ### $connection_upgrade must be defined at http scope for the above to work.
 deploy_template "$TPL/conf.d/01-upgrade-map.conf" /etc/nginx/conf.d/01-upgrade-map.conf || true
 
-ln -sf /etc/nginx/sites-available/voip-api /etc/nginx/sites-enabled/voip-api
+ln -sf /etc/nginx/sites-available/qwixbox-api /etc/nginx/sites-enabled/qwixbox-api
 
 nginx -t || die "nginx configuration is invalid."
 enable_service nginx

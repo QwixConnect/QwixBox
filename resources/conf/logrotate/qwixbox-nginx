@@ -1,5 +1,5 @@
-# Managed by the VoIP PBX installer.
-/var/log/nginx/voip-*.log {
+# Managed by the Qwixbox installer.
+/var/log/nginx/qwixbox-*.log {
     daily
     rotate 30
     missingok

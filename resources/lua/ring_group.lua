@@ -4,20 +4,20 @@
   Usage:  <action application="lua" data="ring_group.lua <domain> <id> [depth]"/>
 --]]
 
-local voip = require "voip"
+local qwixbox = require "qwixbox"
 
 local domain, id, depth = argv[1], argv[2], tonumber(argv[3] or "0")
 
 if not session or not session:ready() then return end
 if not domain or not id then
-  voip.log("ring_group", "err", "usage: ring_group.lua <domain> <id>")
+  qwixbox.log("ring_group", "err", "usage: ring_group.lua <domain> <id>")
   session:hangup("NORMAL_TEMPORARY_FAILURE")
   return
 end
 
-local group = voip.fetch("rg", domain, id)
+local group = qwixbox.fetch("rg", domain, id)
 if not group then
-  voip.log("ring_group", "err", "no ring group %s@%s in cache", id, domain)
+  qwixbox.log("ring_group", "err", "no ring group %s@%s in cache", id, domain)
   session:hangup("NORMAL_TEMPORARY_FAILURE")
   return
 end
@@ -26,9 +26,9 @@ local members = group.members or {}
 if #members == 0 then
   -- An empty group is a configuration mistake, but hanging up on the caller is the wrong
   -- response to it: go straight to failover if there is one.
-  voip.log("ring_group", "warning", "ring group %s has no enabled members", group.name)
+  qwixbox.log("ring_group", "warning", "ring group %s has no enabled members", group.name)
   if group.failoverType then
-    voip.go(session, domain, group.failoverType, group.failoverId, depth)
+    qwixbox.go(session, domain, group.failoverType, group.failoverId, depth)
   else
     session:hangup("NO_ROUTE_DESTINATION")
   end
@@ -57,7 +57,7 @@ end
 
 local dial_string = table.concat(dials, separator)
 
-voip.log("ring_group", "info", "%s: ringing %d member(s) %s for %ds",
+qwixbox.log("ring_group", "info", "%s: ringing %d member(s) %s for %ds",
   group.name, #members, (separator == "|") and "sequentially" or "simultaneously",
   group.ringTimeoutSec or 30)
 
@@ -73,10 +73,10 @@ session:execute("bridge", dial_string)
 if not session:ready() then return end
 
 local cause = session:getVariable("originate_disposition") or "NO_ANSWER"
-voip.log("ring_group", "info", "%s: nobody answered (%s)", group.name, cause)
+qwixbox.log("ring_group", "info", "%s: nobody answered (%s)", group.name, cause)
 
 if group.failoverType then
-  voip.go(session, domain, group.failoverType, group.failoverId, depth)
+  qwixbox.go(session, domain, group.failoverType, group.failoverId, depth)
 else
   session:execute("answer", "")
   session:execute("voicemail", string.format("default %s %s", domain, group.number))

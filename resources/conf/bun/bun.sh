@@ -1,4 +1,4 @@
-# Managed by the VoIP PBX installer.
+# Managed by the Qwixbox installer.
 export BUN_INSTALL="@BUN_INSTALL@"
 case ":$PATH:" in
   *":$BUN_INSTALL/bin:"*) ;;

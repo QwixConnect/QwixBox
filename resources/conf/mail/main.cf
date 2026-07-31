@@ -1,0 +1,49 @@
+# Managed by the Qwixbox installer.
+#
+# Postfix here is a submission-only MTA: it accepts mail from local processes (FreeSWITCH's
+# switch_simple_email() and the API's fax delivery, both via /usr/sbin/sendmail) and sends it
+# out. It never accepts mail from the network.
+#
+# inet_interfaces = loopback-only is what makes that true, and it is the property that made the
+# earlier msmtp-only design safe. A SIP edge with an internet-facing MTA is one misconfiguration
+# away from being an open relay, so do not widen this without a reason.
+
+myhostname = @PBX_FQDN@
+mydomain = @MAIL_DOMAIN@
+myorigin = $mydomain
+
+inet_interfaces = loopback-only
+inet_protocols = ipv4
+mydestination = localhost
+mynetworks = 127.0.0.0/8 [::1]/128
+
+# No inbound mail: nothing in this stack reads a mailbox.
+local_recipient_maps =
+local_transport = error:local delivery is not configured on this host
+
+# Empty when sending direct to MX, "[host]:port" when relaying through a provider.
+relayhost = @RELAYHOST@
+
+# Relay credentials and outbound TLS policy. Both live in this one block because Postfix takes
+# the LAST occurrence of a parameter: a second smtp_tls_security_level further down silently
+# demoted the relay path from "encrypt" to "may", which would have put the relay password on
+# the wire in the clear.
+@RELAY_BLOCK@
+
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+
+# No inbound listener, so there is nothing to offer TLS on.
+smtpd_tls_security_level = none
+
+# DKIM signing. non_smtpd_milters is the load-bearing one here: mail submitted with sendmail(1)
+# does not pass through smtpd, so a config with only smtpd_milters signs nothing this host
+# actually sends - and that failure is invisible until a receiver checks the signature.
+milter_protocol = 6
+milter_default_action = accept
+smtpd_milters = local:/opendkim/opendkim.sock
+non_smtpd_milters = local:/opendkim/opendkim.sock
+
+# Bounces go to the operator rather than to a caller's voicemail sender address.
+notify_classes = resource, software
+compatibility_level = 3.6
+maillog_file = /var/log/postfix.log

@@ -1,0 +1,11 @@
+[Unit]
+# Managed by the Qwixbox installer.
+Description=Qwixbox backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/qwixbox-backup
+EnvironmentFile=-/etc/qwixbox/config.env
+Nice=10
+IOSchedulingClass=idle

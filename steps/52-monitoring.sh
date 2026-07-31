@@ -24,19 +24,19 @@ enable_service prometheus-node-exporter
 
 ### --- Health check --------------------------------------------------------------------------
 
-deploy_template "$TPL/voip-healthcheck" /usr/local/sbin/voip-healthcheck 0755 || true
+deploy_template "$TPL/qwixbox-healthcheck" /usr/local/sbin/qwixbox-healthcheck 0755 || true
 
 ### Run it on a timer and let failures surface through the journal, where an existing
 ### monitoring agent can pick them up without this script needing to know about your alerting.
-deploy_template "$TPL/voip-healthcheck.service" /etc/systemd/system/voip-healthcheck.service 0644 || true
+deploy_template "$TPL/qwixbox-healthcheck.service" /etc/systemd/system/qwixbox-healthcheck.service 0644 || true
 
-deploy_template "$TPL/voip-healthcheck.timer" /etc/systemd/system/voip-healthcheck.timer 0644 || true
+deploy_template "$TPL/qwixbox-healthcheck.timer" /etc/systemd/system/qwixbox-healthcheck.timer 0644 || true
 
 systemctl daemon-reload
-systemctl enable --now voip-healthcheck.timer >/dev/null 2>&1 || true
+systemctl enable --now qwixbox-healthcheck.timer >/dev/null 2>&1 || true
 
 info "Current health:"
-/usr/local/sbin/voip-healthcheck 2>&1 | sed 's/^/  /' || true
+/usr/local/sbin/qwixbox-healthcheck 2>&1 | sed 's/^/  /' || true
 
 ok "Monitoring configured (node_exporter on 127.0.0.1:9100, health check every 5min)"
-warn "Nothing alerts yet - point your monitoring at the exporter and the voip-health journal identifier."
+warn "Nothing alerts yet - point your monitoring at the exporter and the qwixbox-health journal identifier."

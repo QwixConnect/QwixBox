@@ -1,6 +1,6 @@
 <configuration name="acl.conf" description="Network Lists">
   <network-lists>
-    <!-- Managed by the VoIP PBX installer.
+    <!-- Managed by the Qwixbox installer.
 
          Only Kamailio (loopback) may send SIP to FreeSWITCH. Anything else is rejected before
          it reaches the dialplan. -->

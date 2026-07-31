@@ -1,5 +1,5 @@
 <configuration name="voicemail.conf" description="Voicemail">
-  <!-- Managed by the VoIP PBX installer.
+  <!-- Managed by the Qwixbox installer.
 
        Storage layout is $${storage_dir}/voicemail/default/<domain>/<mailbox>, so tenants are
        already separated by the SIP domain. No extra per-tenant storage-dir is needed. -->

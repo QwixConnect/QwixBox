@@ -1,5 +1,5 @@
 <configuration name="xml_curl.conf" description="cURL XML Gateway">
-  <!-- Managed by the VoIP PBX installer.
+  <!-- Managed by the Qwixbox installer.
 
        Bindings fall through: switch_xml.c loops over them and continues past any that returns
        NULL or status="not found". Lua is registered first (mod_lua loads earlier), so this only

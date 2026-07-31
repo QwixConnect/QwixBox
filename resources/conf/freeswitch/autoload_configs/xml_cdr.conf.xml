@@ -1,5 +1,5 @@
 <configuration name="xml_cdr.conf" description="XML CDR">
-  <!-- Managed by the VoIP PBX installer.
+  <!-- Managed by the Qwixbox installer.
 
        mod_xml_cdr posts a record to the API when a channel hangs up. Off the call path entirely -
        the caller has already gone - so unlike the XML gateway this is tuned for durability rather

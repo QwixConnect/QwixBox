@@ -7,15 +7,15 @@
  * Key namespace (Lua depends on these exact shapes, so changing one means changing
  * scripts/xml_handler.lua too):
  *
- *   voip:dir:<domain>:<user>     rendered directory XML for one extension
- *   voip:routes:<domain>         the tenant's outbound route table, JSON
- *   voip:did:<domain>:<number>   inbound DID destination, JSON
- *   voip:tenant:<domain>         tenant settings needed at call time, JSON
- *   voip:num:<domain>:<number>   internal feature number -> call-flow object, JSON
- *   voip:call:<domain>:<number>  per-extension call handling (DND, forwarding), JSON
- *   voip:rg:<domain>:<id>        ring group with its members
- *   voip:ivr:<domain>:<id>       IVR menu with its options, keyed by digit
- *   voip:tc:<domain>:<id>        time condition with its rules
+ *   qwixbox:dir:<domain>:<user>     rendered directory XML for one extension
+ *   qwixbox:routes:<domain>         the tenant's outbound route table, JSON
+ *   qwixbox:did:<domain>:<number>   inbound DID destination, JSON
+ *   qwixbox:tenant:<domain>         tenant settings needed at call time, JSON
+ *   qwixbox:num:<domain>:<number>   internal feature number -> call-flow object, JSON
+ *   qwixbox:call:<domain>:<number>  per-extension call handling (DND, forwarding), JSON
+ *   qwixbox:rg:<domain>:<id>        ring group with its members
+ *   qwixbox:ivr:<domain>:<id>       IVR menu with its options, keyed by digit
+ *   qwixbox:tc:<domain>:<id>        time condition with its rules
  */
 import { RedisClient } from "bun";
 import { env } from "../env";
@@ -35,18 +35,18 @@ export const keys = {
    *
    * Deliberately has no TTL. Its absence is the signal, and an expiring sentinel would fake it.
    */
-  warmSentinel: () => "voip:warm",
-  directory: (domain: string, user: string) => `voip:dir:${domain}:${user}`,
-  routes: (domain: string) => `voip:routes:${domain}`,
-  did: (domain: string, number: string) => `voip:did:${domain}:${number}`,
-  tenant: (domain: string) => `voip:tenant:${domain}`,
+  warmSentinel: () => "qwixbox:warm",
+  directory: (domain: string, user: string) => `qwixbox:dir:${domain}:${user}`,
+  routes: (domain: string) => `qwixbox:routes:${domain}`,
+  did: (domain: string, number: string) => `qwixbox:did:${domain}:${number}`,
+  tenant: (domain: string) => `qwixbox:tenant:${domain}`,
   /**
    * Internal feature number -> call-flow object. Users expect to dial 600 for the sales ring
    * group or 700 for the auto-attendant from their own desk phone, exactly as they would dial
    * a colleague's extension. Without this map an internally dialled 600 is not an extension
    * and not a DID, so it falls through to the outbound routes and dies as UNALLOCATED_NUMBER.
    */
-  featureNumber: (domain: string, number: string) => `voip:num:${domain}:${number}`,
+  featureNumber: (domain: string, number: string) => `qwixbox:num:${domain}:${number}`,
   /**
    * How to treat a call TO this extension - DND, forwarding, ring time, call waiting.
    *
@@ -56,29 +56,29 @@ export const keys = {
    * when someone dials them. Making the dialplan parse XML out of the directory entry to find
    * a DND flag would be a poor trade for one saved key.
    */
-  extensionCall: (domain: string, number: string) => `voip:call:${domain}:${number}`,
+  extensionCall: (domain: string, number: string) => `qwixbox:call:${domain}:${number}`,
   /** Call-flow objects, read by the Lua scripts mid-call. */
-  ringGroup: (domain: string, id: string) => `voip:rg:${domain}:${id}`,
-  ivr: (domain: string, id: string) => `voip:ivr:${domain}:${id}`,
-  timeCondition: (domain: string, id: string) => `voip:tc:${domain}:${id}`,
+  ringGroup: (domain: string, id: string) => `qwixbox:rg:${domain}:${id}`,
+  ivr: (domain: string, id: string) => `qwixbox:ivr:${domain}:${id}`,
+  timeCondition: (domain: string, id: string) => `qwixbox:tc:${domain}:${id}`,
   /**
    * Every per-tenant key pattern, for a full purge before a rebuild.
    *
-   * Enumerated rather than globbed as `voip:*:<domain>*`, because that trailing wildcard would
+   * Enumerated rather than globbed as `qwixbox:*:<domain>*`, because that trailing wildcard would
    * also match a tenant whose domain merely starts with this one - `acme.test` would wipe
    * `acme.test.evil.com`. A colon-terminated prefix cannot straddle a domain boundary, and any
    * new key shape must be added here or it will survive a rebuild as a ghost.
    */
   tenantPatterns: (domain: string) => [
-    `voip:dir:${domain}:*`,
-    `voip:did:${domain}:*`,
-    `voip:num:${domain}:*`,
-    `voip:call:${domain}:*`,
-    `voip:rg:${domain}:*`,
-    `voip:ivr:${domain}:*`,
-    `voip:tc:${domain}:*`,
-    `voip:routes:${domain}`,
-    `voip:tenant:${domain}`,
+    `qwixbox:dir:${domain}:*`,
+    `qwixbox:did:${domain}:*`,
+    `qwixbox:num:${domain}:*`,
+    `qwixbox:call:${domain}:*`,
+    `qwixbox:rg:${domain}:*`,
+    `qwixbox:ivr:${domain}:*`,
+    `qwixbox:tc:${domain}:*`,
+    `qwixbox:routes:${domain}`,
+    `qwixbox:tenant:${domain}`,
   ],
 } as const;
 

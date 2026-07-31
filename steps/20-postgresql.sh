@@ -49,7 +49,7 @@ maint_work_mem=$(( mem_mb / 16 ))
 
 install -d -m 0755 -o postgres -g postgres "${CLUSTER_DIR}/conf.d"
 
-deploy_template "$TPL/90-voip.conf" "${CLUSTER_DIR}/conf.d/90-voip.conf" 0644 postgres:postgres || true
+deploy_template "$TPL/90-qwixbox.conf" "${CLUSTER_DIR}/conf.d/90-qwixbox.conf" 0644 postgres:postgres || true
 
 ### --- Access ----------------------------------------------------------------------------
 

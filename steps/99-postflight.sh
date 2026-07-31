@@ -37,7 +37,7 @@ port_listening() {
 UNIT_FILES="$(systemctl list-unit-files --no-legend 2>/dev/null || true)"
 
 printf '\n--- Services ---\n'
-for unit in postgresql redis-server freeswitch kamailio rtpengine-daemon nginx voip-api fail2ban nftables; do
+for unit in postgresql redis-server freeswitch kamailio rtpengine-daemon nginx qwixbox-api fail2ban nftables; do
   case "$UNIT_FILES" in
     *"${unit}.service"*) : ;;
     *) continue ;;
@@ -118,8 +118,8 @@ fi
 if [ "${ENABLE_STIR_SHAKEN:-0}" = "1" ]; then
   mp="$(dirname "$(find /usr/lib -name 'tm.so' -path '*kamailio*' 2>/dev/null | head -1)")"
   check "stirshaken module built" test -f "$mp/stirshaken.so"
-  check "STIR signing key present" test -f "${STIR_SHAKEN_KEY:-/etc/voip-pbx/stir/signing.key}"
-  check "STIR CA roots present" bash -c "[ -n \"\$(ls -A /etc/voip-pbx/stir/ca 2>/dev/null)\" ]"
+  check "STIR signing key present" test -f "${STIR_SHAKEN_KEY:-/etc/qwixbox/stir/signing.key}"
+  check "STIR CA roots present" bash -c "[ -n \"\$(ls -A /etc/qwixbox/stir/ca 2>/dev/null)\" ]"
 fi
 
 printf '\n--- Security ---\n'
@@ -129,8 +129,33 @@ check "fail2ban jails loaded"    bash -c "fail2ban-client status | grep -q 'Jail
 check "Redis needs a password"   bash -c "! redis-cli ping 2>/dev/null | grep -q PONG"
 check "Postgres is loopback-only" bash -c "! ss -ltn | grep ':5432' | grep -qv '127.0.0.1\|::1'"
 
+### Only meaningful once 15-mail.sh has run; a host with no MTA is a supported state.
+if [ -x /usr/sbin/sendmail ]; then
+  printf '\n--- Mail ---\n'
+  check "postfix running" systemctl is-active --quiet postfix
+  check "sendmail available" test -x /usr/sbin/sendmail
+
+  ### The property that keeps a SIP edge from becoming an open relay. Asserted rather than
+  ### assumed, because a stray inet_interfaces edit would not show up anywhere else.
+  check "postfix is loopback-only" \
+    bash -c "! ss -ltn 2>/dev/null | awk '\$4 ~ /:25\$/' | grep -qv '127.0.0.1\|::1'"
+
+  if systemctl is-active --quiet opendkim 2>/dev/null; then
+    check "opendkim running" systemctl is-active --quiet opendkim
+    ### Compares the published TXT record against the private key. Catches the case where the
+    ### key was regenerated but DNS still carries the old public half - mail then goes out
+    ### signed with a key nobody can verify, and only the receiver notices.
+    _dkim_domain="${MAIL_DOMAIN:-}"
+    if [ -z "$_dkim_domain" ]; then
+      case "${SMTP_FROM:-}" in *@*) _dkim_domain="${SMTP_FROM#*@}" ;; *) _dkim_domain="${PBX_FQDN#*.}" ;; esac
+    fi
+    check "DKIM key matches DNS (${_dkim_domain})" \
+      bash -c "opendkim-testkey -d '$_dkim_domain' -s '${DKIM_SELECTOR:-qwixbox}' -vvv 2>&1 | grep -q 'key OK'"
+  fi
+fi
+
 printf '\n--- TLS ---\n'
-CERT=/etc/voip-pbx/tls/fullchain.pem
+CERT=/etc/qwixbox/tls/fullchain.pem
 if [ -f "$CERT" ]; then
   end="$(openssl x509 -enddate -noout -in "$CERT" 2>/dev/null | cut -d= -f2)"
   days=$(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 ))
@@ -150,7 +175,7 @@ else
 fi
 
 printf '\n--- Scheduled work ---\n'
-for timer in voip-backup.timer voip-maintenance.timer voip-healthcheck.timer; do
+for timer in qwixbox-backup.timer qwixbox-maintenance.timer qwixbox-healthcheck.timer; do
   case "$UNIT_FILES" in *"${timer}"*) : ;; *) continue ;; esac
   check "$timer enabled" systemctl is-enabled --quiet "$timer"
 done
@@ -163,7 +188,7 @@ if [ "$problems" -eq 0 ]; then
   info "SIP:         ${PBX_FQDN}:${SIP_PORT} (UDP/TCP), ${SIPS_PORT} (TLS)"
   info "API:         https://${PBX_FQDN}/"
   info "Config:      ${CONFIG_FILE}"
-  info "Health:      voip-healthcheck"
+  info "Health:      qwixbox-healthcheck"
   printf '\n'
   warn "Still to do before taking real traffic:"
   warn "  - Create SIP subscribers (kamctl add <user>@${PBX_SIP_DOMAIN} <password>)"
@@ -175,6 +200,6 @@ if [ "$problems" -eq 0 ]; then
 else
   fail "${problems} of ${checks} checks failed."
   printf '\n'
-  info "Investigate with: journalctl -xeu <unit>, or voip-healthcheck"
+  info "Investigate with: journalctl -xeu <unit>, or qwixbox-healthcheck"
   exit 1
 fi

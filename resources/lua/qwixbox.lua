@@ -1,7 +1,7 @@
 --[[
   Shared helpers for the call-time scripts.
 
-  Loaded with `require "voip"` - lua.conf.xml sets script-directory so this resolves.
+  Loaded with `require "qwixbox"` - lua.conf.xml sets script-directory so this resolves.
 
   Destinations are polymorphic: an inbound route, an IVR option, a ring-group failover and
   both branches of a time condition all point at "an extension, or a ring group, or an IVR,
@@ -37,7 +37,7 @@ function M.json_decode(str)
 end
 
 function M.fetch(kind, domain, id)
-  return M.json_decode(M.redis_get(string.format("voip:%s:%s:%s", kind, domain, id)))
+  return M.json_decode(M.redis_get(string.format("qwixbox:%s:%s:%s", kind, domain, id)))
 end
 
 --[[ ---------------------------------------------------------------------------------------
@@ -53,14 +53,14 @@ local MAX_DEPTH = 10
 function M.go(session, domain, dtype, did, depth)
   depth = (depth or 0) + 1
   if depth > MAX_DEPTH then
-    M.log("voip", "err", "destination chain exceeded %d hops at %s/%s - hanging up",
+    M.log("qwixbox", "err", "destination chain exceeded %d hops at %s/%s - hanging up",
       MAX_DEPTH, tostring(dtype), tostring(did))
     session:hangup("EXCHANGE_ROUTING_ERROR")
     return
   end
 
   if not session:ready() then
-    M.log("voip", "info", "caller hung up before reaching %s", tostring(dtype))
+    M.log("qwixbox", "info", "caller hung up before reaching %s", tostring(dtype))
     return
   end
 
@@ -89,7 +89,7 @@ function M.go(session, domain, dtype, did, depth)
 
   elseif dtype == "external" then
     -- A literal number, routed like any outbound call - back out through Kamailio's egress.
-    local egress = os.getenv("VOIP_KAM_EGRESS") or "127.0.0.1:5070"
+    local egress = os.getenv("QWIXBOX_KAM_EGRESS") or "127.0.0.1:5070"
     session:execute("set", "hangup_after_bridge=true")
     session:execute("bridge", string.format("sofia/external/%s@%s", tostring(did), egress))
 
@@ -97,7 +97,7 @@ function M.go(session, domain, dtype, did, depth)
     session:hangup("NORMAL_CLEARING")
 
   else
-    M.log("voip", "warning", "unknown destination type '%s' - hanging up", tostring(dtype))
+    M.log("qwixbox", "warning", "unknown destination type '%s' - hanging up", tostring(dtype))
     session:hangup("UNALLOCATED_NUMBER")
   end
 end

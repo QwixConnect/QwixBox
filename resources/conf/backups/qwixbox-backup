@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by the VoIP PBX installer.
+# Managed by the Qwixbox installer.
 set -euo pipefail
 
 BACKUP_DIR="@BACKUP_DIR@"
@@ -11,7 +11,7 @@ install -d -m 0700 "$DEST"
 fail=0
 
 ### Databases. --clean --if-exists makes each dump restorable over an existing database.
-for db in kamailio voipapi; do
+for db in kamailio qwixbox; do
   if su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='$db'\"" | grep -q 1; then
     if su - postgres -c "pg_dump --clean --if-exists --format=custom '$db'" > "$DEST/$db.dump" 2>/dev/null; then
       echo "dumped $db ($(du -h "$DEST/$db.dump" | cut -f1))"
@@ -28,14 +28,14 @@ su - postgres -c "pg_dumpall --globals-only" > "$DEST/globals.sql" 2>/dev/null |
 ### Configuration. Enough to rebuild the host from a fresh install plus this archive.
 tar czf "$DEST/config.tar.gz" \
   --ignore-failed-read \
-  /etc/voip-pbx \
+  /etc/qwixbox \
   /etc/kamailio \
   /etc/rtpengine \
   /etc/nginx/sites-available \
   /etc/nginx/conf.d \
   /usr/local/freeswitch/conf \
   /etc/systemd/system/freeswitch.service \
-  /etc/systemd/system/voip-api.service \
+  /etc/systemd/system/qwixbox-api.service \
   /etc/nftables.conf \
   /etc/fail2ban/jail.d \
   2>/dev/null || true

@@ -20,7 +20,7 @@ command -v bun >/dev/null || die "Bun is not installed - run 40-bun.sh first."
 ### FreeSWITCH's ESL; it has no reason to be able to log in.
 if ! id -u "$API_USER" >/dev/null 2>&1; then
   adduser --system --group --home "$API_DIR" --shell /usr/sbin/nologin \
-    --gecos "VoIP PBX API" "$API_USER"
+    --gecos "Qwixbox API" "$API_USER"
   info "Created service account: $API_USER"
 fi
 
@@ -83,7 +83,7 @@ fi
 ### Must match the default in 31-freeswitch-config.sh: FreeSWITCH writes faxes there and the
 ### unit's ReadWritePaths has to cover the same directory.
 # shellcheck disable=SC2034  # read by name from the template
-FAX_SPOOL="${FAX_SPOOL:-/var/spool/voip-fax}"
+FAX_SPOOL="${FAX_SPOOL:-/var/spool/qwixbox-fax}"
 
 ### Determine the entrypoint: package.json start script wins, else a conventional filename.
 ENTRY="server.ts"
@@ -92,17 +92,17 @@ for candidate in server.ts src/index.ts index.ts; do
 done
 info "Entrypoint: $ENTRY"
 
-deploy_template "$TPL/voip-api.service" /etc/systemd/system/voip-api.service 0644 || true
+deploy_template "$TPL/qwixbox-api.service" /etc/systemd/system/qwixbox-api.service 0644 || true
 
 systemctl daemon-reload
-enable_service voip-api
-restart_service voip-api
+enable_service qwixbox-api
+restart_service qwixbox-api
 
 sleep 3
 if ss -ltn 2>/dev/null | grep -q ":${API_PORT}"; then
   ok "API listening on 127.0.0.1:${API_PORT}"
 else
-  warn "Nothing listening on ${API_PORT} yet - check: journalctl -u voip-api -n 50"
+  warn "Nothing listening on ${API_PORT} yet - check: journalctl -u qwixbox-api -n 50"
 fi
 
 ok "API deployed"

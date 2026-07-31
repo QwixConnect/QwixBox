@@ -1,7 +1,7 @@
 #!/usr/sbin/nft -f
-# Managed by the VoIP PBX installer.
+# Managed by the Qwixbox installer.
 #
-# Populated at runtime by voip-fw-sync from Kamailio's live registrations.
+# Populated at runtime by qwixbox-fw-sync from Kamailio's live registrations.
 
 table inet filter {
     # IPs that have successfully registered. Refreshed on every sync; entries expire if an

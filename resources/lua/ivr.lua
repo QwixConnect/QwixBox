@@ -4,20 +4,20 @@
   Usage:  <action application="lua" data="ivr.lua <domain> <id> [depth]"/>
 --]]
 
-local voip = require "voip"
+local qwixbox = require "qwixbox"
 
 local domain, id, depth = argv[1], argv[2], tonumber(argv[3] or "0")
 
 if not session or not session:ready() then return end
 if not domain or not id then
-  voip.log("ivr", "err", "usage: ivr.lua <domain> <id>")
+  qwixbox.log("ivr", "err", "usage: ivr.lua <domain> <id>")
   session:hangup("NORMAL_TEMPORARY_FAILURE")
   return
 end
 
-local menu = voip.fetch("ivr", domain, id)
+local menu = qwixbox.fetch("ivr", domain, id)
 if not menu then
-  voip.log("ivr", "err", "no IVR menu %s@%s in cache", id, domain)
+  qwixbox.log("ivr", "err", "no IVR menu %s@%s in cache", id, domain)
   session:hangup("NORMAL_TEMPORARY_FAILURE")
   return
 end
@@ -47,26 +47,26 @@ for attempt = 1, max_retries do
   if digit and digit ~= "" then
     local choice = options[digit]
     if choice then
-      voip.log("ivr", "info", "%s: caller pressed %s -> %s", menu.name, digit, tostring(choice.type))
-      voip.go(session, domain, choice.type, choice.id, depth)
+      qwixbox.log("ivr", "info", "%s: caller pressed %s -> %s", menu.name, digit, tostring(choice.type))
+      qwixbox.go(session, domain, choice.type, choice.id, depth)
       return
     end
-    voip.log("ivr", "info", "%s: invalid digit %s (attempt %d/%d)",
+    qwixbox.log("ivr", "info", "%s: invalid digit %s (attempt %d/%d)",
       menu.name, digit, attempt, max_retries)
     session:execute("playback", invalid)
   else
-    voip.log("ivr", "info", "%s: no digit (attempt %d/%d)", menu.name, attempt, max_retries)
+    qwixbox.log("ivr", "info", "%s: no digit (attempt %d/%d)", menu.name, attempt, max_retries)
   end
 end
 
 --[[ Out of retries. This is the most common real-world path - rotary phones, callers who put
      the handset down, speech that never registers - so it has to lead somewhere sensible
      rather than a hangup. ]]
-voip.log("ivr", "info", "%s: exhausted %d attempts -> %s",
+qwixbox.log("ivr", "info", "%s: exhausted %d attempts -> %s",
   menu.name, max_retries, tostring(menu.timeoutType))
 
 if menu.timeoutType then
-  voip.go(session, domain, menu.timeoutType, menu.timeoutId, depth)
+  qwixbox.go(session, domain, menu.timeoutType, menu.timeoutId, depth)
 else
   session:hangup("NO_ROUTE_DESTINATION")
 end

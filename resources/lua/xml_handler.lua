@@ -147,7 +147,7 @@ function M.directory(req, p)
     return nil
   end
 
-  local cached = redis_get("voip:dir:" .. domain .. ":" .. user)
+  local cached = redis_get("qwixbox:dir:" .. domain .. ":" .. user)
   if cached then
     debug("directory hit %s@%s", user, domain)
     return document(
@@ -254,7 +254,7 @@ local function build_outbound(route, destination, tenant)
 
   -- Always out through Kamailio's egress port. FreeSWITCH never contacts a carrier directly -
   -- Kamailio is the only element that touches the internet.
-  local egress = os.getenv("VOIP_KAM_EGRESS") or "127.0.0.1:5070"
+  local egress = os.getenv("QWIXBOX_KAM_EGRESS") or "127.0.0.1:5070"
   table.insert(actions, action("bridge", string.format("sofia/external/%s@%s", number, egress)))
 
   return actions
@@ -272,7 +272,7 @@ function M.dialplan(req, p)
     return nil
   end
 
-  local tenant = json_decode(redis_get("voip:tenant:" .. domain))
+  local tenant = json_decode(redis_get("qwixbox:tenant:" .. domain))
   if not tenant then
     log("warning", "dialplan MISS: no tenant for %s - falling through", domain)
     return nil
@@ -289,7 +289,7 @@ function M.dialplan(req, p)
   end
 
   local context = "tenant_" .. tenant.organizationId
-  local routes = json_decode(redis_get("voip:routes:" .. domain)) or {}
+  local routes = json_decode(redis_get("qwixbox:routes:" .. domain)) or {}
 
   -- 1. Emergency, before anything that could block it.
   for _, route in ipairs(routes) do
@@ -378,7 +378,7 @@ function M.dialplan(req, p)
   --[[ 2. Internal extension. Handed to extension.lua rather than bridged from here, so DND,
        call forwarding, call waiting and voicemail are decided in one place regardless of how
        the call arrived - a colleague dialling, an inbound DID, an IVR option. ]]
-  local ext = redis_get("voip:dir:" .. domain .. ":" .. destination)
+  local ext = redis_get("qwixbox:dir:" .. domain .. ":" .. destination)
   if ext then
     return document(
       "dialplan",
@@ -393,7 +393,7 @@ function M.dialplan(req, p)
 
   --[[ 3. A stored destination - reached either by an inbound DID or by dialling a feature
        number internally. Both resolve to the same {type, id} pair, so they share one action
-       builder; the call-time scripts in voip.lua handle everything past the first hop. ]]
+       builder; the call-time scripts in qwixbox.lua handle everything past the first hop. ]]
   local function destination_actions(dtype, did_id)
     local actions = {}
     if dtype == "extension" then
@@ -418,7 +418,7 @@ function M.dialplan(req, p)
     return actions
   end
 
-  local did = json_decode(redis_get("voip:did:" .. domain .. ":" .. destination))
+  local did = json_decode(redis_get("qwixbox:did:" .. domain .. ":" .. destination))
   if did then
     return document("dialplan", context_xml(context,
       extension_xml("did", destination, destination_actions(did.destinationType, did.destinationId))))
@@ -428,7 +428,7 @@ function M.dialplan(req, p)
        the tenant. Checked after the directory so an extension always wins a number collision -
        a user who cannot be reached on their own extension is a worse failure than a ring group
        that needs renumbering. ]]
-  local feature = json_decode(redis_get("voip:num:" .. domain .. ":" .. destination))
+  local feature = json_decode(redis_get("qwixbox:num:" .. domain .. ":" .. destination))
   if feature then
     return document("dialplan", context_xml(context,
       extension_xml("feature", destination, destination_actions(feature.type, feature.id))))

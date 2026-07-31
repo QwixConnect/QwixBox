@@ -18,16 +18,20 @@ apt_install logrotate
 ### copytruncate can lose the lines written during the copy.
 deploy_template "$TPL/freeswitch" /etc/logrotate.d/freeswitch || true
 
-deploy_template "$TPL/voip-nginx" /etc/logrotate.d/voip-nginx || true
+deploy_template "$TPL/qwixbox-nginx" /etc/logrotate.d/qwixbox-nginx || true
 
-### msmtp writes its own file rather than the journal - it runs as a one-shot child of whichever
-### service is sending, so there is no unit to attribute the output to. One line per message,
-### and it is the only record of a voicemail or fax that failed to deliver.
-deploy_template "$TPL/voip-msmtp" /etc/logrotate.d/voip-msmtp || true
+### Postfix writes its own file rather than the journal: main.cf sets maillog_file, so postlogd
+### owns the output. It is the only record of a voicemail or fax that failed to deliver, and of
+### whether outbound mail was signed.
+deploy_template "$TPL/qwixbox-postfix" /etc/logrotate.d/qwixbox-postfix || true
+
+### Remove the file the msmtp-era config left behind, so an upgraded host is not rotating a log
+### nothing writes to any more.
+rm -f /etc/logrotate.d/qwixbox-msmtp
 
 ### Kamailio, rtpengine and the API all log to the journal, so their retention is a journald
 ### setting rather than a logrotate one.
-deploy_template "$TPL/journald-90-voip.conf" /etc/systemd/journald.conf.d/90-voip.conf || true
+deploy_template "$TPL/journald-90-qwixbox.conf" /etc/systemd/journald.conf.d/90-qwixbox.conf || true
 
 systemctl restart systemd-journald
 

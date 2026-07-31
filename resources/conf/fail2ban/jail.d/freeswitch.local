@@ -1,4 +1,4 @@
-# Managed by the VoIP PBX installer.
+# Managed by the Qwixbox installer.
 [freeswitch-pbx]
 enabled  = true
 filter   = freeswitch-pbx

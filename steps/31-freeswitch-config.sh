@@ -33,7 +33,7 @@ REDIS_PASSWORD="${REDIS_PASSWORD:-}"
 VM_MAX_RECORD_LEN="${VM_MAX_RECORD_LEN:-300}"
 MAIL_FROM_NAME="${MAIL_FROM_NAME:-Phone System}"
 SMTP_FROM="${SMTP_FROM:-pbx@${PBX_FQDN}}"
-FAX_SPOOL="${FAX_SPOOL:-/var/spool/voip-fax}"
+FAX_SPOOL="${FAX_SPOOL:-/var/spool/qwixbox-fax}"
 CDR_SPOOL="${CDR_SPOOL:-$PREFIX/log/xml_cdr}"
 
 ### --- Modules that must be autoloaded -------------------------------------------------------
@@ -109,7 +109,7 @@ deploy_template "$TPL/autoload_configs/lua.conf.xml" \
 
 install -d -m 0755 /etc/systemd/system/freeswitch.service.d
 deploy_template "$TPL/systemd-env.conf" \
-  /etc/systemd/system/freeswitch.service.d/10-voip-env.conf 0644 || true
+  /etc/systemd/system/freeswitch.service.d/10-qwixbox-env.conf 0644 || true
 systemctl daemon-reload
 
 ### --- Redis client --------------------------------------------------------------------------

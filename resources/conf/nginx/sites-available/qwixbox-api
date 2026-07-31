@@ -1,4 +1,4 @@
-# Managed by the VoIP PBX installer.
+# Managed by the Qwixbox installer.
 
 server {
     listen 80;
@@ -34,8 +34,8 @@ server {
     client_max_body_size 10m;
     client_body_timeout 30s;
 
-    access_log /var/log/nginx/voip-api.access.log;
-    error_log  /var/log/nginx/voip-api.error.log warn;
+    access_log /var/log/nginx/qwixbox-api.access.log;
+    error_log  /var/log/nginx/qwixbox-api.error.log warn;
 
     location /.well-known/acme-challenge/ {
         root /var/www/acme;

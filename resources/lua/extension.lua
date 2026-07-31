@@ -9,13 +9,13 @@
   Usage:  <action application="lua" data="extension.lua <domain> <number> [depth]"/>
 --]]
 
-local voip = require "voip"
+local qwixbox = require "qwixbox"
 
 local domain, number, depth = argv[1], argv[2], tonumber(argv[3] or "0")
 
 if not session or not session:ready() then return end
 if not domain or not number then
-  voip.log("extension", "err", "usage: extension.lua <domain> <number>")
+  qwixbox.log("extension", "err", "usage: extension.lua <domain> <number>")
   session:hangup("NORMAL_TEMPORARY_FAILURE")
   return
 end
@@ -23,16 +23,16 @@ end
 --[[ Absent settings are not an error. An extension that exists in the directory but has no
      call-handling entry - a cache still warming, say - should ring normally rather than fail;
      the defaults below are exactly "ring the phone, then voicemail". ]]
-local ext = voip.fetch("call", domain, number) or {}
+local ext = qwixbox.fetch("call", domain, number) or {}
 local ring_timeout = ext.ringTimeoutSec or 25
 
 --[[ Unconditional forward wins over everything, including DND: a user who has forwarded their
      phone to their mobile has said where calls go, and quietly sending them to voicemail
      instead because DND is also set would lose the call. ]]
 if ext.forwardAllTo and ext.forwardAllTo ~= "" then
-  voip.log("extension", "info", "%s@%s: forwarded to %s", number, domain, ext.forwardAllTo)
+  qwixbox.log("extension", "info", "%s@%s: forwarded to %s", number, domain, ext.forwardAllTo)
   session:execute("set", "sip_h_X-Forwarded-From=" .. number)
-  voip.go(session, domain, "external", ext.forwardAllTo, depth)
+  qwixbox.go(session, domain, "external", ext.forwardAllTo, depth)
   return
 end
 
@@ -42,19 +42,19 @@ local function no_answer_treatment(reason, forward_to)
   if not session:ready() then return end
 
   if forward_to and forward_to ~= "" then
-    voip.log("extension", "info", "%s@%s: %s, forwarding to %s", number, domain, reason, forward_to)
+    qwixbox.log("extension", "info", "%s@%s: %s, forwarding to %s", number, domain, reason, forward_to)
     session:execute("set", "sip_h_X-Forwarded-From=" .. number)
-    voip.go(session, domain, "external", forward_to, depth)
+    qwixbox.go(session, domain, "external", forward_to, depth)
     return
   end
 
   if ext.voicemailEnabled == false then
-    voip.log("extension", "info", "%s@%s: %s, no voicemail - hanging up", number, domain, reason)
+    qwixbox.log("extension", "info", "%s@%s: %s, no voicemail - hanging up", number, domain, reason)
     session:hangup(reason == "busy" and "USER_BUSY" or "NO_ANSWER")
     return
   end
 
-  voip.log("extension", "info", "%s@%s: %s, taking a message", number, domain, reason)
+  qwixbox.log("extension", "info", "%s@%s: %s, taking a message", number, domain, reason)
   session:execute("answer", "")
   session:execute("voicemail", string.format("default %s %s", domain, number))
 end
@@ -62,7 +62,7 @@ end
 if ext.dnd then
   --[[ Do not ring at all. The caller still gets the full treatment - a DND user's callers
        should reach voicemail, not a dead line. ]]
-  voip.log("extension", "info", "%s@%s: DND", number, domain)
+  qwixbox.log("extension", "info", "%s@%s: DND", number, domain)
   no_answer_treatment("dnd", ext.forwardNoAnswerTo)
   return
 end
@@ -90,7 +90,7 @@ if ext.callWaitingEnabled == false then
     freeswitch.API():execute("limit_usage",
       string.format("%s %s %s", LIMIT_BACKEND, domain, number)) or "0") or 0
   if usage >= 1 then
-    voip.log("extension", "info", "%s@%s: on a call and call waiting is off", number, domain)
+    qwixbox.log("extension", "info", "%s@%s: on a call and call waiting is off", number, domain)
     no_answer_treatment("busy", ext.forwardBusyTo)
     return
   end

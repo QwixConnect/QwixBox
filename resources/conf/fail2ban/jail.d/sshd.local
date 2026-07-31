@@ -1,4 +1,4 @@
-# Managed by the VoIP PBX installer.
+# Managed by the Qwixbox installer.
 [sshd]
 enabled = true
 mode = aggressive

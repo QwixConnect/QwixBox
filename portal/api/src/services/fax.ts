@@ -55,7 +55,7 @@ async function convertToPdf(tiffPath: string): Promise<string | null> {
  *
  * Uses the system MTA via `sendmail`. Debian installs none by default, so this is expected to
  * be absent on a fresh box - it warns rather than failing, because the fax is already stored
- * and downloadable from the portal. Install msmtp-mta or postfix to enable delivery.
+ * and downloadable from the portal. steps/15-mail.sh installs Postfix, which provides it.
  */
 /**
  * RFC 2047 encodes a header value if it is not plain ASCII.
@@ -80,15 +80,15 @@ async function deliverByEmail(
   if (!sendmail) {
     console.warn(
       `[fax] no MTA installed - not delivering to ${to}. ` +
-        `The fax is stored and available in the portal. Install msmtp-mta to enable email.`,
+        `The fax is stored and available in the portal. Run steps/15-mail.sh to enable email.`,
     );
     return false;
   }
 
-  const boundary = `----voipfax-${randomUUID()}`;
-  /* From and Date are set explicitly rather than left to the MTA. msmtp would fill From in from
-     its own config, but a different MTA uses the local system user - and a message with no Date
-     is scored as spam by most receivers. */
+  const boundary = `----qwixboxfax-${randomUUID()}`;
+  /* From and Date are set explicitly rather than left to the MTA. Postfix would otherwise
+     rewrite From to the local system user, and a message with no Date is scored as spam by most
+     receivers. The From domain must also match the DKIM signing domain or alignment fails. */
   const replyTo = env.mailReplyTo ? `Reply-To: ${env.mailReplyTo}\r\n` : "";
   let message =
     `From: "${env.mailFromName}" <${env.mailFrom}>\r\n${replyTo}` +

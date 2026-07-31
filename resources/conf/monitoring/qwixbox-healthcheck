@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by the VoIP PBX installer.
+# Managed by the Qwixbox installer.
 # Exit 0 = healthy, 1 = degraded. Suitable for a monitoring agent or cron alert.
 set -uo pipefail
 
@@ -8,7 +8,7 @@ problems=0
 report() { printf '%-22s %s\n' "$1" "$2"; }
 
 ### Services that must be running.
-for unit in postgresql redis-server freeswitch kamailio rtpengine nginx voip-api; do
+for unit in postgresql redis-server freeswitch kamailio rtpengine nginx qwixbox-api; do
   if systemctl list-unit-files 2>/dev/null | grep -q "^${unit}"; then
     if systemctl is-active --quiet "$unit"; then
       report "$unit" "active"
@@ -43,7 +43,7 @@ else
 fi
 
 ### Certificate expiry - the classic silent 90-day outage.
-CERT=/etc/voip-pbx/tls/fullchain.pem
+CERT=/etc/qwixbox/tls/fullchain.pem
 if [ -f "$CERT" ]; then
   end="$(openssl x509 -enddate -noout -in "$CERT" 2>/dev/null | cut -d= -f2)"
   days=$(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 ))

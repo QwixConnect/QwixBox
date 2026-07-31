@@ -1,5 +1,5 @@
 <include>
-  <!-- Managed by the VoIP PBX installer.
+  <!-- Managed by the Qwixbox installer.
 
        Opus first for WiFi/mobile, then G.711 for PSTN interop. G.722 sits between them as a
        wideband fallback for endpoints that cannot do Opus. -->

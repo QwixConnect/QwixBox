@@ -1,6 +1,6 @@
 [Unit]
-# Managed by the VoIP PBX installer.
-Description=Nightly VoIP PBX maintenance
+# Managed by the Qwixbox installer.
+Description=Nightly Qwixbox maintenance
 
 [Timer]
 # After the backup, so anything pruned here is already captured.

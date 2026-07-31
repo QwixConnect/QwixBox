@@ -116,12 +116,12 @@ fi
 ### --- TLS ---------------------------------------------------------------------------------
 
 TLS_READY=0
-if [ -f /etc/voip-pbx/tls/fullchain.pem ]; then
+if [ -f /etc/qwixbox/tls/fullchain.pem ]; then
   usermod -aG ssl-cert kamailio 2>/dev/null || true
   TLS_READY=1
   deploy_template "$TPL/tls.cfg" /etc/kamailio/tls.cfg 0640 root:kamailio || true
 else
-  warn "No TLS material at /etc/voip-pbx/tls - SIP TLS on ${SIPS_PORT} will be disabled."
+  warn "No TLS material at /etc/qwixbox/tls - SIP TLS on ${SIPS_PORT} will be disabled."
   warn "Run 13-tls-certs.sh, then re-run this step."
 fi
 

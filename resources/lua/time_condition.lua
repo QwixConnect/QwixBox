@@ -9,23 +9,23 @@
   Usage:  <action application="lua" data="time_condition.lua <domain> <id> [depth]"/>
 --]]
 
-local voip = require "voip"
+local qwixbox = require "qwixbox"
 
 local domain, id, depth = argv[1], argv[2], tonumber(argv[3] or "0")
 
 if not session or not session:ready() then return end
 if not domain or not id then
-  voip.log("time_condition", "err", "usage: time_condition.lua <domain> <id>")
+  qwixbox.log("time_condition", "err", "usage: time_condition.lua <domain> <id>")
   session:hangup("NORMAL_TEMPORARY_FAILURE")
   return
 end
 
-local cond = voip.fetch("tc", domain, id)
+local cond = qwixbox.fetch("tc", domain, id)
 if not cond then
   -- The cache is authoritative here; falling back to Postgres mid-call would mean a database
   -- round trip the caller waits through. Failing to the no-match branch is not safe either -
   -- we do not know what it is - so this is one of the few places that hangs up.
-  voip.log("time_condition", "err", "no time condition %s@%s in cache", id, domain)
+  qwixbox.log("time_condition", "err", "no time condition %s@%s in cache", id, domain)
   session:hangup("NORMAL_TEMPORARY_FAILURE")
   return
 end
@@ -50,7 +50,7 @@ local function now_in(tz)
   --[[ Unknown zone name, or the API is missing. Fall back to the server clock rather than
        failing the call, but say so loudly - after-hours routing that is quietly an hour out is
        the kind of bug that gets noticed by a customer's customer, not by us. ]]
-  voip.log("time_condition", "warning",
+  qwixbox.log("time_condition", "warning",
     "timezone '%s' did not resolve (%s) - falling back to the server clock",
     zone, tostring(stamp))
   local t = os.date("*t")
@@ -91,7 +91,7 @@ for _, rule in ipairs(cond.rules or {}) do
   end
 end
 
-voip.log("time_condition", "info", "%s: %s (%s %s in %s) -> %s branch",
+qwixbox.log("time_condition", "info", "%s: %s (%s %s in %s) -> %s branch",
   cond.name, matched and "MATCH" or "no match", today, hhmm, cond.timezone,
   matched and tostring(cond.matchType) or tostring(cond.noMatchType))
 
@@ -99,10 +99,10 @@ local dtype = matched and cond.matchType or cond.noMatchType
 local did = matched and cond.matchId or cond.noMatchId
 
 if not dtype then
-  voip.log("time_condition", "warning", "%s has no %s destination configured",
+  qwixbox.log("time_condition", "warning", "%s has no %s destination configured",
     cond.name, matched and "match" or "no-match")
   session:hangup("UNALLOCATED_NUMBER")
   return
 end
 
-voip.go(session, domain, dtype, did, depth)
+qwixbox.go(session, domain, dtype, did, depth)

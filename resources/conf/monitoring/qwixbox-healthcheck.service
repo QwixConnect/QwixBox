@@ -1,0 +1,10 @@
+[Unit]
+# Managed by the Qwixbox installer.
+Description=Qwixbox health check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/qwixbox-healthcheck
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=qwixbox-health

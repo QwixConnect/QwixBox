@@ -81,7 +81,7 @@ function Login() {
       <Card withBorder shadow="sm" p="xl" w={400} component="form" onSubmit={submit}>
         <Stack>
           <div>
-            <Title order={3}>VoIP PBX</Title>
+            <Title order={3}>Qwixbox</Title>
             <Text size="sm" c="dimmed">
               Sign in to the admin portal.
             </Text>

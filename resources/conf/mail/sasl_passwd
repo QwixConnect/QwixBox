@@ -1,0 +1,2 @@
+# Managed by the Qwixbox installer. Relay credentials - 0600, and postmap'd to a .db beside it.
+[@SMTP_HOST@]:@SMTP_PORT@ @SMTP_USER@:@SMTP_PASSWORD@

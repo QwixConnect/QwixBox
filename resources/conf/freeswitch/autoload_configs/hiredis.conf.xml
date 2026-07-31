@@ -1,5 +1,5 @@
 <configuration name="hiredis.conf" description="mod_hiredis">
-  <!-- Managed by the VoIP PBX installer.
+  <!-- Managed by the Qwixbox installer.
 
        timeout_ms is deliberately tight. hiredis_profile_execute_sync is synchronous, so a Redis
        call from Lua blocks call setup; 200ms bounds that, and the handler falls through to

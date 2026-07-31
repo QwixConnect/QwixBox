@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by the VoIP PBX installer.
+# Managed by the Qwixbox installer.
 set -uo pipefail
 
 PREFIX=/usr/local/freeswitch
@@ -10,7 +10,7 @@ if command -v kamctl >/dev/null 2>&1; then
   su - postgres -c "psql -q -d kamailio -c \"DELETE FROM location WHERE expires < NOW() - INTERVAL '1 day'\"" 2>/dev/null || true
 fi
 
-### CDR retention. Adjust CDR_KEEP_DAYS in /etc/voip-pbx/config.env - and check what your
+### CDR retention. Adjust CDR_KEEP_DAYS in /etc/qwixbox/config.env - and check what your
 ### jurisdiction requires before shortening it.
 find "$PREFIX/log/cdr-csv" -name '*.csv.*' -mtime +@CDR_KEEP_DAYS@ -delete 2>/dev/null || true
 
@@ -19,11 +19,11 @@ find "$PREFIX/recordings" -type f -mtime +@RECORDING_KEEP_DAYS@ -delete 2>/dev/n
 find "$PREFIX/recordings" -type d -empty -delete 2>/dev/null || true
 
 ### FreeSWITCH's core db accumulates dead rows from every call leg.
-su - postgres -c "psql -q -d voipapi -c 'VACUUM ANALYZE'" 2>/dev/null || true
+su - postgres -c "psql -q -d qwixbox -c 'VACUUM ANALYZE'" 2>/dev/null || true
 su - postgres -c "psql -q -d kamailio -c 'VACUUM ANALYZE'" 2>/dev/null || true
 
 ### Old config backups left by write_file across many installer runs.
-find /etc/voip-pbx /etc/kamailio /usr/local/freeswitch/conf \
+find /etc/qwixbox /etc/kamailio /usr/local/freeswitch/conf \
   -name '*.bak-*' -mtime +30 -delete 2>/dev/null || true
 
 echo "maintenance complete"

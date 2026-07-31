@@ -37,7 +37,7 @@ local caller_name = session:getVariable("caller_id_name") or ""
 
 --[[ Storage. One directory per day keeps a busy tenant's fax spool navigable, and the
      filename carries the UUID so a TIFF can always be traced back to its channel. ]]
-local spool = os.getenv("VOIP_FAX_SPOOL") or "/var/spool/voip-fax"
+local spool = os.getenv("QWIXBOX_FAX_SPOOL") or "/var/spool/qwixbox-fax"
 local day = os.date("%Y-%m-%d")
 local dir = string.format("%s/%s/%s", spool, domain, day)
 -- 2770 with the group inherited: the API (a different user) writes the converted PDF into
@@ -86,8 +86,8 @@ log(ok and "notice" or "warning",
      Deliberately fire-and-forget with a short timeout: the caller has already hung up by the
      time this runs, and the TIFF is safely on disk either way. An API outage must not turn a
      received fax into a lost one - the file is on disk and reconcilable. ]]
-local api = os.getenv("VOIP_API_BASE") or "http://127.0.0.1:3000"
-local secret = os.getenv("VOIP_FS_GATEWAY_SECRET") or ""
+local api = os.getenv("QWIXBOX_API_BASE") or "http://127.0.0.1:3000"
+local secret = os.getenv("QWIXBOX_FS_GATEWAY_SECRET") or ""
 
 local payload = string.format(
   '{"callUuid":"%s","domain":"%s","did":"%s","callerNumber":"%s","callerName":"%s",' ..

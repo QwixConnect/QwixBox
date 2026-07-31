@@ -13,22 +13,22 @@ load_config
 
 TPL="$REPO_DIR/resources/conf/backups"
 
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/voip-pbx}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/qwixbox}"
 BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
 
 install -d -m 0700 -o root -g root "$BACKUP_DIR"
 
-deploy_template "$TPL/voip-backup" /usr/local/sbin/voip-backup 0750 || true
+deploy_template "$TPL/qwixbox-backup" /usr/local/sbin/qwixbox-backup 0750 || true
 
-deploy_template "$TPL/voip-backup.service" /etc/systemd/system/voip-backup.service 0644 || true
+deploy_template "$TPL/qwixbox-backup.service" /etc/systemd/system/qwixbox-backup.service 0644 || true
 
-deploy_template "$TPL/voip-backup.timer" /etc/systemd/system/voip-backup.timer 0644 || true
+deploy_template "$TPL/qwixbox-backup.timer" /etc/systemd/system/qwixbox-backup.timer 0644 || true
 
 systemctl daemon-reload
-systemctl enable --now voip-backup.timer >/dev/null 2>&1 || true
+systemctl enable --now qwixbox-backup.timer >/dev/null 2>&1 || true
 
 info "Running an initial backup to prove it works"
-if /usr/local/sbin/voip-backup; then
+if /usr/local/sbin/qwixbox-backup; then
   ok "Backup verified"
 else
   warn "The first backup reported errors - check the output above."

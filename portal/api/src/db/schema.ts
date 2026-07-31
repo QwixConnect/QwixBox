@@ -13,7 +13,7 @@
  * source of truth and Kamailio's tables are derived.
  *
  * Secrets: columns suffixed `Enc` hold ciphertext, encrypted by the API with a key from
- * /etc/voip-pbx/config.env. Plaintext SIP passwords never leave the API - the Kamailio
+ * /etc/qwixbox/config.env. Plaintext SIP passwords never leave the API - the Kamailio
  * projection decrypts, computes the HA1 digest, and writes only that.
  */
 import { relations } from "drizzle-orm";
