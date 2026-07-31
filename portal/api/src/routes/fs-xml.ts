@@ -127,7 +127,7 @@ async function handleDirectory(form: Record<string, unknown>): Promise<string> {
     "directory",
     `    <domain name="${escapeXml(domain)}">
       <params>
-        <param name="dial-string" value="{^^:sip_invite_domain=\${dialed_domain}:presence_id=\${dialed_user}@\${dialed_domain}}\${sofia_contact(\${dialed_user}@\${dialed_domain})}"/>
+        <param name="dial-string" value="{^^|sip_invite_domain=\${dialed_domain}|presence_id=\${dialed_user}@\${dialed_domain}|sip_route_uri=sip:${escapeXml(env.kamEgress)}}sofia/external/\${dialed_user}@\${dialed_domain}"/>
       </params>
       <user id="${escapeXml(ext.number)}" cacheable="${cacheMs}">
         <params>

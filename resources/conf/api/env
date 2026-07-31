@@ -25,6 +25,12 @@ AUTH_SECRET=@AUTH_SECRET@
 PBX_FQDN=@PBX_FQDN@
 PBX_SIP_DOMAIN=@PBX_SIP_DOMAIN@
 
+# Kamailio's egress listener. The directory this API serves as the mod_xml_curl fallback has to
+# hand FreeSWITCH a dial-string pointing back here, because endpoints register to Kamailio and
+# FreeSWITCH holds no registrations of its own. Must match what 31-freeswitch-config.sh puts in
+# QWIXBOX_KAM_EGRESS for the Lua tier - the two serve the same directory and cannot disagree.
+KAM_EGRESS=@FS_HOST@:@KAM_EGRESS_PORT@
+
 # Sender for fax-to-email. Matches what steps/15-mail.sh gave Postfix and what FreeSWITCH's
 # voicemail templates use, so every notification the platform sends comes from one address that
 # SPF and DKIM can be aligned to.

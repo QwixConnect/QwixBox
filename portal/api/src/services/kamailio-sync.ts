@@ -152,20 +152,33 @@ export async function removeTrunkAddress(trunkId: string): Promise<boolean> {
  * exposed. Best-effort: a failure here means stale in-memory data, not a broken write.
  */
 export async function reloadKamailio(): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(["kamcmd", "permissions.addressReload"], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    await proc.exited;
-    const dispatcher = Bun.spawn(["kamcmd", "dispatcher.reload"], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    await dispatcher.exited;
-    return proc.exitCode === 0;
-  } catch (err) {
-    console.warn("[kamailio-sync] kamcmd reload failed:", (err as Error).message);
-    return false;
+  /* `domain` is here for the same reason as the other two, and matters more than it looks: the
+     egress pass uses is_domain_local() to tell an internal call from a carrier-bound one, so a
+     tenant whose domain is not in the cache has every call to its extensions treated as outbound
+     and killed looking for a trunk. */
+  const commands = ["permissions.addressReload", "dispatcher.reload", "domain.reload"];
+  let ok = true;
+
+  for (const command of commands) {
+    try {
+      const proc = Bun.spawn(["kamcmd", command], { stdout: "pipe", stderr: "pipe" });
+      const stderr = await new Response(proc.stderr).text();
+      await proc.exited;
+
+      /* kamcmd exits 0 even when it cannot open the control socket, so the exit code alone
+         reports success for a reload that never happened. That is exactly how this went
+         unnoticed: the API's service account was not in the kamailio group, every reload failed
+         with "Permission denied", and nothing said so - a trunk or tenant change simply did not
+         take effect until Kamailio was restarted. Inspect the output, not the status. */
+      if (proc.exitCode !== 0 || /ERROR|Permission denied/i.test(stderr)) {
+        console.warn(`[kamailio-sync] ${command} failed: ${stderr.trim() || `exit ${proc.exitCode}`}`);
+        ok = false;
+      }
+    } catch (err) {
+      console.warn(`[kamailio-sync] ${command} failed:`, (err as Error).message);
+      ok = false;
+    }
   }
+
+  return ok;
 }

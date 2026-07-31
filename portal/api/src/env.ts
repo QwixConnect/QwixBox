@@ -40,6 +40,13 @@ export const env = {
   pbxSipDomain: optional("PBX_SIP_DOMAIN", "localhost"),
 
   /**
+   * Kamailio's egress listener, used in the directory dial-string this API serves as the
+   * mod_xml_curl fallback. Endpoints register to Kamailio, so FreeSWITCH cannot reach them
+   * directly and sends calls for an extension back out to Kamailio instead.
+   */
+  kamEgress: optional("KAM_EGRESS", "127.0.0.1:5070"),
+
+  /**
    * Key for the `*Enc` columns. Distinct from the auth secret: rotating a session secret
    * should not make every stored SIP password undecryptable.
    */

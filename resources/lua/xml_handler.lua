@@ -150,16 +150,37 @@ function M.directory(req, p)
   local cached = redis_get("qwixbox:dir:" .. domain .. ":" .. user)
   if cached then
     debug("directory hit %s@%s", user, domain)
+
+    --[[ Endpoints register to KAMAILIO, not to us: route[REGISTRAR] saves the contact into
+         Kamailio's location table and never forwards the REGISTER here. So FreeSWITCH holds no
+         registrations at all, and the stock dial-string - ${sofia_contact(...)} - resolves to
+         nothing. Every call to an extension failed with USER_NOT_REGISTERED: colleague to
+         colleague, and every inbound DID once it reached its destination.
+
+         Instead, send the INVITE back out to Kamailio with the request URI left as
+         user@domain, and let it do the location lookup it is already the authority for.
+         sip_route_uri sets where the packet goes without rewriting the R-URI, which is what
+         Kamailio matches on.
+
+         The separator is declared as '|' (^^|) rather than the usual ':' because
+         sip_route_uri's value contains colons. ]]
+    local egress = os.getenv("QWIXBOX_KAM_EGRESS") or "127.0.0.1:5070"
+    local dial_string = string.format(
+      "{^^|sip_invite_domain=${dialed_domain}|presence_id=${dialed_user}@${dialed_domain}" ..
+      "|sip_route_uri=sip:%s}sofia/external/${dialed_user}@${dialed_domain}",
+      egress)
+
     return document(
       "directory",
       string.format(
         [[    <domain name="%s">
       <params>
-        <param name="dial-string" value="{^^:sip_invite_domain=${dialed_domain}:presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(${dialed_user}@${dialed_domain})}"/>
+        <param name="dial-string" value="%s"/>
       </params>
 %s
     </domain>]],
         xml_escape(domain),
+        xml_escape(dial_string),
         cached
       )
     )

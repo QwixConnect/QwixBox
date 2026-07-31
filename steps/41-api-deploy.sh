@@ -24,6 +24,20 @@ if ! id -u "$API_USER" >/dev/null 2>&1; then
   info "Created service account: $API_USER"
 fi
 
+### The API reloads Kamailio's cached tables (addresses, dispatcher, domains) with kamcmd over
+### the binrpc socket, which is owned by kamailio:kamailio. Without this membership every reload
+### fails with "Permission denied" - and kamcmd exits 0 regardless, so nothing surfaces it. The
+### visible symptom is a new tenant or a changed trunk not taking effect until Kamailio restarts.
+###
+### Guarded on the group existing: on a split deployment the API can run on a host with no
+### Kamailio, where there is nothing to reload and nothing to join.
+if getent group kamailio >/dev/null 2>&1; then
+  if ! id -nG "$API_USER" 2>/dev/null | tr ' ' '\n' | grep -qx kamailio; then
+    usermod -a -G kamailio "$API_USER"
+    info "Added $API_USER to the kamailio group (for kamcmd reloads)"
+  fi
+fi
+
 ### --- Code ---------------------------------------------------------------------------------
 
 install -d -m 0750 -o "$API_USER" -g "$API_USER" "$API_DIR"
