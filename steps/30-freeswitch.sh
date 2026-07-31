@@ -69,6 +69,35 @@ sudo ldconfig
 
 ### Install freeswitch
 cd "$BUILD_DIR/freeswitch"
+
+### --- mod_hiredis format-string fix ---------------------------------------------------------
+###
+### Upstream passes the Redis reply straight into write_function, which is printf-style - so the
+### reply IS the format string:
+###
+###     stream->write_function(stream, response);
+###
+### Two consequences, both real here. Any cached value containing '%' comes back corrupted: an
+### outbound route pattern "^1%d%d..." is returned with the %d sequences expanded into garbage
+### numbers, so it never matches and every outbound call dies as UNALLOCATED_NUMBER. And it is a
+### format-string vulnerability - %n writes to memory - reachable from data a tenant controls,
+### because route patterns, extension names and caller IDs all flow through this cache.
+###
+### Patched with a grep guard rather than a .patch file so that a re-run over an already-patched
+### tree is a no-op and an upstream fix makes this loudly skip instead of silently reversing.
+HIREDIS_SRC="$BUILD_DIR/freeswitch/src/mod/applications/mod_hiredis/mod_hiredis.c"
+if [ -f "$HIREDIS_SRC" ]; then
+  if grep -q 'write_function(stream, response);' "$HIREDIS_SRC"; then
+    sudo sed -i 's|write_function(stream, response);|write_function(stream, "%s", response);|' "$HIREDIS_SRC"
+    ok "Patched mod_hiredis format-string bug"
+  elif grep -q 'write_function(stream, "%s", response);' "$HIREDIS_SRC"; then
+    ok "mod_hiredis format-string fix already present"
+  else
+    warn "mod_hiredis.c does not match either form - upstream may have changed it."
+    warn "  Check that the Redis reply is not being used as a printf format string."
+  fi
+fi
+
 sudo ./bootstrap.sh -j
 
 ### Modules to build, over and above the stock modules.conf selection. The path prefixes must

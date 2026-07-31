@@ -236,6 +236,18 @@ local function build_outbound(route, destination, tenant)
   table.insert(actions, action("set", "sip_h_X-Auth-User=${sip_auth_username}"))
   table.insert(actions, action("set", "sip_h_X-Correlation-ID=${uuid}"))
 
+  --[[ The carrier this route selected. Route matching happened here, against a regex and with
+       the digit translation below already applied - so Kamailio must NOT decide again. It has
+       neither the original dialled number nor the regex, and a second decision made on
+       different inputs is a second, different decision.
+
+       X-Trunk-Target is what Kamailio relays to; X-Trunk-ID is for attribution and logging. ]]
+  local transport = route.trunk.transport or "udp"
+  table.insert(actions, action("set", "sip_h_X-Trunk-ID=" .. route.trunk.id))
+  table.insert(actions, action("set", string.format(
+    "sip_h_X-Trunk-Target=%s:%d;transport=%s",
+    route.trunk.host, route.trunk.port or 5060, transport)))
+
   if route.isEmergency then
     -- Must be a SIP header, not just a channel variable: Kamailio's egress pass reads
     -- $hdr(X-Emergency) to skip the fraud checks, and a channel variable never reaches the

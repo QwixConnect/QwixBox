@@ -56,7 +56,9 @@ else
 
   ### standard covers version/usrloc/subscriber-adjacent core tables. The rest map one-to-one
   ### onto loadmodule lines: drop a module and its schema stops being needed.
-  KAM_SCHEMAS="standard auth_db usrloc domain permissions dispatcher drouting dialog acc"
+  ### No drouting: carrier selection happens in FreeSWITCH's Lua handler, so the dr_* tables
+  ### would be created and never written. See the "Carrier routing" note in kamailio.cfg.
+  KAM_SCHEMAS="standard auth_db usrloc domain permissions dispatcher dialog acc"
 
   info "Applying the Kamailio schema"
   for schema in $KAM_SCHEMAS; do

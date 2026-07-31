@@ -8,9 +8,16 @@
  *
  * Relationship to Kamailio's own database: Kamailio owns its schema (created by kamdbctl) in
  * a SEPARATE database. Nothing here lives there. The API projects a subset of these tables
- * into Kamailio's operational tables (`subscriber`, `address`, `dispatcher`, `dr_gateways`,
- * `dr_rules`) - see services/kamailio-sync.ts. That projection is one-way: this schema is the
- * source of truth and Kamailio's tables are derived.
+ * into Kamailio's operational tables (`subscriber`, `domain`, `address`) - see
+ * services/kamailio-sync.ts. That projection is one-way: this schema is the source of truth
+ * and Kamailio's tables are derived.
+ *
+ * Carrier selection is deliberately NOT projected. Outbound routing happens in FreeSWITCH's
+ * Lua handler, which matches `outboundRoute.pattern` against the number as dialled; the chosen
+ * trunk reaches Kamailio in an X-Trunk-Target header. An earlier version of this comment
+ * claimed the projection also wrote `dr_gateways` and `dr_rules`. It never did, and because
+ * kamailio.cfg called do_routing() against those empty tables, every outbound call answered
+ * 404. Do not reintroduce that path without removing the Lua one.
  *
  * Secrets: columns suffixed `Enc` hold ciphertext, encrypted by the API with a key from
  * /etc/qwixbox/config.env. Plaintext SIP passwords never leave the API - the Kamailio
@@ -337,9 +344,6 @@ export const trunk = pgTable(
      * ITSPs do this for SMB resellers, and it removes the STI-CA procurement entirely.
      */
     carrierSigns: boolean("carrier_signs").default(false).notNull(),
-
-    /** Set by kamailio-sync when this trunk is projected into Kamailio's dr_gateways. */
-    kamGatewayId: integer("kam_gateway_id"),
 
     enabled: boolean("enabled").default(true).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
