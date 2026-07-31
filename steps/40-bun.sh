@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 ### Bun runtime, installed system-wide.
+###
+# step-inputs: resources/conf/bun
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 require_root
 load_config
+
+TPL="$REPO_DIR/resources/conf/bun"
 
 BUN_INSTALL="/usr/local/lib/bun"
 BUN_BIN="/usr/local/bin/bun"
@@ -26,14 +30,7 @@ else
 fi
 
 ### Make it available to non-login shells and systemd units without each needing PATH tweaks.
-write_file /etc/profile.d/bun.sh 0644 <<EOF || true
-# Managed by the VoIP PBX installer.
-export BUN_INSTALL="${BUN_INSTALL}"
-case ":\$PATH:" in
-  *":\$BUN_INSTALL/bin:"*) ;;
-  *) export PATH="\$BUN_INSTALL/bin:\$PATH" ;;
-esac
-EOF
+deploy_template "$TPL/bun.sh" /etc/profile.d/bun.sh 0644 || true
 
 "$BUN_BIN" --version >/dev/null || die "Bun is installed but not runnable."
 ok "Bun ready"

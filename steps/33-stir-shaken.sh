@@ -12,11 +12,15 @@
 ###
 ### Disabled by default: signing also requires a certificate issued by an STI-CA authorised
 ### by the policy administrator, which is a procurement exercise, not an install step.
+###
+# step-inputs: resources/conf/stir-shaken
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 require_root
 load_config
+
+TPL="$REPO_DIR/resources/conf/stir-shaken"
 
 if [ "${ENABLE_STIR_SHAKEN:-0}" != "1" ]; then
   info "ENABLE_STIR_SHAKEN is not 1 - skipping."
@@ -137,45 +141,25 @@ if [ -z "$(ls -A "$CA_DIR" 2>/dev/null)" ]; then
   warn "Add the roots you trust (from the STI-PA trust list) as .pem files there."
 fi
 
-write_file /etc/voip-pbx/stir/README 0644 <<EOF || true
-STIR/SHAKEN material for ${PBX_FQDN}.
+# shellcheck disable=SC2034  # read by name from the template
+STIR_X5U_DISPLAY="${STIR_SHAKEN_X5U:-<set STIR_SHAKEN_X5U in /etc/voip-pbx/config.env>}"
 
-  signing.key   EC (prime256v1) private key issued with your SP certificate. Mode 0640.
-  signing.pem   The SP certificate itself, published publicly at:
-                ${STIR_SHAKEN_X5U:-<set STIR_SHAKEN_X5U in /etc/voip-pbx/config.env>}
-  ca/           STI-CA root certificates you trust for verifying inbound calls.
-
-Attestation levels sent on outbound calls (STIR_SHAKEN_ATTEST):
-  A  You authenticated the caller AND they are authorised to use that number.
-  B  You authenticated the caller but cannot confirm the number is theirs.
-  C  The call entered your network from elsewhere; you can only identify the gateway.
-
-Claiming A for traffic you cannot actually vouch for is a compliance problem, not a
-configuration shortcut.
-EOF
+deploy_template "$TPL/README" /etc/voip-pbx/stir/README 0644 || true
 
 ### --- Kamailio configuration fragment ---------------------------------------------------------
 
 ### Written as a separate file that 34-kamailio-config.sh imports, so the routing logic can
 ### live alongside the feature rather than being conditionally spliced into the main config.
-write_file /etc/kamailio/stirshaken.cfg 0640 root:kamailio <<EOF || true
-# Managed by the VoIP PBX installer. Imported by kamailio.cfg.
+### The signing key is only configured once a certificate exists; until then the module is
+### loaded for verification alone. Empty leaves a blank line, as the substitution did.
+# shellcheck disable=SC2034  # read by name from the template
+if [ "$SIGNING_READY" = "1" ]; then
+  SIGNING_KEY_PARAM="modparam(\"stirshaken\", \"as_default_key\", \"${SS_KEY}\")"
+else
+  SIGNING_KEY_PARAM=""
+fi
 
-loadmodule "stirshaken.so"
-
-modparam("stirshaken", "vs_verify_x509_cert_path", 1)
-modparam("stirshaken", "vs_ca_dir", "${CA_DIR}")
-modparam("stirshaken", "vs_cache_certificates", 1)
-modparam("stirshaken", "vs_cache_expire_s", 3600)
-# Reject a PASSporT whose iat is far from now - this is the replay defence.
-modparam("stirshaken", "vs_identity_expire_s", 60)
-modparam("stirshaken", "vs_connect_timeout_s", 3)
-
-$( [ "$SIGNING_READY" = "1" ] && cat <<INNER
-modparam("stirshaken", "as_default_key", "${SS_KEY}")
-INNER
-)
-EOF
+deploy_template "$TPL/stirshaken.cfg" /etc/kamailio/stirshaken.cfg 0640 root:kamailio || true
 
 systemctl is-active --quiet kamailio && restart_service kamailio || true
 

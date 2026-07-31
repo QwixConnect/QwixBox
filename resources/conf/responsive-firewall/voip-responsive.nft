@@ -1,0 +1,19 @@
+#!/usr/sbin/nft -f
+# Managed by the VoIP PBX installer.
+#
+# Populated at runtime by voip-fw-sync from Kamailio's live registrations.
+
+table inet filter {
+    # IPs that have successfully registered. Refreshed on every sync; entries expire if an
+    # endpoint stops registering.
+    set sip_known {
+        type ipv4_addr
+        flags timeout
+        timeout 1h
+    }
+
+    # Trunks and gateways: long-lived, authenticated by IP rather than by registration.
+    set sip_trusted {
+        type ipv4_addr
+    }
+}

@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 ### nginx: TLS termination for the API and the ACME webroot for renewals.
+###
+# step-inputs: resources/conf/nginx
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 require_root
 load_config
+
+TPL="$REPO_DIR/resources/conf/nginx"
 
 apt_install nginx
 
@@ -26,11 +30,7 @@ usermod -aG ssl-cert www-data 2>/dev/null || true
 ### ACME renewals switch from standalone to webroot now that nginx owns :80, so certbot never
 ### needs to stop the web server to renew.
 install -d -m 0755 /var/www/acme
-write_file /etc/letsencrypt/cli.ini 0644 <<'EOF' || true
-# Managed by the VoIP PBX installer.
-authenticator = webroot
-webroot-path = /var/www/acme
-EOF
+deploy_template "$TPL/letsencrypt-cli.ini" /etc/letsencrypt/cli.ini || true
 
 rm -f /etc/nginx/sites-enabled/default
 
@@ -47,194 +47,16 @@ for directive in $NGINX_OVERRIDDEN; do
   fi
 done
 
-write_file /etc/nginx/conf.d/00-hardening.conf 0644 <<'EOF' || true
-# Managed by the VoIP PBX installer.
-#
-# The distro's own copies of these directives are commented out of nginx.conf by
-# 42-nginx.sh - nginx rejects a duplicate rather than letting the later one win.
-server_tokens off;
+deploy_template "$TPL/conf.d/00-hardening.conf" /etc/nginx/conf.d/00-hardening.conf || true
 
-# TLS policy, applied to every server block.
-ssl_protocols TLSv1.2 TLSv1.3;
-ssl_prefer_server_ciphers off;
-ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
-ssl_session_timeout 1d;
-ssl_session_cache shared:SSL:10m;
-ssl_session_tickets off;
-ssl_stapling on;
-ssl_stapling_verify on;
-
-# Rate limit zones. Applied per-location below; login endpoints get the strict one.
-limit_req_zone $binary_remote_addr zone=api_general:10m rate=20r/s;
-limit_req_zone $binary_remote_addr zone=api_auth:10m rate=5r/m;
-EOF
-
-write_file /etc/nginx/sites-available/voip-api 0644 <<EOF || true
-# Managed by the VoIP PBX installer.
-
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${PBX_FQDN};
-
-    # ACME validation must stay reachable over plain HTTP for renewals.
-    location /.well-known/acme-challenge/ {
-        root /var/www/acme;
-    }
-
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
-    server_name ${PBX_FQDN};
-
-    ssl_certificate     ${TLS_DIR}/fullchain.pem;
-    ssl_certificate_key ${TLS_DIR}/privkey.pem;
-
-    # HSTS. Only safe because everything here is served over TLS.
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-
-    # Do not let a large body tie up the API.
-    client_max_body_size 10m;
-    client_body_timeout 30s;
-
-    access_log /var/log/nginx/voip-api.access.log;
-    error_log  /var/log/nginx/voip-api.error.log warn;
-
-    location /.well-known/acme-challenge/ {
-        root /var/www/acme;
-    }
-
-    # Authentication endpoints are the ones worth brute forcing, so they are limited far
-    # more tightly than ordinary API traffic. better-auth mounts under /api/auth.
-    # There is no self-service registration: accounts are created by an operator with
-    # src/cli/create-user.ts. Returning 404 rather than 403 keeps the endpoint's existence
-    # unadvertised. The API refuses it as well (databaseHooks in portal/api/src/auth.ts) - this
-    # is the edge layer, that one catches anything reaching the API directly on loopback.
-    location ~ ^/api/auth/sign-up {
-        return 404;
-    }
-
-    location ~ ^/api/(auth|login|token) {
-        limit_req zone=api_auth burst=5 nodelay;
-        proxy_pass http://127.0.0.1:${API_PORT};
-        include /etc/nginx/proxy_params;
-    }
-
-    location /api/ {
-        limit_req zone=api_general burst=40 nodelay;
-        proxy_pass http://127.0.0.1:${API_PORT};
-        include /etc/nginx/proxy_params;
-    }
-
-    # The API's health endpoint. Without this it fell through to the SPA below and returned
-    # HTML, which broke the portal's own health badge - it calls /health and got a document.
-    location = /health {
-        proxy_pass http://127.0.0.1:${API_PORT};
-        include /etc/nginx/proxy_params;
-        access_log off;
-    }
-
-    # Session probe for the auth_request below. 'internal' means it cannot be requested
-    # directly - only nginx may invoke it.
-    location = /_session {
-        internal;
-        proxy_pass http://127.0.0.1:${API_PORT}/internal/session;
-        include /etc/nginx/proxy_params;
-        # No body is needed to check a cookie, and not forwarding one avoids buffering
-        # uploads twice on every request.
-        proxy_pass_request_body off;
-        proxy_set_header Content-Length "";
-    }
-
-    # The admin portal: a static Vite bundle published by 43-portal-web.sh.
-    root ${WEB_ROOT};
-    index index.html;
-
-    # Hashed asset filenames are content-addressed, so they can be cached indefinitely.
-    location /assets/ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-        try_files \$uri =404;
-    }
-
-    # Always reachable, because these are what an anonymous visitor needs to reach the sign-in
-    # page at all: the entry point, the login route itself, and the favicon.
-    #
-    # An exact-match location for "/" is required. Without it the site root falls into the
-    # gated prefix location below and an anonymous visitor gets 404 at the site root -
-    # locked out with no way to reach the login page. The SPA boots here and its own guard
-    # sends them to /login.
-    location = / {
-        try_files /index.html =404;
-        add_header Cache-Control "no-store, must-revalidate";
-    }
-
-    location = /login {
-        try_files /index.html =404;
-        add_header Cache-Control "no-store, must-revalidate";
-    }
-
-    location = /favicon.svg {
-        try_files \$uri =404;
-    }
-
-    # TanStack Router owns the client-side routes, so any unmatched path has to fall through
-    # to index.html or a refresh on a deep link returns 404.
-    #
-    # Gated on a valid session. auth_request is what lets both requirements hold at once: a
-    # signed-in operator refreshing on /trunks still gets the app, while an anonymous visitor
-    # gets 404 and cannot enumerate the console. A plain 404 on app paths would have broken
-    # refresh and bookmarks for everyone.
-    location / {
-        auth_request /_session;
-        error_page 401 = @anon;
-
-        try_files \$uri \$uri/ /index.html;
-        # index.html itself must never be cached, or clients keep loading a bundle whose
-        # hashed assets no longer exist after a deploy.
-        add_header Cache-Control "no-store, must-revalidate";
-    }
-
-    # 404, not a redirect to /login: a redirect would confirm which paths exist. The client-side
-    # guard in routes/_app.tsx is what actually walks a user to the login page.
-    location @anon {
-        return 404;
-    }
-}
-EOF
+deploy_template "$TPL/sites-available/voip-api" /etc/nginx/sites-available/voip-api || true
 
 ### Debian ships proxy_params, but not with WebSocket upgrade handling - which SIP over WSS
 ### and any realtime API endpoint both need.
-write_file /etc/nginx/proxy_params 0644 <<'EOF' || true
-# Managed by the VoIP PBX installer.
-proxy_http_version 1.1;
-proxy_set_header Host $host;
-proxy_set_header X-Real-IP $remote_addr;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-proxy_set_header X-Forwarded-Proto $scheme;
-proxy_set_header Upgrade $http_upgrade;
-proxy_set_header Connection $connection_upgrade;
-proxy_read_timeout 300s;
-proxy_send_timeout 300s;
-EOF
+deploy_template "$TPL/proxy_params" /etc/nginx/proxy_params || true
 
 ### $connection_upgrade must be defined at http scope for the above to work.
-write_file /etc/nginx/conf.d/01-upgrade-map.conf 0644 <<'EOF' || true
-# Managed by the VoIP PBX installer.
-map $http_upgrade $connection_upgrade {
-    default upgrade;
-    ''      close;
-}
-EOF
+deploy_template "$TPL/conf.d/01-upgrade-map.conf" /etc/nginx/conf.d/01-upgrade-map.conf || true
 
 ln -sf /etc/nginx/sites-available/voip-api /etc/nginx/sites-enabled/voip-api
 

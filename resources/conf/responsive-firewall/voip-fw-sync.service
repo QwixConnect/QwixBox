@@ -1,0 +1,10 @@
+[Unit]
+# Managed by the VoIP PBX installer.
+Description=Sync registered SIP endpoints into the firewall
+After=kamailio.service postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/voip-fw-sync
+StandardOutput=journal
+SyslogIdentifier=voip-fw-sync

@@ -1,0 +1,6 @@
+# Managed by the VoIP PBX installer.
+export BUN_INSTALL="@BUN_INSTALL@"
+case ":$PATH:" in
+  *":$BUN_INSTALL/bin:"*) ;;
+  *) export PATH="$BUN_INSTALL/bin:$PATH" ;;
+esac

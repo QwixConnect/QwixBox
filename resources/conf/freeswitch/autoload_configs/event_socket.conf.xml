@@ -1,0 +1,14 @@
+<configuration name="event_socket.conf" description="Socket Client">
+  <!-- Managed by the VoIP PBX installer.
+
+       The stock config listens on "::". On a host without IPv6 that fails to bind outright, and
+       where it does work it exposes the control socket far wider than intended. ESL is a full
+       remote-control channel for the switch - it belongs on loopback with a real password. -->
+  <settings>
+    <param name="nat-map" value="false"/>
+    <param name="listen-ip" value="127.0.0.1"/>
+    <param name="listen-port" value="8021"/>
+    <param name="password" value="@FS_ESL_PASSWORD@"/>
+    <param name="apply-inbound-acl" value="loopback.auto"/>
+  </settings>
+</configuration>

@@ -5,11 +5,15 @@
 ### Kamailio proxying signalling the two endpoints cannot generally reach each other
 ### directly. Without a relay the usual symptom is a call that connects with no audio, or
 ### audio in one direction only.
+###
+# step-inputs: resources/conf/rtpengine
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 require_root
 load_config
+
+TPL="$REPO_DIR/resources/conf/rtpengine"
 
 ### Debian 13 carries rtpengine in main, so no third-party repo or source build is needed.
 apt_install rtpengine-daemon rtpengine-utils
@@ -24,10 +28,7 @@ KERNEL_TABLE=0
 if apt_install rtpengine-kernel-dkms 2>/dev/null && modprobe xt_RTPENGINE 2>/dev/null; then
   KERNEL_TABLE=1
   ok "Kernel forwarding module loaded"
-  write_file /etc/modules-load.d/rtpengine.conf 0644 <<'EOF' || true
-# Managed by the VoIP PBX installer.
-xt_RTPENGINE
-EOF
+  deploy_template "$TPL/modules-load.conf" /etc/modules-load.d/rtpengine.conf 0644 || true
 else
   warn "xt_RTPENGINE unavailable - falling back to userspace forwarding."
   warn "That is functionally correct but uses noticeably more CPU per call."
@@ -43,6 +44,7 @@ local_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')"
 ### On a cloud instance the interface holds a private address while SIP advertises the public
 ### one. rtpengine needs both so it can advertise the right address in SDP.
 public_ip="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo "")"
+# shellcheck disable=SC2034  # read by name from the template
 if [ -n "$public_ip" ] && [ "$public_ip" != "$local_ip" ]; then
   interface_spec="${local_ip}!${public_ip}"
   info "NAT detected: advertising ${public_ip}, bound to ${local_ip}"
@@ -50,44 +52,17 @@ else
   interface_spec="${local_ip}"
 fi
 
-write_file /etc/rtpengine/rtpengine.conf 0644 <<EOF || true
-# Managed by the VoIP PBX installer.
-[rtpengine]
-interface = ${interface_spec}
+### Conditional lines, built here rather than in the template. table = -1 is userspace
+### forwarding; the HTTP listener only exists for WebRTC. Both leave a blank line when off,
+### exactly as the command substitutions they replaced did.
+# shellcheck disable=SC2034  # read by name from the template
+if [ "$KERNEL_TABLE" = "1" ]; then TABLE_LINE="table = 0"; else TABLE_LINE="table = -1"; fi
+# shellcheck disable=SC2034  # read by name from the template
+if [ "${ENABLE_WEBRTC:-1}" = "1" ]; then HTTP_LISTEN="listen-http = 127.0.0.1:8080"; else HTTP_LISTEN=""; fi
+# shellcheck disable=SC2034  # read by name from the template
+NUM_THREADS="$(nproc)"
 
-# Control channel for Kamailio's rtpengine module. Loopback only.
-listen-ng = 127.0.0.1:${RTPENGINE_NG_PORT}
-
-port-min = ${RTP_PORT_MIN}
-port-max = ${RTP_PORT_MAX}
-
-$( [ "$KERNEL_TABLE" = "1" ] && echo "table = 0" || echo "table = -1" )
-
-# Hang up media for calls whose signalling vanished, so ports are not leaked forever.
-timeout = 60
-silent-timeout = 3600
-final-timeout = 21600
-
-# Delete delay of 0 frees ports immediately on BYE rather than holding them.
-delete-delay = 0
-
-# WebRTC. Browsers require DTLS-SRTP and ICE; FreeSWITCH speaks plain RTP. rtpengine bridges
-# the two, which is what lets the media server stay unaware that a leg is a browser at all.
-# The fingerprint algorithm must be one browsers accept - sha-1 is still the safe default,
-# and offering only sha-256 breaks older clients.
-dtls-passive = true
-$( [ "${ENABLE_WEBRTC:-1}" = "1" ] && cat <<'INNER'
-listen-http = 127.0.0.1:8080
-INNER
-)
-
-log-level = 5
-log-stderr = false
-
-# graphite is deliberately absent rather than empty: rtpengine parses an empty value and
-# exits with "Invalid IP or port ''" rather than treating it as unset.
-num-threads = $(nproc)
-EOF
+deploy_template "$TPL/rtpengine.conf" /etc/rtpengine/rtpengine.conf 0644 || true
 
 ### The Debian unit reads defaults from here.
 ensure_directive /etc/default/rtpengine "RUN_RTPENGINE" "yes" "="

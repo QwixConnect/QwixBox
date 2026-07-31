@@ -1,0 +1,10 @@
+# Managed by the VoIP PBX installer.
+[kamailio-auth]
+enabled  = true
+filter   = kamailio-auth
+port     = 5060,5061
+protocol = all
+backend  = systemd
+maxretry = 5
+findtime = 10m
+bantime  = 6h

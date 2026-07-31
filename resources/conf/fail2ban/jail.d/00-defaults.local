@@ -1,0 +1,14 @@
+# Managed by the VoIP PBX installer.
+[DEFAULT]
+banaction = nftables-multiport
+banaction_allports = nftables-allports
+backend = systemd
+findtime = 10m
+bantime = 1h
+maxretry = 5
+
+# Escalating bans: repeat offenders get progressively longer time-outs, which is far more
+# effective against botnets that cycle slowly than a fixed ban.
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 7d

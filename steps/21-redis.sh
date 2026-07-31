@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 ### Redis, used by FreeSWITCH via mod_hiredis and by the API for caching.
+###
+# step-inputs: resources/conf/redis
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 require_root
 load_config
+
+TPL="$REPO_DIR/resources/conf/redis"
 
 apt_install redis-server
 
@@ -17,32 +21,7 @@ else
   redis_bind="127.0.0.1 $(internal_bind_addr) -::1"
 fi
 
-write_file /etc/redis/redis.conf.d/90-voip.conf 0640 redis:redis <<EOF || true
-# Managed by the VoIP PBX installer.
-
-# Loopback on an all-in-one box, plus the internal address when roles are split. Never a
-# public address - Redis has no business being reachable from outside the deployment.
-bind ${redis_bind}
-protected-mode yes
-port ${REDIS_PORT}
-
-requirepass ${REDIS_PASSWORD}
-
-# Cache and short-lived state, not a system of record - Postgres holds anything durable.
-# Evict the least recently used keys rather than returning errors when memory runs out.
-maxmemory 256mb
-maxmemory-policy allkeys-lru
-
-# Persistence off: everything here is reconstructible, and fsync pauses would show up as
-# latency on call setup.
-save ""
-appendonly no
-
-# Rename the commands that can wipe or reconfigure the instance out from under the services.
-rename-command FLUSHALL ""
-rename-command FLUSHDB ""
-rename-command CONFIG ""
-EOF
+deploy_template "$TPL/90-voip.conf" /etc/redis/redis.conf.d/90-voip.conf 0640 redis:redis || true
 
 ### Debian's redis.conf does not include a conf.d directory by default.
 if ! grep -q "^include /etc/redis/redis.conf.d/" /etc/redis/redis.conf; then

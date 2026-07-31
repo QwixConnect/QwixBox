@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 ### Deploy the Hono API: dependencies, Drizzle migrations, systemd unit.
+###
+# step-inputs: resources/conf/api
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 require_root
 load_config
+
+TPL="$REPO_DIR/resources/conf/api"
 
 SRC="$REPO_DIR/portal/api"
 [ -d "$SRC" ] || die "No API source at $SRC."
@@ -43,41 +47,7 @@ config_ensure_secret FS_XML_GATEWAY_SECRET 32
 
 ### Secrets live in a root-owned file the service can read but not modify, rather than being
 ### baked into the unit where they would show up in `systemctl show`.
-write_file "$API_DIR/.env" 0640 "root:$API_USER" <<EOF || true
-# Managed by the VoIP PBX installer. Regenerated on every deploy - do not hand-edit.
-NODE_ENV=production
-PORT=${API_PORT}
-HOST=127.0.0.1
-
-DATABASE_URL=postgres://${API_USER}:${API_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/voipapi
-
-# Kamailio's own database, which the API projects subscribers and trunks into. A separate
-# connection from the application database by design - different schema, different owner.
-KAMAILIO_DATABASE_URL=postgres://kamailio:${KAMAILIO_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/kamailio
-
-REDIS_URL=redis://:${REDIS_PASSWORD:-}@${REDIS_HOST}:${REDIS_PORT}
-
-FS_ESL_HOST=${FS_ESL_HOST}
-FS_ESL_PORT=${FS_ESL_PORT}
-FS_ESL_PASSWORD=${FS_ESL_PASSWORD}
-
-# Shared with FreeSWITCH's xml_curl binding (steps/31-freeswitch-config.sh) so the fallback
-# XML gateway can authenticate the machine calling it.
-FS_XML_GATEWAY_SECRET=${FS_XML_GATEWAY_SECRET}
-
-ENCRYPTION_KEY=${ENCRYPTION_KEY}
-AUTH_SECRET=${AUTH_SECRET}
-
-PBX_FQDN=${PBX_FQDN}
-PBX_SIP_DOMAIN=${PBX_SIP_DOMAIN}
-
-# Sender for fax-to-email. Matches what steps/15-mail.sh gave msmtp and what FreeSWITCH's
-# voicemail templates use, so every notification the platform sends comes from one address that
-# SPF and DKIM can be aligned to.
-SMTP_FROM=${SMTP_FROM:-pbx@${PBX_FQDN}}
-MAIL_FROM_NAME=${MAIL_FROM_NAME:-Phone System}
-MAIL_REPLY_TO=${MAIL_REPLY_TO:-}
-EOF
+deploy_template "$TPL/env" "$API_DIR/.env" 0640 "root:$API_USER" || true
 
 ### --- Dependencies and migrations ---------------------------------------------------------
 
@@ -104,9 +74,16 @@ if has_role db; then
   api_after="network-online.target postgresql.service redis-server.service"
   api_requires="Requires=postgresql.service"
 else
+  # shellcheck disable=SC2034  # read by name from the template
   api_after="network-online.target"
+  # shellcheck disable=SC2034  # read by name from the template
   api_requires="# database is remote - no local ordering dependency"
 fi
+
+### Must match the default in 31-freeswitch-config.sh: FreeSWITCH writes faxes there and the
+### unit's ReadWritePaths has to cover the same directory.
+# shellcheck disable=SC2034  # read by name from the template
+FAX_SPOOL="${FAX_SPOOL:-/var/spool/voip-fax}"
 
 ### Determine the entrypoint: package.json start script wins, else a conventional filename.
 ENTRY="server.ts"
@@ -115,50 +92,7 @@ for candidate in server.ts src/index.ts index.ts; do
 done
 info "Entrypoint: $ENTRY"
 
-write_file /etc/systemd/system/voip-api.service 0644 <<EOF || true
-[Unit]
-# Managed by the VoIP PBX installer.
-Description=VoIP PBX API
-After=${api_after}
-Wants=network-online.target
-${api_requires}
-
-[Service]
-Type=simple
-User=${API_USER}
-Group=${API_USER}
-WorkingDirectory=${API_DIR}
-EnvironmentFile=${API_DIR}/.env
-ExecStart=/usr/local/bin/bun run ${ENTRY}
-Restart=on-failure
-RestartSec=5
-
-# Bind to loopback only - nginx terminates TLS and proxies in.
-# Hardening: the API needs the network and its own directory, nothing else.
-NoNewPrivileges=true
-PrivateTmp=true
-PrivateDevices=true
-ProtectSystem=strict
-ProtectHome=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-RestrictNamespaces=true
-LockPersonality=true
-ReadWritePaths=${API_DIR}
-# The fax spool. ProtectSystem=strict makes everything outside these paths read-only, so
-# without this the TIFF-to-PDF conversion fails silently - the file is written by FreeSWITCH,
-# the API can read it, and the PDF it tries to write next simply never appears.
-ReadWritePaths=${FAX_SPOOL:-/var/spool/voip-fax}
-
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=voip-api
-
-[Install]
-WantedBy=multi-user.target
-EOF
+deploy_template "$TPL/voip-api.service" /etc/systemd/system/voip-api.service 0644 || true
 
 systemctl daemon-reload
 enable_service voip-api

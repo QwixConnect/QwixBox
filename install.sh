@@ -140,8 +140,25 @@ step_applies() {
 ### Markers record the checksum of the script that satisfied the step. If the script is later
 ### edited, the checksum no longer matches and the step runs again - which is what makes
 ### re-running the installer after a change do the right thing.
-marker_for()  { printf '%s/%s.done' "$STATE_DIR" "$1"; }
-script_hash() { sha256sum "$1" | cut -d' ' -f1; }
+###
+### A step whose real content lives in resources/ declares those paths in a `# step-inputs:`
+### line, and they are hashed alongside the script. Without that, editing a config template
+### would leave the script byte-identical, the marker would still match, and the installer would
+### skip the very step that deploys the file you just changed.
+marker_for() { printf '%s/%s.done' "$STATE_DIR" "$1"; }
+script_hash() {
+  local path="$1" input
+  {
+    sha256sum "$path"
+    # shellcheck disable=SC2013  # word splitting is the point: one line, several paths
+    for input in $(sed -n 's/^#[[:space:]]*step-inputs:[[:space:]]*//p' "$path"); do
+      [ -e "$SCRIPT_DIR/$input" ] || die "$(basename "$path"): step-inputs path not found: $input"
+      ### Relative paths, so a rename still changes the hash but relocating the checkout
+      ### does not re-run every step.
+      ( cd "$SCRIPT_DIR" && find "$input" -type f -exec sha256sum {} + | sort -k2 )
+    done
+  } | sha256sum | cut -d' ' -f1
+}
 
 step_state() {
   local name="$1" path="$STEP_DIR/$1" marker

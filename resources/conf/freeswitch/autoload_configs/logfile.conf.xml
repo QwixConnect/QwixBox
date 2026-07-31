@@ -1,0 +1,21 @@
+<configuration name="logfile.conf" description="File Logging">
+  <!-- Managed by the VoIP PBX installer.
+
+       Default console logging is extremely chatty. Keep the file log at info and let
+       50-logrotate handle retention. -->
+  <settings>
+    <param name="rotate-on-hup" value="true"/>
+  </settings>
+  <profiles>
+    <profile name="default">
+      <settings>
+        <param name="logfile" value="/usr/local/freeswitch/log/freeswitch.log"/>
+        <param name="rollover" value="0"/>
+        <param name="maximum-rotate" value="0"/>
+      </settings>
+      <mappings>
+        <map name="all" value="console,info,notice,warning,err,crit,alert"/>
+      </mappings>
+    </profile>
+  </profiles>
+</configuration>

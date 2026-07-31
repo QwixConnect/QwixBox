@@ -1,0 +1,13 @@
+[Unit]
+# Managed by the VoIP PBX installer.
+Description=VoIP PBX scheduled maintenance
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/voip-maintenance
+EnvironmentFile=-/etc/voip-pbx/config.env
+Nice=15
+IOSchedulingClass=idle
+StandardOutput=journal
+SyslogIdentifier=voip-maintenance

@@ -1,0 +1,24 @@
+<configuration name="hiredis.conf" description="mod_hiredis">
+  <!-- Managed by the VoIP PBX installer.
+
+       timeout_ms is deliberately tight. hiredis_profile_execute_sync is synchronous, so a Redis
+       call from Lua blocks call setup; 200ms bounds that, and the handler falls through to
+       mod_xml_curl rather than stalling. -->
+  <profiles>
+    <profile name="default">
+      <connections>
+        <connection name="primary">
+          <param name="hostname" value="@REDIS_HOST@"/>
+          <param name="password" value="@REDIS_PASSWORD@"/>
+          <param name="port" value="@REDIS_PORT@"/>
+          <param name="timeout_ms" value="200"/>
+        </connection>
+      </connections>
+      <params>
+        <!-- Do not refuse to start if Redis is down: the Lua handler declines and the lookup
+             falls through to mod_xml_curl, which is the whole point of the fall-through chain. -->
+        <param name="ignore-connect-fail" value="true"/>
+      </params>
+    </profile>
+  </profiles>
+</configuration>

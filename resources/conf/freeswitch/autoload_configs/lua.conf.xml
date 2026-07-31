@@ -1,0 +1,10 @@
+<configuration name="lua.conf" description="LUA Configuration">
+  <settings>
+    <param name="script-directory" value="@PREFIX@/scripts/?.lua"/>
+    <param name="xml-handler-script" value="xml_handler.lua"/>
+    <!-- 'configuration' is deliberately absent, and is not bound to xml_curl either: nothing
+         serves it dynamically. It is read at module load and on reloadxml, and the static XML
+         in the conf tree answers it. -->
+    <param name="xml-handler-bindings" value="directory,dialplan"/>
+  </settings>
+</configuration>

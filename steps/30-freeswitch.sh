@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 ### FreeSWITCH built from source - the media server and PBX core.
+###
+# step-inputs: resources/freeswitch.service
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 

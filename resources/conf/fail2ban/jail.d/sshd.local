@@ -1,0 +1,6 @@
+# Managed by the VoIP PBX installer.
+[sshd]
+enabled = true
+mode = aggressive
+maxretry = 3
+bantime = 2h

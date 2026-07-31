@@ -1,0 +1,42 @@
+[Unit]
+# Managed by the VoIP PBX installer.
+Description=VoIP PBX API
+After=@api_after@
+Wants=network-online.target
+@api_requires@
+
+[Service]
+Type=simple
+User=@API_USER@
+Group=@API_USER@
+WorkingDirectory=@API_DIR@
+EnvironmentFile=@API_DIR@/.env
+ExecStart=/usr/local/bin/bun run @ENTRY@
+Restart=on-failure
+RestartSec=5
+
+# Bind to loopback only - nginx terminates TLS and proxies in.
+# Hardening: the API needs the network and its own directory, nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths=@API_DIR@
+# The fax spool. ProtectSystem=strict makes everything outside these paths read-only, so
+# without this the TIFF-to-PDF conversion fails silently - the file is written by FreeSWITCH,
+# the API can read it, and the PDF it tries to write next simply never appears.
+ReadWritePaths=@FAX_SPOOL@
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=voip-api
+
+[Install]
+WantedBy=multi-user.target

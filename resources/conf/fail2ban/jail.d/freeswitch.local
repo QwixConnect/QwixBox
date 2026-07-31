@@ -1,0 +1,11 @@
+# Managed by the VoIP PBX installer.
+[freeswitch-pbx]
+enabled  = true
+filter   = freeswitch-pbx
+port     = 5060,5061,5080
+protocol = all
+logpath  = /usr/local/freeswitch/log/freeswitch.log
+backend  = auto
+maxretry = 5
+findtime = 10m
+bantime  = 6h

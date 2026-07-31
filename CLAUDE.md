@@ -11,6 +11,7 @@ An installer for a full VoIP PBX stack on Debian 13: Kamailio (public SIP edge) 
 - `config.env.example` → `/etc/voip-pbx/config.env` (0600). Site config plus generated secrets. **Never rotate a secret on re-run** — every service already holds the old value.
 - `steps/` — the numbered step scripts. The number encodes ordering; dependencies flow downwards.
 - `resources/freeswitch.service` — systemd unit template. `${PREFIX}` is substituted by sed at deploy time (systemd does not expand shell variables), so keep the placeholder intact.
+- `resources/conf/` — every configuration file the steps deploy, one directory per step (`kamailio/`, `nginx/`, `freeswitch/`, …). These were inline heredocs until they got long enough that the shell quoting was doing more harm than the co-location was worth; the reasoning comments moved into the file they describe. See "Config templates" below.
 - `resources/lua/` — the call-time scripts, deployed by `31-freeswitch-config.sh`. This is the code that runs while a call is being set up; see "Call-time resolution" below.
 - `portal/api/` — Bun/Hono API. Owns every write: Postgres, the Redis cache, and Kamailio's `subscriber`/`domain` tables. Also holds the operator CLIs in `src/cli/`.
 - `portal/web/` — React admin portal (Vite, TanStack Router, React Query, Mantine). Built and published by `43-portal-web.sh`.
@@ -128,6 +129,16 @@ docker run -d --platform linux/amd64 ... # same recipe, ~5x slower under emulati
 ```
 
 Known limitation of the emulated amd64 container: **its systemd is broken** — journald, sysusers, sysctl and tmp.mount all fail, and `systemd-run /bin/sleep 300` fails too. So an amd64 run verifies the *build* (dependencies, configure flags, modules) but cannot verify the service. Start FreeSWITCH manually there (`sudo -u freeswitch $PREFIX/bin/freeswitch -ncwait -nonat`) to check runtime behaviour, and rely on the arm64 container for the systemd unit. Kill leftover instances between manual runs or the log fills with spurious `Could not listen` / `Error Creating SIP UA` port conflicts.
+
+## Config templates (resources/conf)
+
+A step deploys a config with `deploy_template "$TPL/<file>" <dst> [mode] [owner]`, which renders the template and hands it to `write_file` — so it keeps the same idempotence, backup and 0-changed/1-unchanged return, and callers still need the `|| true`.
+
+- **A step that reads anything under `resources/` must declare it in a `# step-inputs:` comment** (space-separated paths, relative to the repo root). `install.sh`'s `script_hash` folds those files into the step's marker checksum. Without the line, editing a template leaves the script byte-identical, the marker still matches, and the installer skips the very step that deploys the file you just changed. A declared path that does not exist aborts the run rather than being ignored.
+- **The placeholder is `@NAME@`, not `${NAME}`.** These files are full of FreeSWITCH's own `${channel_var}` and `$${global_var}`, and Kamailio's `$rU`/`$fU`, all of which must reach the deployed file untouched. Any `$`-based syntax would mean escaping every one of them — which is exactly what made the heredocs this replaced so easy to get wrong.
+- **An unset placeholder aborts the step, on purpose.** A literal `@FS_ESL_PASSWORD@` in a live SIP profile fails later, somewhere else, and looks like anything except a typo. So an optional setting has to be defaulted in the step *before* the `deploy_template` call — `FAX_SPOOL="${FAX_SPOOL:-/var/spool/voip-fax}"`. This is the one thing the extraction got wrong, in `41-api-deploy.sh`, and it will recur: the old inline `${X:-default}` disappears silently when the heredoc moves out.
+- Anything the old heredoc computed inline — a command substitution, a conditional block — becomes a named variable assigned in the step (`WEBRTC_RULE`, `TABLE_LINE`, `SIGNING_KEY_PARAM`). These read as unused to shellcheck, hence the `# shellcheck disable=SC2034  # read by name from the template` above each.
+- `resources/freeswitch.service` is *not* one of these: systemd does not expand shell variables, so `${PREFIX}` is substituted by sed in `30-freeswitch.sh`. Keep the placeholder intact.
 
 ## Things to know when editing the step scripts
 

@@ -12,6 +12,7 @@ config.env.example      site configuration template
 lib/common.sh           shared helpers (logging, idempotency, apt, files, services)
 steps/                  the numbered step scripts
 resources/              systemd unit template
+resources/conf/         the config files the steps deploy, one directory per step
 resources/lua/          FreeSWITCH call-time scripts (XML handler, ring groups, IVR, ...)
 portal/api/             the Hono API source, plus the operator CLIs
 portal/web/             the React admin portal

@@ -1,0 +1,16 @@
+<configuration name="acl.conf" description="Network Lists">
+  <network-lists>
+    <!-- Managed by the VoIP PBX installer.
+
+         Only Kamailio (loopback) may send SIP to FreeSWITCH. Anything else is rejected before
+         it reaches the dialplan. -->
+    <list name="trusted" default="deny">
+      <node type="allow" cidr="127.0.0.0/8"/>
+      <node type="allow" cidr="::1/128"/>
+    </list>
+    <list name="loopback.auto" default="deny">
+      <node type="allow" cidr="127.0.0.0/8"/>
+      <node type="allow" cidr="::1/128"/>
+    </list>
+  </network-lists>
+</configuration>

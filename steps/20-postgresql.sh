@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 ### PostgreSQL from the PGDG repository, tuned for this workload.
+###
+# step-inputs: resources/conf/postgresql
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 require_root
 load_config
+
+TPL="$REPO_DIR/resources/conf/postgresql"
 
 PG_VERSION="${PG_VERSION:-18}"
 
@@ -37,6 +41,7 @@ fi
 ### more work_mem, which is why this lives in its own drop-in you can edit.
 mem_mb="$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)"
 shared_buffers=$(( mem_mb / 4 ))
+# shellcheck disable=SC2034  # read by name from the template
 effective_cache=$(( mem_mb / 2 ))
 maint_work_mem=$(( mem_mb / 16 ))
 [ "$maint_work_mem" -gt 2048 ] && maint_work_mem=2048
@@ -44,40 +49,7 @@ maint_work_mem=$(( mem_mb / 16 ))
 
 install -d -m 0755 -o postgres -g postgres "${CLUSTER_DIR}/conf.d"
 
-write_file "${CLUSTER_DIR}/conf.d/90-voip.conf" 0644 postgres:postgres <<EOF || true
-# Managed by the VoIP PBX installer. Sized for a host with ${mem_mb}MB RAM.
-
-listen_addresses = '${pg_listen}'
-max_connections = 200
-
-shared_buffers = ${shared_buffers}MB
-effective_cache_size = ${effective_cache}MB
-maintenance_work_mem = ${maint_work_mem}MB
-work_mem = 8MB
-
-# SSD defaults: random reads cost roughly the same as sequential ones.
-random_page_cost = 1.1
-effective_io_concurrency = 200
-
-# Write-ahead logging sized to allow point-in-time recovery and future replication.
-wal_level = replica
-max_wal_size = 2GB
-min_wal_size = 512MB
-checkpoint_completion_target = 0.9
-
-# Log slow queries and every DDL change - invaluable when a call flow suddenly gets slow.
-log_min_duration_statement = 500
-log_line_prefix = '%m [%p] %q%u@%d '
-log_checkpoints = on
-log_statement = 'ddl'
-log_autovacuum_min_duration = 0
-
-# CDR tables grow monotonically; keep autovacuum keen so they do not bloat.
-autovacuum_vacuum_scale_factor = 0.05
-autovacuum_analyze_scale_factor = 0.02
-
-timezone = '${TIMEZONE}'
-EOF
+deploy_template "$TPL/90-voip.conf" "${CLUSTER_DIR}/conf.d/90-voip.conf" 0644 postgres:postgres || true
 
 ### --- Access ----------------------------------------------------------------------------
 
@@ -87,18 +59,11 @@ EOF
 if is_all_in_one; then
   pg_hba_internal="# (all-in-one: no off-host access)"
 else
+  # shellcheck disable=SC2034  # read by name from the template
   pg_hba_internal="host    all             all             ${INTERNAL_CIDR}            scram-sha-256"
 fi
 
-write_file "${CLUSTER_DIR}/pg_hba.conf" 0640 postgres:postgres <<EOF || true
-# Managed by the VoIP PBX installer.
-# TYPE  DATABASE        USER            ADDRESS                 METHOD
-local   all             postgres                                peer
-local   all             all                                     scram-sha-256
-host    all             all             127.0.0.1/32            scram-sha-256
-host    all             all             ::1/128                 scram-sha-256
-${pg_hba_internal}
-EOF
+deploy_template "$TPL/pg_hba.conf" "${CLUSTER_DIR}/pg_hba.conf" 0640 postgres:postgres || true
 
 systemctl enable postgresql >/dev/null 2>&1 || true
 if systemctl list-unit-files | grep -q "postgresql@${PG_VERSION}-main"; then

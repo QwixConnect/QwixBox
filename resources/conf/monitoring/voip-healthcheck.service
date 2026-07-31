@@ -1,0 +1,10 @@
+[Unit]
+# Managed by the VoIP PBX installer.
+Description=VoIP PBX health check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/voip-healthcheck
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=voip-health

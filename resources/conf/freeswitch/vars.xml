@@ -1,0 +1,31 @@
+<include>
+  <!-- Managed by the VoIP PBX installer.
+
+       Opus first for WiFi/mobile, then G.711 for PSTN interop. G.722 sits between them as a
+       wideband fallback for endpoints that cannot do Opus. -->
+
+  <X-PRE-PROCESS cmd="set" data="domain=@PBX_SIP_DOMAIN@"/>
+  <X-PRE-PROCESS cmd="set" data="domain_name=$${domain}"/>
+  <X-PRE-PROCESS cmd="set" data="hostname=@PBX_FQDN@"/>
+
+  <!-- FreeSWITCH sits behind Kamailio on loopback. -->
+  <X-PRE-PROCESS cmd="set" data="internal_sip_ip=127.0.0.1"/>
+  <X-PRE-PROCESS cmd="set" data="internal_sip_port=@FS_INTERNAL_SIP_PORT@"/>
+
+  <!-- Media addresses. auto-nat is off: rtpengine handles NAT, and letting FreeSWITCH
+       also rewrite SDP produces two components fighting over the same fields. -->
+  <X-PRE-PROCESS cmd="set" data="external_rtp_ip=$${local_ip_v4}"/>
+  <X-PRE-PROCESS cmd="set" data="external_sip_ip=$${local_ip_v4}"/>
+
+  <X-PRE-PROCESS cmd="set" data="global_codec_prefs=OPUS,G722,PCMU,PCMA"/>
+  <X-PRE-PROCESS cmd="set" data="outbound_codec_prefs=OPUS,G722,PCMU,PCMA"/>
+
+  <X-PRE-PROCESS cmd="set" data="rtp_video_max_bandwidth_in=0"/>
+  <X-PRE-PROCESS cmd="set" data="sound_prefix=$${sounds_dir}/en/us/callie"/>
+
+  <!-- Recording and voicemail formats. wav keeps CPU free; transcode later if you need it. -->
+  <X-PRE-PROCESS cmd="set" data="recording_format=wav"/>
+
+  <X-PRE-PROCESS cmd="set" data="rtp_start_port=@RTP_PORT_MIN@"/>
+  <X-PRE-PROCESS cmd="set" data="rtp_end_port=@RTP_PORT_MAX@"/>
+</include>

@@ -1,0 +1,12 @@
+[Unit]
+# Managed by the VoIP PBX installer.
+Description=Nightly VoIP PBX maintenance
+
+[Timer]
+# After the backup, so anything pruned here is already captured.
+OnCalendar=*-*-* 04:10:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

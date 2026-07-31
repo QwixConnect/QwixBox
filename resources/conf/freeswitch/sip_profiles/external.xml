@@ -1,0 +1,44 @@
+<profile name="external">
+  <!-- Managed by the VoIP PBX installer. Outbound leg to Kamailio's egress listener.
+
+       A SEPARATE profile from `internal` on purpose: it is one of the two independent signals
+       (alongside KAM_EGRESS_PORT) that let Kamailio tell its ingress pass from its egress pass.
+       Kamailio sees every call twice, and confusing the two is what produces double dialog
+       counting and duplicate CDRs.
+
+       FreeSWITCH still binds loopback here. It never contacts a carrier - Kamailio is the only
+       element that touches the internet. -->
+  <gateways>
+    <gateway name="kamailio-egress">
+      <param name="realm" value="@FS_HOST@:@KAM_EGRESS_PORT@"/>
+      <param name="proxy" value="@FS_HOST@:@KAM_EGRESS_PORT@"/>
+      <!-- No registration: Kamailio trusts this peer by address, and a registering gateway
+           here would produce loops. -->
+      <param name="register" value="false"/>
+      <param name="context" value="egress"/>
+    </gateway>
+  </gateways>
+  <settings>
+    <param name="sip-ip" value="127.0.0.1"/>
+    <param name="sip-port" value="@FS_EGRESS_SIP_PORT@"/>
+    <param name="rtp-ip" value="$${local_ip_v4}"/>
+    <param name="context" value="egress"/>
+    <param name="dialplan" value="XML"/>
+    <param name="user-agent-string" value="VoIP PBX"/>
+
+    <param name="auth-calls" value="false"/>
+    <param name="apply-inbound-acl" value="trusted"/>
+
+    <param name="inbound-codec-prefs" value="$${global_codec_prefs}"/>
+    <param name="outbound-codec-prefs" value="$${outbound_codec_prefs}"/>
+    <param name="inbound-late-negotiation" value="true"/>
+
+    <!-- rtpengine relays this leg too, so the carrier never sees FreeSWITCH's address and the
+         GCE private-IP-behind-NAT problem does not arise. -->
+    <param name="aggressive-nat-detection" value="false"/>
+    <param name="apply-nat-acl" value="none"/>
+
+    <param name="rtp-timeout-sec" value="300"/>
+    <param name="log-auth-failures" value="true"/>
+  </settings>
+</profile>

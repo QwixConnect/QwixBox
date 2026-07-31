@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Managed by the VoIP PBX installer.
+# Mirrors Kamailio's registered contacts into the nftables sip_known set.
+set -uo pipefail
+
+# shellcheck disable=SC1091
+[ -f /etc/voip-pbx/config.env ] && . /etc/voip-pbx/config.env
+
+known=0
+
+### received_ip is where the endpoint actually reached us from, which is the address the
+### firewall needs. It differs from the contact address for anything behind NAT - using the
+### contact would allowlist an RFC1918 address and achieve nothing.
+if command -v psql >/dev/null 2>&1; then
+    while read -r ip; do
+        [ -n "$ip" ] || continue
+        case "$ip" in
+            127.*|0.0.0.0|"") continue ;;
+        esac
+        nft add element inet filter sip_known "{ $ip }" 2>/dev/null && known=$((known+1))
+    done < <(
+        su - postgres -c "psql -tAq -d kamailio -c \"
+            SELECT DISTINCT COALESCE(NULLIF(split_part(split_part(received,':',2),';',1),''),
+                                     split_part(split_part(contact,'@',2),':',1))
+            FROM location
+            WHERE expires > NOW()
+        \"" 2>/dev/null | tr -d ' '
+    )
+fi
+
+### Statically trusted peers: carriers and gateways that authenticate by IP. Kamailio's
+### permissions module reads the same table, so the firewall and the proxy agree on who is
+### a trunk without the list being maintained twice.
+trusted=0
+if command -v psql >/dev/null 2>&1; then
+    while read -r ip; do
+        [ -n "$ip" ] || continue
+        nft add element inet filter sip_trusted "{ $ip }" 2>/dev/null && trusted=$((trusted+1))
+    done < <(
+        su - postgres -c "psql -tAq -d kamailio -c \
+            \"SELECT DISTINCT ip_addr FROM address\"" 2>/dev/null | tr -d ' '
+    )
+fi
+
+logger -t voip-fw-sync "synced ${known} registered, ${trusted} trusted SIP sources"
+echo "synced ${known} registered, ${trusted} trusted SIP sources"

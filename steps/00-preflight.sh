@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 ### Host validation and baseline tuning. Everything else assumes this ran.
+###
+# step-inputs: resources/conf/system
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 require_root
 require_debian
 load_config
+
+TPL="$REPO_DIR/resources/conf/system"
 
 ### --- Sanity ---------------------------------------------------------------------------
 
@@ -94,44 +98,13 @@ enable_service chrony
 
 ### Defaults are tuned for a handful of TCP streams, not thousands of small UDP packets
 ### arriving every 20ms. Undersized socket buffers show up as crackling audio under load.
-write_file /etc/sysctl.d/90-voip.conf <<EOF || true
-# Managed by the VoIP PBX installer.
-
-# Larger socket buffers: RTP is many small packets, and the default 208KB is easily
-# overrun by a few hundred concurrent calls.
-net.core.rmem_max = 33554432
-net.core.wmem_max = 33554432
-net.core.rmem_default = 1048576
-net.core.wmem_default = 1048576
-net.core.netdev_max_backlog = 5000
-
-# Connection tracking sized for SIP registrations plus RTP flows.
-net.netfilter.nf_conntrack_max = 262144
-
-# SIP over UDP does not benefit from these, and they slow down failover.
-net.ipv4.tcp_fin_timeout = 15
-net.ipv4.tcp_keepalive_time = 300
-
-# Allow services to bind ports before the address is fully up (failover, restarts).
-net.ipv4.ip_nonlocal_bind = 1
-
-# Do not let the box swap out a media process - jitter is worse than memory pressure.
-vm.swappiness = 10
-EOF
+deploy_template "$TPL/sysctl-90-voip.conf" /etc/sysctl.d/90-voip.conf || true
 sysctl --system >/dev/null
 ok "Kernel parameters applied"
 
 ### FreeSWITCH and Kamailio both open a lot of descriptors: one per registration, per call
 ### leg, per database handle. The 1024 default is exhausted almost immediately.
-write_file /etc/security/limits.d/90-voip.conf <<'EOF' || true
-# Managed by the VoIP PBX installer.
-*       soft    nofile  100000
-*       hard    nofile  100000
-*       soft    nproc   60000
-*       hard    nproc   60000
-root    soft    nofile  100000
-root    hard    nofile  100000
-EOF
+deploy_template "$TPL/limits-90-voip.conf" /etc/security/limits.d/90-voip.conf || true
 ok "File descriptor limits raised"
 
 ### --- Base OS updates ------------------------------------------------------------------

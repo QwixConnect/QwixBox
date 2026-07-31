@@ -1,0 +1,11 @@
+[Unit]
+# Managed by the VoIP PBX installer.
+Description=VoIP PBX backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/voip-backup
+EnvironmentFile=-/etc/voip-pbx/config.env
+Nice=10
+IOSchedulingClass=idle

@@ -1,0 +1,14 @@
+STIR/SHAKEN material for @PBX_FQDN@.
+
+  signing.key   EC (prime256v1) private key issued with your SP certificate. Mode 0640.
+  signing.pem   The SP certificate itself, published publicly at:
+                @STIR_X5U_DISPLAY@
+  ca/           STI-CA root certificates you trust for verifying inbound calls.
+
+Attestation levels sent on outbound calls (STIR_SHAKEN_ATTEST):
+  A  You authenticated the caller AND they are authorised to use that number.
+  B  You authenticated the caller but cannot confirm the number is theirs.
+  C  The call entered your network from elsewhere; you can only identify the gateway.
+
+Claiming A for traffic you cannot actually vouch for is a compliance problem, not a
+configuration shortcut.

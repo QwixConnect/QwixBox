@@ -13,11 +13,15 @@
 ### Relay credentials are optional. Without SMTP_HOST the step installs nothing and says so -
 ### an operator evaluating the system should not have to set up email before they can make a
 ### call, and the two features degrade honestly (the recording is stored and downloadable).
+###
+# step-inputs: resources/conf/mail
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 require_root
 load_config
+
+TPL="$REPO_DIR/resources/conf/mail"
 
 SMTP_HOST="${SMTP_HOST:-}"
 
@@ -50,28 +54,13 @@ fi
 
 auth_lines="auth off"
 if [ -n "$SMTP_USER" ]; then
+  # shellcheck disable=SC2034  # read by name from the template
   auth_lines="auth on
 user ${SMTP_USER}
 password ${SMTP_PASSWORD}"
 fi
 
-write_file /etc/msmtprc 0640 root:msmtp <<EOF || true
-# Managed by the VoIP PBX installer.
-
-defaults
-# Certificate verification stays on. A relay that needs it disabled is a relay that cannot
-# prove who it is, and voicemail recordings are customer content.
-tls on
-tls_starttls ${SMTP_STARTTLS}
-tls_trust_file /etc/ssl/certs/ca-certificates.crt
-logfile /var/log/msmtp.log
-
-account default
-host ${SMTP_HOST}
-port ${SMTP_PORT}
-from ${SMTP_FROM}
-${auth_lines}
-EOF
+deploy_template "$TPL/msmtprc" /etc/msmtprc 0640 root:msmtp || true
 
 ### msmtp refuses to run if the file is group- or world-writable, and reports it only in its own
 ### log - so assert it here rather than discovering it from an undelivered voicemail.

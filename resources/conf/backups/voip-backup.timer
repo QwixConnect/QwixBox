@@ -1,0 +1,12 @@
+[Unit]
+# Managed by the VoIP PBX installer.
+Description=Nightly VoIP PBX backup
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+# Spread the load if several hosts share a backup target, and catch up after downtime.
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

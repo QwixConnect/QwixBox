@@ -263,6 +263,50 @@ write_file() {
   return 0
 }
 
+# Renders a config template from resources/ to stdout, substituting each @NAME@ placeholder with
+# the value of the shell variable NAME. Most callers want deploy_template below.
+#
+# @NAME@ rather than ${NAME}: these files are full of FreeSWITCH's own ${channel_var} and
+# $${global_var}, which have to reach the deployed file untouched. Any $-based placeholder syntax
+# would mean escaping every one of them - the thing that made the heredocs this replaced so easy
+# to get wrong.
+#
+# An unset variable aborts the step. A literal @FS_ESL_PASSWORD@ deployed into a live SIP profile
+# fails later, somewhere else, and looks like anything except a typo in a template.
+render_template() {
+  local src="$1" body name value
+  [ -f "$src" ] || die "Template not found: $src"
+  body="$(cat "$src")"
+
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    eval "[ \"\${${name}+set}\" = set ]" \
+      || die "$(basename "$src"): @${name}@ has no value in the environment"
+    eval "value=\"\${${name}}\""
+    body="${body//@${name}@/$value}"
+  done < <(grep -o '@[A-Za-z_][A-Za-z0-9_]*@' "$src" | tr -d '@' | sort -u)
+
+  printf '%s\n' "$body"
+}
+
+# Renders a template and installs it, keeping write_file's idempotence, backup and ownership
+# handling and its return contract (0 when the file changed, 1 when it was already correct).
+#
+#   deploy_template "$TPL/vars.xml" "$CONF/vars.xml" 0644 freeswitch:freeswitch || true
+#
+# The temp file is not an accident of style. `render_template x | write_file y` runs the render
+# in a subshell, so a die() on an unset placeholder exits only that subshell - write_file then
+# writes what it got, which is nothing, and the `|| true` every caller needs swallows the
+# failure. An empty SIP profile deployed silently is worse than the typo that caused it.
+deploy_template() {
+  local src="$1" dst="$2" mode="${3:-0644}" owner="${4:-root:root}" tmp rc=0
+  tmp="$(mktemp)"
+  render_template "$src" > "$tmp"
+  write_file "$dst" "$mode" "$owner" < "$tmp" || rc=$?
+  rm -f "$tmp"
+  return "$rc"
+}
+
 # Ensures a single directive exists in a config file, replacing any existing (even commented)
 # occurrence. Used for sshd_config and similar key/value files.
 ensure_directive() {
