@@ -25,8 +25,8 @@ portal/web/             the React admin portal
 ## Quick start
 
 ```bash
-git clone https://github.com/thiru-to/qwixbox.git
-cd qwixbox
+git clone https://github.com/QwixPBX/QwixPBX.git
+cd QwixPBX
 
 # Asks for what it needs, then installs. Detected values are pre-filled.
 sudo ./install.sh
@@ -226,8 +226,8 @@ failed attempt does not burn the production rate limit.
 ssh admin@pbx.example.com          # 'admin' on AWS, your own user on GCP, 'root' on Vultr
 
 sudo apt update && sudo apt install -y git
-git clone https://github.com/thiru-to/qwixbox.git
-cd qwixbox
+git clone https://github.com/QwixPBX/QwixPBX.git
+cd QwixPBX
 
 # First run creates /etc/qwixbox/config.env from the template and stops.
 sudo ./install.sh
