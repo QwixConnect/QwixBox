@@ -15,7 +15,7 @@ lib/wizard.sh           the first-run configuration wizard
 lib/detect.sh           host self-detection (public IP, FQDN, timezone, admin CIDR)
 lib/dns-cloudflare.sh   Cloudflare API - zone lookup and record upsert
 steps/                  the numbered step scripts
-docs/                   roadmap, and design notes for features not yet built
+docs/                   MVP checklist, roadmap, and design notes for features not yet built
 resources/              systemd unit template
 resources/conf/         the config files the steps deploy, one directory per step
 resources/lua/          FreeSWITCH call-time scripts (XML handler, ring groups, IVR, ...)

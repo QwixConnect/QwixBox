@@ -5,14 +5,21 @@ actually contains**. v1's own status markers were unreliable — it marked Billi
 SMS/Messaging as complete when they had schema and no working feature — so every line below was
 checked against the code rather than copied.
 
+For what blocks a shippable product, see **[mvp.md](mvp.md)** — this file is the long view.
+
 ## Status key
 
 | Mark | Meaning |
 |---|---|
-| **Working** | Built, deployed by the installer, and exercised by the postflight checks |
+| **Working** | Built, deployed, and proven by doing it — a call placed, a packet captured |
+| **Untested** | Code exists and is deployed; it has never been executed |
 | **Partial** | Real but incomplete — the gap is named |
 | **Schema only** | A table exists; nothing reads or writes it as a feature |
 | **Not started** | Design may exist under `docs/design/`; no code |
+
+The distinction between **Working** and **Untested** is the one that matters. Four bugs found on
+2026-07-31 were all code that read as correct and did nothing, and static review caught none of
+them. "Deployed" is not evidence.
 
 ## Where the product is
 
@@ -21,23 +28,23 @@ checked against the code rather than copied.
 | 1 | Multi-tenancy & administration | **Working** | Tenant = better-auth organization; `requireTenant` refuses an unscoped request |
 | 2 | User management & authentication | **Working** | better-auth, RBAC via `createAccessControl`, no self-service registration by design |
 | 3 | Extension & device management | **Partial** | Extensions work; one credential set per extension. Multi-device in [backlog](design/backlog.md) |
-| 4 | Dialplan & call routing | **Working** | Inbound/outbound routes, `mod_lua` → Redis → `mod_xml_curl` resolution |
-| 5 | Call features | **Partial** | Ring groups, time conditions, feature codes. No MoH management or parking |
-| 6 | Voicemail | **Working** | `mod_voicemail`, voicemail-to-email through Postfix |
-| 7 | IVR | **Working** | Menus and options, depth-limited against routing loops |
+| 4 | Dialplan & call routing | **Working** | Extension-to-extension, inbound DID and outbound-to-carrier all verified by placing calls |
+| 5 | Call features | **Untested** | Ring groups, time conditions and feature codes are written and deployed; none has been executed. No MoH management or parking |
+| 6 | Voicemail | **Untested** | `mod_voicemail` configured and voicemail-to-email wired; no message has been left or delivered. The unregistered-callee fallback is specifically unverified |
+| 7 | IVR | **Untested** | Menus, options and loop-depth limiting are written; no call has traversed one |
 | 8 | Conference rooms | **Not started** | [backlog](design/backlog.md) |
 | 9 | Call centre / contact centre | **Schema only** | A bare `queue` table. The big one — [design](design/call-centre.md) |
-| 10 | CDR & reporting | **Partial** | CDR captured and attributed; no reporting beyond a call list |
+| 10 | CDR & reporting | **Partial** | CDR ingest wired; no call has produced one yet, and no reporting beyond a call list |
 | 11 | Real-time monitoring | **Not started** | ESL client exists (`services/esl.ts`); no wallboard |
-| 12 | Trunks & providers | **Working** | Trunks with encrypted credentials, Kamailio projection |
+| 12 | Trunks & providers | **Working** | Encrypted credentials, Kamailio projection, and outbound delivery to a carrier verified |
 | 13 | Contacts & directory | **Not started** | [backlog](design/backlog.md); `mod_cidlookup` is built and unused |
-| 14 | WebRTC & softphone | **Partial** | WSS listener and rtpengine bridging work; no softphone in the portal |
-| 15 | System administration | **Working** | Installer, wizard, health checks, backups, log rotation |
+| 14 | WebRTC & softphone | **Untested** | WSS listens and rtpengine is in the media path in config; no browser client has connected |
+| 15 | System administration | **Partial** | Installer, wizard, health checks and log rotation work. Backups run and **have never been restored** |
 | 16 | Integration & APIs | **Partial** | The REST API is the integration surface; no webhooks |
 | 17 | Billing & invoicing | **Not started** | v1 marked this complete; it was not — [design](design/billing.md) |
 | 18 | Call transcription & AI | **Not started** | Premium in v1's plan |
 | 19 | AI digital receptionist | **Not started** | See below |
-| 20 | FAX | **Working** | Inbound fax to email, T.38 via `mod_spandsp` |
+| 20 | FAX | **Untested** | Inbound fax to email is written end to end (`fax_receive.lua`, `/fs/fax`, `services/fax.ts`) with T.38 via `mod_spandsp`; no fax has been sent or received |
 | 21 | SMS / messaging | **Not started** | v1 marked complete; schema only — [backlog](design/backlog.md) |
 | 22 | Hospitality / hotel module | **Not started** | Speculative |
 | 23 | Omnichannel | **Not started** | Speculative |
@@ -55,6 +62,12 @@ or an assumption — but nothing in this codebase enforces an edition boundary t
 before there is a product to sell would be the wrong order.
 
 ## Notes on specific areas
+
+**4 — Call routing.** All three paths were broken and are now fixed and verified: outbound died
+in Kamailio's empty `dr_*` tables (and again in `mod_hiredis` corrupting the route pattern), while
+extension-to-extension and inbound DID both died because FreeSWITCH held no registrations —
+endpoints register to Kamailio. See `CLAUDE.md` for the mechanics. **Media has still never been
+tested**, only signalling; [mvp.md](mvp.md) covers what that leaves open.
 
 **9 — Call centre.** The largest single gap and the best-documented part of v1. The architecture is
 settled: `mod_callcenter` runs the queue, we own configuration and history. See
