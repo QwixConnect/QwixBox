@@ -6,6 +6,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { fax } from "../db/schema";
 import { recordInboundFax, type FaxReport } from "../services/fax";
+import { safeEqual } from "../lib/crypto";
 import { actionForMethod, requirePermission, requireTenant, type AppEnv } from "../middleware/tenant";
 
 /* ---------------------------------------------------------------------------------------
@@ -21,15 +22,19 @@ faxHook.use("*", async (c, next) => {
   if (!expected) return c.text("FS_XML_GATEWAY_SECRET is not configured", 500);
   /* X-Gateway-Secret is what the Lua scripts send: mod_curl's `append_headers` splits on
      whitespace, so it cannot carry "Authorization: Basic <b64>". mod_xml_curl sends real Basic
-     auth, so both are accepted. */
+     auth, so both are accepted.
+
+     Both compared with safeEqual, the same helper /fs/feature uses. This route previously used
+     `===` on the Basic password, which is a timing oracle on the one secret that authenticates
+     every FreeSWITCH-to-API call. */
   const direct = c.req.header("X-Gateway-Secret");
-  if (direct === expected) return next();
+  if (direct && safeEqual(direct, expected)) return next();
 
   const header = c.req.header("Authorization") ?? "";
   const [scheme, encoded] = header.split(" ");
   if (scheme !== "Basic" || !encoded) return c.text("Unauthorized", 401);
   const [, password] = Buffer.from(encoded, "base64").toString("utf8").split(":");
-  if (password !== expected) return c.text("Unauthorized", 401);
+  if (!password || !safeEqual(password, expected)) return c.text("Unauthorized", 401);
   await next();
 });
 

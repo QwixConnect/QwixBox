@@ -7,8 +7,32 @@
  * Plaintext SIP passwords never leave the API. The Kamailio projection decrypts here, computes
  * the HA1 digest, and stores only the digest - see services/kamailio-sync.ts.
  */
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import { env } from "../env";
+
+/**
+ * Constant-time string comparison, for secrets.
+ *
+ * Lives here rather than beside one of its callers because both FreeSWITCH-facing endpoints
+ * (`/fs/feature` and `/fs/fax`) authenticate the same gateway secret, and a private copy in one
+ * of them is how they came to disagree: one compared in constant time and the other used `===`.
+ *
+ * The length check leaks the length of the secret, which is unavoidable with this approach and
+ * not worth defending - the secret is 32 generated characters and its length is not the part
+ * worth guessing.
+ */
+export function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
 
 const ALGORITHM = "aes-256-gcm";
 const IV_BYTES = 12; // GCM standard
