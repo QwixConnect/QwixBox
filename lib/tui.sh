@@ -37,9 +37,18 @@ tui_password() {
 }
 
 # tui_menu "prompt" tag1 "label1" tag2 "label2" ...
+#
+# Height and list size are variables rather than parameters because the parameters after the
+# prompt are the menu items themselves - there is nowhere to put an optional argument. Callers
+# with a long prompt set TUI_MENU_HEIGHT and TUI_MENU_LIST around the call.
+#
+# whiptail silently truncates a prompt that does not fit the remaining rows, so a menu whose
+# prompt is a summary shows only its first line and nothing warns you. That is worth knowing
+# before adding another one.
 tui_menu() {
   local prompt="$1"; shift
-  whiptail --title "$TUI_TITLE" --menu "$prompt" 20 78 10 "$@" 3>&1 1>&2 2>&3
+  whiptail --title "$TUI_TITLE" --menu "$prompt" \
+    "${TUI_MENU_HEIGHT:-20}" 78 "${TUI_MENU_LIST:-10}" "$@" 3>&1 1>&2 2>&3
 }
 
 ### Re-prompts until the value passes `validator`, so the wizard cannot produce a config.env that

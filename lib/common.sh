@@ -209,6 +209,11 @@ load_config() {
 . "$REPO_DIR/lib/wizard.sh"
 # shellcheck source=./dns-cloudflare.sh
 . "$REPO_DIR/lib/dns-cloudflare.sh"
+# shellcheck source=./dns-domainconnect.sh
+. "$REPO_DIR/lib/dns-domainconnect.sh"
+### Last of the DNS files: dns.sh dispatches to the two above, so they must already be defined.
+# shellcheck source=./dns.sh
+. "$REPO_DIR/lib/dns.sh"
 
 ### --- Roles ----------------------------------------------------------------------------
 

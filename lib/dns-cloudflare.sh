@@ -98,27 +98,6 @@ cf_record_put() {
   fi
 }
 
-### Waits for a public resolver to return the expected value. Cloudflare's API returning success
-### only means the record is stored; the local resolver may still be serving a cached negative
-### answer, and certbot would then fail its own pre-flight.
-###
-### Queries 1.1.1.1 explicitly rather than the system resolver: on a freshly-renamed host the
-### local stub may have the old answer cached with a long TTL.
-cf_wait_for_record() {
-  local name="$1" expect="$2" type="${3:-A}" tries="${4:-30}" got i
-
-  command -v dig >/dev/null 2>&1 || { warn "dig not installed - not waiting for $name."; return 0; }
-
-  for i in $(seq 1 "$tries"); do
-    got="$(dig +short @1.1.1.1 "$name" "$type" 2>/dev/null | tr -d '"' | head -1)"
-    if [ "$got" = "$expect" ]; then
-      ok "$name resolves to $expect"
-      return 0
-    fi
-    [ "$i" -eq 1 ] && info "Waiting for $name to resolve to $expect"
-    sleep 2
-  done
-
-  warn "$name still does not resolve to $expect (last answer: ${got:-none})."
-  return 1
-}
+### cf_wait_for_record used to live here. It is now dns_wait_for_record in lib/dns.sh: asking a
+### public resolver what it can see is the same question whatever wrote the record, and every
+### tier needs the answer. Nothing Cloudflare-specific was lost in the move.

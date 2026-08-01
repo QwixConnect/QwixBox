@@ -1,4 +1,4 @@
-# Qwixbox
+# qwixbox
 
 Builds a production VoIP PBX on a fresh Debian 13 server: Kamailio as the public SIP edge,
 FreeSWITCH as the media/PBX core behind it, rtpengine for media relay, PostgreSQL and Redis
@@ -7,12 +7,15 @@ for state, and a Bun/Hono API.
 ## Layout
 
 ```
+bootstrap.sh            one-line installer - clones the repo and runs install.sh
 install.sh              master installer - runs the steps in order
 config.env.example      site configuration template
 lib/common.sh           shared helpers (logging, idempotency, apt, files, services)
 lib/tui.sh              whiptail wrappers and the input validators
 lib/wizard.sh           the first-run configuration wizard
 lib/detect.sh           host self-detection (public IP, FQDN, timezone, admin CIDR)
+lib/dns.sh              picks a DNS tier and dispatches; the only entry point steps use
+lib/dns-domainconnect.sh  Domain Connect - discovery and the browser approval flow
 lib/dns-cloudflare.sh   Cloudflare API - zone lookup and record upsert
 steps/                  the numbered step scripts
 docs/                   MVP checklist, roadmap, and design notes for features not yet built
@@ -26,24 +29,42 @@ portal/web/             the React admin portal
 ## Quick start
 
 ```bash
-git clone https://github.com/QwixPBX/QwixPBX.git
-cd QwixPBX
+curl -fsSL https://get.qwixbox.io | sudo bash
+```
 
-# Asks for what it needs, then installs. Detected values are pre-filled.
+Or clone it first, if you would rather read what you are about to run as root:
+
+```bash
+git clone https://github.com/QwixPBX/qwixbox.git
+cd qwixbox
 sudo ./install.sh
 ```
 
-On a terminal the first run opens a setup wizard, so there is nothing to edit by hand. It asks
-for the public hostname, a Let's Encrypt email, which addresses may reach SSH, the timezone, and
-optionally DNS and outbound mail. `sudo ./install.sh --menu` gives the same wizard plus per-step
-re-runs, status and logs.
+Either way the first run opens a setup wizard on a terminal, so there is nothing to edit by hand.
+It asks three things — your domain, the hostname phones will register against, and an email
+address for the certificate — and shows everything else it detected before writing anything.
+`sudo ./install.sh --menu` gives the same wizard plus per-step re-runs, status and logs.
 
 Without a terminal — CI, `nohup`, a provisioning script — nothing prompts. The first run writes
 `/etc/qwixbox/config.env`, exits **78**, and tells you what to set; fill it in and run again.
 That exit code means "waiting for configuration", not "failed".
 
-`PBX_FQDN` must resolve to this server's public IP. With `DNS_PROVIDER="cloudflare"` the
-installer creates that record itself (`02-dns.sh`); otherwise create it before you start.
+### DNS
+
+`PBX_FQDN` must resolve to this server's public IP before `13-tls-certs.sh` runs. Three ways to
+get there, set by `DNS_PROVIDER`:
+
+| | What happens | Stores a credential |
+|---|---|---|
+| `domainconnect` | You approve once in your DNS provider's browser UI and the records appear | no |
+| `cloudflare` | The installer writes them with an API token | yes, in `config.env` |
+| `none` | The installer prints the records for you to create | no |
+
+The wizard detects which apply. Automatic setup works when your DNS provider implements
+[Domain Connect](https://www.domainconnect.org/) — currently **GoDaddy, IONOS, Cloudflare,
+NameSilo, Plesk, Vercel, WordPress.com, Domain Chief and Glauca Digital**. Anywhere else,
+`none` prints the exact records and the install continues; that path is fully supported, not a
+consolation prize.
 
 ### Getting a certificate without port 80
 
@@ -51,6 +72,9 @@ installer creates that record itself (`02-dns.sh`); otherwise create it before y
 `ACME_CHALLENGE="dns"` with a Cloudflare token to validate over DNS instead — the only option
 behind a firewall that blocks 80, and the only one that can issue a wildcard. The token needs
 **Zone:Read** and **DNS:Edit**, scoped to the one zone.
+
+This needs `DNS_PROVIDER="cloudflare"` specifically. Domain Connect cannot do it: a certificate
+renews every sixty days and that flow needs a person in a browser each time.
 
 For a cloud instance, start at [Installing on a cloud server](#installing-on-a-cloud-server)
 instead — the provider firewall has to be opened first or the install completes and no phone
@@ -112,7 +136,7 @@ tightens limits for sources that have never registered.
 ```bash
 # Create the instance. Check the current image family first if this errors:
 #   gcloud compute images list --project debian-cloud --filter="family~debian"
-gcloud compute instances create pbx-1 \
+gcloud compute instances create qwixbox \
   --machine-type=e2-standard-2 \
   --image-family=debian-13 --image-project=debian-cloud \
   --boot-disk-size=20GB --boot-disk-type=pd-balanced \
@@ -120,8 +144,8 @@ gcloud compute instances create pbx-1 \
   --zone=us-east1-b
 
 # Reserve the address so it survives a stop/start, then note it for DNS.
-gcloud compute addresses create pbx-1-ip --region=us-east1
-gcloud compute instances describe pbx-1 --zone=us-east1-b \
+gcloud compute addresses create qwixbox-ip --region=us-east1
+gcloud compute instances describe qwixbox --zone=us-east1-b \
   --format='get(networkInterfaces[0].accessConfigs[0].natIP)'
 ```
 
@@ -159,7 +183,7 @@ aws ec2 describe-images --owners 136693071363 \
 ```bash
 # Security group
 SG=$(aws ec2 create-security-group --group-name qwixbox \
-      --description "Qwixbox VoIP PBX" --query GroupId --output text)
+      --description "qwixbox VoIP PBX" --query GroupId --output text)
 
 aws ec2 authorize-security-group-ingress --group-id "$SG" --protocol tcp --port 22   --cidr 203.0.113.10/32
 aws ec2 authorize-security-group-ingress --group-id "$SG" --protocol tcp --port 80   --cidr 0.0.0.0/0
@@ -174,7 +198,7 @@ aws ec2 authorize-security-group-ingress --group-id "$SG" --protocol udp --port 
 aws ec2 run-instances --image-id <ami-from-above> --instance-type t3.large \
   --security-group-ids "$SG" --key-name <your-key> \
   --block-device-mappings 'DeviceName=/dev/xvda,Ebs={VolumeSize=20,VolumeType=gp3}' \
-  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=pbx-1}]'
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=qwixbox}]'
 ```
 
 Then allocate an Elastic IP and associate it, so the address survives a stop/start:
@@ -227,8 +251,8 @@ failed attempt does not burn the production rate limit.
 ssh admin@pbx.example.com          # 'admin' on AWS, your own user on GCP, 'root' on Vultr
 
 sudo apt update && sudo apt install -y git
-git clone https://github.com/QwixPBX/QwixPBX.git
-cd QwixPBX
+git clone https://github.com/QwixPBX/qwixbox.git
+cd qwixbox
 
 # First run creates /etc/qwixbox/config.env from the template and stops.
 sudo ./install.sh
@@ -511,7 +535,8 @@ and mobile behind NAT.
 ## Portal access
 
 The console is behind a session gate at nginx, so only the login page exists until you sign in.
-`/extensions`, `/trunks`, `/calls` and the rest return **404** to anyone not signed in, and
+`/extensions`, `/trunks`, `/routing`, `/call-flows`, `/calls`, `/faxes`, `/users`, `/audit`,
+`/settings` and the rest return **404** to anyone not signed in, and
 `/api/*` returns 401. A signed-in user refreshing on a deep link still gets the app.
 
 This changes what a broken install looks like: if the *whole* site 404s **including after you

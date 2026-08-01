@@ -178,37 +178,32 @@ if [ -z "$SMTP_HOST" ]; then
   fi
 fi
 
-if [ "${DNS_PROVIDER:-none}" = "cloudflare" ] && [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
-  if MAIL_ZONE="$(cf_zone_for_name "$MAIL_DOMAIN")"; then
-    cf_record_put "$MAIL_ZONE" TXT "$DKIM_NAME"  "$DKIM_VALUE"  300 false
-    cf_record_put "$MAIL_ZONE" TXT "$DMARC_NAME" "$DMARC_VALUE" 300 false
-    [ -n "$SPF_VALUE" ] && cf_record_put "$MAIL_ZONE" TXT "$MAIL_DOMAIN" "$SPF_VALUE" 300 false
-
-    ### Nothing here receives mail, so an MX pointing at this host makes every message to the
-    ### domain bounce. Off unless explicitly asked for.
-    if [ "${DNS_PUBLISH_MX:-0}" = "1" ]; then
-      warn "Publishing an MX for $MAIL_DOMAIN - this host does NOT accept inbound mail."
-      cf_record_put "$MAIL_ZONE" MX "$MAIL_DOMAIN" "$PBX_FQDN" 300 false
-    fi
-  else
-    warn "$MAIL_DOMAIN is not in a zone this Cloudflare token can see - publish the records by hand."
-    DNS_PROVIDER="none"
-  fi
+dns_publish TXT "$DKIM_NAME"  "$DKIM_VALUE"  300 false
+dns_publish TXT "$DMARC_NAME" "$DMARC_VALUE" 300 false
+if [ -n "$SPF_VALUE" ]; then
+  dns_publish TXT "$MAIL_DOMAIN" "$SPF_VALUE" 300 false
 fi
 
-if [ "${DNS_PROVIDER:-none}" != "cloudflare" ]; then
+### Nothing here receives mail, so an MX pointing at this host makes every message to the domain
+### bounce. Off unless explicitly asked for.
+if [ "${DNS_PUBLISH_MX:-0}" = "1" ]; then
+  warn "Publishing an MX for $MAIL_DOMAIN - this host does NOT accept inbound mail."
+  dns_publish MX "$MAIL_DOMAIN" "$PBX_FQDN" 300 false
+fi
+
+### On the manual tier this prints the records instead of writing them, which is the same list
+### this step used to format by hand. Never fatal: mail signing works the moment the records
+### appear, and holding up the install until then helps nobody.
+dns_commit || warn "Publish the records above by hand - DKIM will not verify until you do."
+
+### Independent of any of that. An empty SPF_VALUE means we are relaying, and only the relay
+### provider knows which servers to authorise, so this is guidance rather than a record.
+if [ -z "$SPF_VALUE" ]; then
   printf '\n'
-  info "Add these DNS records for ${MAIL_DOMAIN}:"
-  printf '\n  %-40s TXT  %s\n' "$DKIM_NAME" "$DKIM_VALUE"
-  printf '  %-40s TXT  %s\n'   "$DMARC_NAME" "$DMARC_VALUE"
-  if [ -n "$SPF_VALUE" ]; then
-    printf '  %-40s TXT  %s\n' "$MAIL_DOMAIN" "$SPF_VALUE"
-  else
-    printf '  %-40s TXT  v=spf1 include:<your relay> ~all\n' "$MAIL_DOMAIN"
-    printf '\n'
-    info "  The SPF include comes from your relay provider - it names the servers that will"
-    info "  actually send your mail. Ours is not one of them when SMTP_HOST is set."
-  fi
+  printf '  %-40s TXT  v=spf1 include:<your relay> ~all\n' "$MAIL_DOMAIN"
+  printf '\n'
+  info "  The SPF include comes from your relay provider - it names the servers that will"
+  info "  actually send your mail. Ours is not one of them when SMTP_HOST is set."
   printf '\n'
 fi
 

@@ -12,9 +12,11 @@ TPL="$REPO_DIR/resources/conf/apt"
 
 ### whiptail drives the configuration wizard and the menu; dnsutils provides dig, which the
 ### FQDN detection and the DNS step both use to check what a name actually resolves to.
+### qrencode renders the Domain Connect approval link, which is long enough that retyping it onto
+### a phone is worse than not offering the feature.
 apt_install \
   curl wget git ca-certificates gnupg lsb-release apt-transport-https \
-  vim-tiny htop jq rsync whiptail dnsutils \
+  vim-tiny htop jq rsync whiptail dnsutils qrencode \
   tcpdump sngrep ngrep \
   rsyslog logrotate \
   unattended-upgrades apt-listchanges
