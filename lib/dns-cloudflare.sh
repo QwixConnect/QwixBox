@@ -29,12 +29,34 @@ cf_api() {
   printf '%s' "$out"
 }
 
+_CF_OVERRIDE_ZONE_NAME=""
+
+# True when $2 is $1 or a subdomain of it.
+_cf_name_in_zone() {
+  local zone="$1" name="$2"
+  [ "$name" = "$zone" ] || [ "${name%".$zone"}" != "$name" ]
+}
+
 cf_zone_for_name() {
   local name="$1" candidate="$1" resp id
 
+  # CLOUDFLARE_ZONE_ID names one zone, so it can only answer for names inside that zone.
+  # 15-mail.sh publishes for MAIL_DOMAIN, which need not share a zone with PBX_FQDN, and
+  # returning this id unconditionally wrote those records into the wrong zone.
   if [ -n "${CLOUDFLARE_ZONE_ID:-}" ]; then
-    printf '%s' "$CLOUDFLARE_ZONE_ID"
-    return 0
+    if [ -z "$_CF_OVERRIDE_ZONE_NAME" ]; then
+      resp="$(cf_api GET "/zones/$CLOUDFLARE_ZONE_ID")" || return 1
+      _CF_OVERRIDE_ZONE_NAME="$(printf '%s' "$resp" | jq -r '.result.name // empty')"
+      [ -n "$_CF_OVERRIDE_ZONE_NAME" ] || {
+        fail "CLOUDFLARE_ZONE_ID is not a zone this token can see."
+        return 1
+      }
+    fi
+    if _cf_name_in_zone "$_CF_OVERRIDE_ZONE_NAME" "$name"; then
+      printf '%s' "$CLOUDFLARE_ZONE_ID"
+      return 0
+    fi
+    info "$name is outside CLOUDFLARE_ZONE_ID ($_CF_OVERRIDE_ZONE_NAME) - looking it up." >&2
   fi
 
   while [ "${candidate#*.}" != "$candidate" ]; do
