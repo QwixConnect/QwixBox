@@ -534,6 +534,43 @@ and mobile behind NAT.
 
 ## Portal access
 
+### Signing in the first time
+
+If you set a company name and an email in the wizard, the install created your account and its
+tenant for you — `44-admin-account.sh`. **The password is generated during the install and shown
+once**, at the end of that step, and it is deliberately kept out of `/var/log/qwixbox/`. If it has
+scrolled away:
+
+```bash
+sudo cat /etc/qwixbox/first-login     # url, email, password — 0600
+```
+
+Delete that file once you are in. Then browse to `https://<PBX_FQDN>/`.
+
+There is **no default credential**. The password above exists only on this machine and only for
+this install.
+
+If you skipped it — no `ADMIN_EMAIL` in the config, or a split-role install — create the account
+by hand. Both commands are needed: the account is who you are, the tenant is what you can reach,
+and an account with no tenant signs in to an empty console.
+
+```bash
+cd /opt/qwixbox-api
+
+sudo -u qwixbox bun run src/cli/create-user.ts \
+  --email you@yourdomain.com --name "Your Name"
+
+sudo -u qwixbox bun run src/cli/provision-tenant.ts \
+  --name "Acme Corp" --slug acme \
+  --domain <PBX_SIP_DOMAIN> --owner you@yourdomain.com
+```
+
+Run them from `/opt/qwixbox-api`, not the git checkout — the checkout has neither `.env` nor
+dependencies. To add more people later, use the Users page in the portal, or
+`add-tenant-user.ts --email ... --tenant acme --role admin|member|viewer`.
+
+### How the gate works
+
 The console is behind a session gate at nginx, so only the login page exists until you sign in.
 `/extensions`, `/trunks`, `/routing`, `/call-flows`, `/calls`, `/faxes`, `/users`, `/audit`,
 `/settings` and the rest return **404** to anyone not signed in, and

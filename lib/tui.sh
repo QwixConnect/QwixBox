@@ -27,6 +27,14 @@ tui_yesno() {
   whiptail --title "$TUI_TITLE" --yesno "$1" "${2:-10}" "${3:-72}" 3>&1 1>&2 2>&3
 }
 
+### Progress notice with no button - it returns immediately and the next widget paints over it.
+### tui_msg would be wrong for this: an <Ok> the operator has to dismiss before a step they did
+### not ask for is not information, it is an interruption, and it silently shifts every answer
+### after it when the flow is being driven by anything other than a human.
+tui_info() {
+  whiptail --title "$TUI_TITLE" --infobox "$1" "${2:-8}" "${3:-72}" 3>&1 1>&2 2>&3
+}
+
 tui_input() {
   local prompt="$1" default="${2:-}"
   whiptail --title "$TUI_TITLE" --inputbox "$prompt" 10 72 "$default" 3>&1 1>&2 2>&3

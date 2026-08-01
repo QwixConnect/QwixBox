@@ -7,7 +7,7 @@
 # refuses to run without, plus the things people get wrong. Everything else keeps its documented
 # default and stays editable in the file.
 #
-# Two paths. The express one asks three questions and shows what was detected for everything else;
+# Two paths. The express one asks four questions and shows what was detected for everything else;
 # the advanced one is the full linear flow and is reachable from the confirmation screen. The
 # split exists because the detected values are almost always right - the timezone, the address
 # you are connected from, the fact that this is a single-server install - and asking about a value
@@ -22,6 +22,7 @@
 ### path sets all of them.
 _WZ_FQDN=""; _WZ_SIP_DOMAIN=""; _WZ_EMAIL=""; _WZ_CIDR=""; _WZ_TZ=""; _WZ_ROLES="all"
 _WZ_DNS="none"; _WZ_ACME="http"; _WZ_CF_TOKEN=""
+_WZ_ADMIN_EMAIL=""; _WZ_TENANT_NAME=""
 _WZ_SMTP_HOST=""; _WZ_SMTP_PORT="587"; _WZ_SMTP_USER=""; _WZ_SMTP_PASS=""; _WZ_SMTP_FROM=""
 
 ### The registered domain to start the express flow from. Empty is fine - and better than a wrong
@@ -68,11 +69,13 @@ _wizard_express() {
 
   tui_msg "This configures Qwixbox on this machine.
 
-It needs three things: your domain, the hostname phones will register against, and an email
-address for the TLS certificate. Everything else is detected and shown before anything is
-written.
+It needs four things: your domain, the hostname phones will register against, your company name,
+and an email address. Everything else is detected and shown before anything is written.
 
-Nothing is changed until you confirm." 16 74 || return 1
+When it finishes you will have a portal account and a password to sign in with - there is no
+default login to look up.
+
+Nothing is changed until you confirm." 17 74 || return 1
 
   guess="$(_wizard_guess_domain)"
   domain="$(tui_input_validated \
@@ -86,7 +89,7 @@ supports it, the records can be created for you." \
   ### rather than failing the lookup silently: "your provider does not support this" and "dig is
   ### not installed" look identical from the outside, and only one of them is true.
   if ! command -v dig >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
-    tui_msg "Checking what your DNS provider supports - installing a few tools first." 8 70
+    tui_info "Checking what your DNS provider supports - installing a few tools first." 8 70
     apt_install curl jq dnsutils >/dev/null 2>&1 || true
   fi
 
@@ -107,13 +110,30 @@ Set DNS up automatically?" 14 74; then
 Endpoints register against it and the TLS certificate is issued for it." \
     "pbx.${domain}" valid_fqdn)" || return 1
 
-  local email_default="${LETSENCRYPT_EMAIL:-}"
-  [ "$email_default" = "admin@example.com" ] && email_default=""
-  _WZ_EMAIL="$(tui_input_validated \
-    "Email address for the TLS certificate.
+  ### Prefilled from the domain's first label, capitalised. A guess, and one the operator is
+  ### looking straight at - it is what the portal shows every user from here on.
+  local name_guess="${domain%%.*}"
+  name_guess="$(printf '%s' "${name_guess:0:1}" | tr '[:lower:]' '[:upper:]')${name_guess:1}"
+  _WZ_TENANT_NAME="$(tui_input_validated \
+    "Your company name.
 
-Used for expiry warnings from Let's Encrypt. It is not published anywhere." \
+Shown in the portal, and the name this system's tenant is created under." \
+    "${TENANT_NAME:-$name_guess}" "")" || return 1
+
+  local email_default="${ADMIN_EMAIL:-${LETSENCRYPT_EMAIL:-}}"
+  [ "$email_default" = "admin@example.com" ] && email_default=""
+  ### One address for both. They are the same person on a single-server install, and asking
+  ### twice to set two fields that will match is the kind of question this flow exists to remove.
+  ### The advanced flow separates them for anyone who needs that.
+  _WZ_EMAIL="$(tui_input_validated \
+    "Your email address.
+
+This is your portal sign-in, and where Let's Encrypt sends certificate expiry warnings. It is
+not published anywhere.
+
+A password is generated during the install and shown once at the end." \
     "$email_default" valid_email)" || return 1
+  _WZ_ADMIN_EMAIL="$_WZ_EMAIL"
 
   _wizard_apply_detected
 
@@ -129,7 +149,7 @@ _wizard_confirm() {
   ### Read by tui_menu, which bash's dynamic scoping makes visible to it, and unset again when
   ### this function returns. See the note there about silent truncation.
   # shellcheck disable=SC2034  # read by tui_menu in lib/tui.sh
-  local TUI_MENU_HEIGHT=24 TUI_MENU_LIST=3
+  local TUI_MENU_HEIGHT=26 TUI_MENU_LIST=3
 
   case "$_WZ_DNS" in
     domainconnect) dns_line="automatic, via your DNS provider" ;;
@@ -139,8 +159,10 @@ _wizard_confirm() {
 
   choice="$(tui_menu "Ready to install.
 
+  Company        ${_WZ_TENANT_NAME:-<not set>}
   Hostname       $_WZ_FQDN
   SIP domain     $_WZ_SIP_DOMAIN
+  Portal login   ${_WZ_ADMIN_EMAIL:-<create one later>}
   Certificate    $_WZ_EMAIL  (over ${_WZ_ACME}-01)
   Admin access   $_WZ_CIDR
   Timezone       $_WZ_TZ
@@ -229,10 +251,34 @@ for spreading the stack across several hosts, and each host then needs its own c
     "media"        "FreeSWITCH only" \
     "portal"       "API, web portal and nginx")" || return 1
 
+  _wizard_account_advanced || return 1
   _wizard_dns_advanced || return 1
   _wizard_smtp_advanced || return 1
 
   _wizard_confirm_advanced
+}
+
+### Separate from the certificate address, unlike the express flow. Somebody running the advanced
+### path is the person who has a reason for them to differ.
+_wizard_account_advanced() {
+  _WZ_TENANT_NAME="$(tui_input \
+    "Company name. Shown in the portal, and the name the tenant is created under." \
+    "${_WZ_TENANT_NAME:-${TENANT_NAME:-}}")" || return 1
+
+  if ! tui_yesno "Create a portal account during the install?
+
+Otherwise the install finishes with no way to sign in, and you run create-user.ts and
+provision-tenant.ts on the server yourself." 12 74; then
+    _WZ_ADMIN_EMAIL=""
+    return 0
+  fi
+
+  _WZ_ADMIN_EMAIL="$(tui_input_validated \
+    "Email address to sign in to the portal with.
+
+A password is generated during the install and shown once at the end - there is no default
+credential to look up." \
+    "${_WZ_ADMIN_EMAIL:-${ADMIN_EMAIL:-$_WZ_EMAIL}}" valid_email)" || return 1
 }
 
 _wizard_dns_advanced() {
@@ -305,8 +351,10 @@ Its domain must be one you control and can add SPF/DKIM records for." \
 _wizard_confirm_advanced() {
   tui_yesno "Write this configuration?
 
+  Company        ${_WZ_TENANT_NAME:-<not set>}
   Hostname       $_WZ_FQDN
   SIP domain     $_WZ_SIP_DOMAIN
+  Portal login   ${_WZ_ADMIN_EMAIL:-<create one later>}
   LE email       $_WZ_EMAIL
   Admin CIDR     $_WZ_CIDR
   Timezone       $_WZ_TZ
@@ -314,7 +362,7 @@ _wizard_confirm_advanced() {
   DNS            $_WZ_DNS (ACME over ${_WZ_ACME})
   SMTP relay     ${_WZ_SMTP_HOST:-<not configured>}
 
-Written to $CONFIG_FILE. Generated secrets are left untouched." 20 72 || return 1
+Written to $CONFIG_FILE. Generated secrets are left untouched." 22 72 || return 1
 
   _wizard_write
 }
@@ -330,6 +378,8 @@ _wizard_write() {
   config_set ROLES              "$_WZ_ROLES"
   config_set DNS_PROVIDER       "$_WZ_DNS"
   config_set ACME_CHALLENGE     "$_WZ_ACME"
+  config_set ADMIN_EMAIL        "$_WZ_ADMIN_EMAIL"
+  config_set TENANT_NAME        "$_WZ_TENANT_NAME"
   [ -n "$_WZ_CF_TOKEN" ] && config_set CLOUDFLARE_API_TOKEN "$_WZ_CF_TOKEN"
 
   if [ -n "$_WZ_SMTP_HOST" ]; then

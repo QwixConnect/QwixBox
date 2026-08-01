@@ -67,6 +67,7 @@ STEPS=(
   "41-api-deploy.sh|portal media|Hono API build, Drizzle migrations, systemd unit, secrets"
   "42-nginx.sh|portal|TLS reverse proxy for the API and WSS"
   "43-portal-web.sh|portal|Build the React admin portal and publish it for nginx"
+  "44-admin-account.sh|portal|First portal account and its tenant (skipped without ADMIN_EMAIL)"
 
   "50-logrotate.sh|all|Rotation and retention for FreeSWITCH, Kamailio and API logs"
   "51-backups.sh|db|Scheduled pg_dump plus config snapshots, with retention"

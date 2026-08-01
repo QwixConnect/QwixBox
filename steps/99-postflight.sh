@@ -186,10 +186,24 @@ if [ "$problems" -eq 0 ]; then
   printf '\n'
   info "SIP domain:  ${PBX_SIP_DOMAIN}"
   info "SIP:         ${PBX_FQDN}:${SIP_PORT} (UDP/TCP), ${SIPS_PORT} (TLS)"
-  info "API:         https://${PBX_FQDN}/"
+  info "Portal:      https://${PBX_FQDN}/"
   info "Config:      ${CONFIG_FILE}"
   info "Health:      qwixbox-healthcheck"
   printf '\n'
+
+  ### Where the password went. Printing it again here would put it in the install log, which is
+  ### the one place 44-admin-account.sh went out of its way to keep it out of.
+  if [ -f "${CONFIG_DIR}/first-login" ]; then
+    info "Sign in as ${ADMIN_EMAIL:-the account you created}"
+    info "  Password:  sudo cat ${CONFIG_DIR}/first-login"
+    info "  Delete that file once you are in."
+  elif [ -z "${ADMIN_EMAIL:-}" ]; then
+    warn "No portal account exists. Create one:"
+    warn "  cd ${API_DIR:-/opt/qwixbox-api} && sudo -u ${API_USER:-qwixbox} \\"
+    warn "    bun run src/cli/create-user.ts --email you@example.com --name 'Your Name'"
+  fi
+  printf '\n'
+
   warn "Still to do before taking real traffic:"
   warn "  - Create SIP subscribers (kamctl add <user>@${PBX_SIP_DOMAIN} <password>)"
   warn "  - Write the dialplan and outbound trunk routing"
