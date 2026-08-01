@@ -1,10 +1,5 @@
 import { createTheme, type MantineColorsTuple } from "@mantine/core";
 
-/**
- * A deliberately restrained palette. This is an operations console that someone stares at
- * while a phone system is misbehaving, so legibility and unambiguous status colour matter more
- * than personality.
- */
 const brand: MantineColorsTuple = [
   "#e8f3ff",
   "#d0e4ff",
@@ -24,8 +19,6 @@ export const theme = createTheme({
 
   fontFamily:
     '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  // Extension numbers, SIP domains and call IDs are all strings where a transposed character
-  // matters, so they are rendered monospaced throughout.
   fontFamilyMonospace: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
 
   headings: { fontWeight: "600" },

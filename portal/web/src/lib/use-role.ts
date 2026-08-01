@@ -1,14 +1,3 @@
-/**
- * Client-side role awareness for the portal UI.
- *
- * This gate is convenience, not security. The server re-reads the `member` row on every
- * request (`portal/api/src/middleware/tenant.ts`) and enforces via `requirePermission`. Hiding
- * a button here only stops a 403 from teaching the operator what they cannot do.
- *
- * The permission table below mirrors `ROLES` in `portal/api/src/auth.ts:48-78`. Mirror rather
- * than import: the API is a separate package and the client cannot reach
- * `better-auth/plugins/access` server roles. Edit both when the statement changes.
- */
 import { useQuery } from "@tanstack/react-query";
 import { authClient } from "./auth-client";
 
@@ -29,7 +18,7 @@ export type PermissionResource =
 type Action = PermissionAction;
 type Resource = PermissionResource;
 
-/** Mirrors portal/api/src/auth.ts ROLES. Keep in sync. */
+// Mirrors ROLES in portal/api/src/auth.ts. Convenience only - the server is the boundary.
 const PERMISSIONS: Record<RoleName, Partial<Record<Resource, readonly Action[]>>> = {
   viewer: {
     extension: ["read"],
@@ -72,11 +61,6 @@ const PERMISSIONS: Record<RoleName, Partial<Record<Resource, readonly Action[]>>
 
 export const ROLE_NAMES = Object.keys(PERMISSIONS) as RoleName[];
 
-/**
- * Fetched once per session in `_app.tsx` (staleTime: Infinity). Do not call this query from
- * individual pages — nginx rate-limits `/api/auth/*` to 5 r/m, and every navigation already
- * hits getSession.
- */
 export function useActiveMemberRoleQuery(userId: string | undefined) {
   return useQuery({
     queryKey: ["active-member-role", userId],

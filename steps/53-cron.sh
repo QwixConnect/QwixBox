@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-### Scheduled maintenance. Timers rather than crontab entries, so failures land in the
-### journal alongside everything else and can be inspected with systemctl.
-###
+# Scheduled maintenance (CDR rollup, cleanup).
 # step-inputs: resources/conf/maintenance
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"

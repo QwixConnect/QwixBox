@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-### Nightly backups of the databases and configuration.
-###
-### Local-only by design. A backup on the same disk survives a bad deploy or a dropped table,
-### but not a lost instance - wire OFFSITE_RSYNC_TARGET up before calling this done.
-###
+# Scheduled pg_dump plus config snapshots. config.env is in the set: without it a restored
+# database has a mismatched ENCRYPTION_KEY and every stored secret is undecryptable.
 # step-inputs: resources/conf/backups
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"

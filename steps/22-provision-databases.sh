@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-### Roles and databases for Kamailio and the API. Least privilege: neither role owns or can
-### reach the other's data, and neither is a superuser.
+# Roles and databases for Kamailio and the API, least privilege.
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
@@ -14,11 +13,6 @@ config_ensure_secret KAMAILIO_DB_PASSWORD 32
 config_ensure_secret KAMAILIO_RO_DB_PASSWORD 32
 config_ensure_secret API_DB_PASSWORD 32
 
-### --- Roles -----------------------------------------------------------------------------
-
-### Kamailio conventionally uses two accounts: a read/write one for the registrar tables it
-### maintains, and a read-only one used by the config at routing time. If the SIP-facing
-### config is ever exploited, the read-only credentials cannot modify subscribers.
 create_role() {
   local role="$1" password="$2"
   if pg_role_exists "$role"; then
@@ -27,8 +21,6 @@ create_role() {
     su - postgres -c "psql -v ON_ERROR_STOP=1 -c \"CREATE ROLE \\\"${role}\\\" LOGIN PASSWORD '${password}'\"" >/dev/null
     info "Created role: $role"
   fi
-  ### Re-apply the password every run so the database always matches config.env - otherwise
-  ### a restored config and a live database can silently drift apart.
   su - postgres -c "psql -v ON_ERROR_STOP=1 -c \"ALTER ROLE \\\"${role}\\\" WITH LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE\"" >/dev/null
 }
 
@@ -49,10 +41,6 @@ create_role "$API_USER"   "$API_DB_PASSWORD"
 create_db "kamailio" "kamailio"
 create_db "qwixbox"  "$API_USER"
 
-### --- Privileges ------------------------------------------------------------------------
-
-### Revoke the implicit PUBLIC grant. Without this every role on the cluster can connect to
-### and create objects in every database, which defeats the separation above.
 for db in kamailio qwixbox; do
   su - postgres -c "psql -v ON_ERROR_STOP=1 -d ${db} -c \"REVOKE ALL ON SCHEMA public FROM PUBLIC\"" >/dev/null
   su - postgres -c "psql -v ON_ERROR_STOP=1 -c \"REVOKE ALL ON DATABASE \\\"${db}\\\" FROM PUBLIC\"" >/dev/null
@@ -61,14 +49,10 @@ done
 su - postgres -c "psql -v ON_ERROR_STOP=1 -d kamailio -c \"GRANT ALL ON SCHEMA public TO kamailio\"" >/dev/null
 su - postgres -c "psql -v ON_ERROR_STOP=1 -d qwixbox  -c \"GRANT ALL ON SCHEMA public TO \\\"${API_USER}\\\"\"" >/dev/null
 
-### The read-only role gets SELECT on everything Kamailio creates, now and in future - the
-### DEFAULT PRIVILEGES clause covers tables that 33-kamailio-config.sh has not made yet.
 su - postgres -c "psql -v ON_ERROR_STOP=1 -d kamailio -c \"GRANT CONNECT ON DATABASE kamailio TO kamailioro\"" >/dev/null
 su - postgres -c "psql -v ON_ERROR_STOP=1 -d kamailio -c \"GRANT USAGE ON SCHEMA public TO kamailioro\"" >/dev/null
 su - postgres -c "psql -v ON_ERROR_STOP=1 -d kamailio -c \"GRANT SELECT ON ALL TABLES IN SCHEMA public TO kamailioro\"" >/dev/null
 su - postgres -c "psql -v ON_ERROR_STOP=1 -d kamailio -c \"ALTER DEFAULT PRIVILEGES FOR ROLE kamailio IN SCHEMA public GRANT SELECT ON TABLES TO kamailioro\"" >/dev/null
-
-### --- Verify ----------------------------------------------------------------------------
 
 check_login() {
   local role="$1" pass="$2" db="$3"

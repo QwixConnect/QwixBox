@@ -1,18 +1,5 @@
 #!/usr/bin/env bash
-### STIR/SHAKEN - caller ID attestation for outbound PSTN calls.
-###
-### Regulatory background: the FCC (US) and CRTC (Canada) require originating carriers to
-### sign outbound calls with a PASSporT attesting to how well they know the caller. Calls
-### that arrive unsigned or with a low attestation increasingly get labelled "Scam Likely" by
-### terminating carriers, so this is as much a deliverability concern as a compliance one.
-###
-### This step is a source build. Neither libstirshaken nor Kamailio's stirshaken module is
-### packaged for Debian - the module has an upstream package group, but Debian cannot build
-### it without the library. dSIPRouter carries a patch for the same reason.
-###
-### Disabled by default: signing also requires a certificate issued by an STI-CA authorised
-### by the policy administrator, which is a procurement exercise, not an install step.
-###
+# STIR/SHAKEN caller attestation (source build; off by default).
 # step-inputs: resources/conf/stir-shaken
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
@@ -34,15 +21,9 @@ command -v kamailio >/dev/null || die "Kamailio is not installed - run 32-kamail
 MPATH="$(dirname "$(find /usr/lib -name 'tm.so' -path '*kamailio*' 2>/dev/null | head -1)")"
 [ -n "$MPATH" ] || die "Could not locate the Kamailio module directory."
 
-### --- Dependencies --------------------------------------------------------------------------
-
-### libjwt 1.17 in Debian satisfies libstirshaken's ">= 1.12" and is still the 1.x API. The
-### upstream README points at SignalWire's token-gated repo; Debian's package avoids that.
 apt_install build-essential automake autoconf libtool pkg-config \
   libcurl4-openssl-dev libssl-dev libjwt-dev uuid-dev
 
-### libks is already built from source by 30-freeswitch.sh. Reuse it rather than pulling in
-### SignalWire's repository for a second copy.
 if [ ! -f /usr/local/lib/pkgconfig/libks2.pc ] && [ ! -f /usr/lib/pkgconfig/libks2.pc ]; then
   if [ -d "$BUILD_DIR/libks" ]; then
     info "Building libks (from the FreeSWITCH source tree)"
@@ -53,8 +34,6 @@ if [ ! -f /usr/local/lib/pkgconfig/libks2.pc ] && [ ! -f /usr/lib/pkgconfig/libk
   fi
 fi
 ok "libks present"
-
-### --- libstirshaken -------------------------------------------------------------------------
 
 if [ -f /usr/local/lib/libstirshaken.so ] || [ -f /usr/lib/libstirshaken.so ]; then
   ok "libstirshaken already installed"
@@ -74,13 +53,9 @@ else
   ok "libstirshaken built and installed"
 fi
 
-### --- Kamailio stirshaken module ------------------------------------------------------------
-
 if [ -f "$MPATH/stirshaken.so" ]; then
   ok "Kamailio stirshaken module already present"
 else
-  ### The module must be built from the *same* Kamailio version as the installed packages, or
-  ### it will fail to load against a mismatched internal ABI.
   kam_ver="$(kamailio -v 2>/dev/null | awk '/^version:/{print $3}')"
   [ -n "$kam_ver" ] || die "Could not determine the installed Kamailio version."
   info "Building the stirshaken module for Kamailio $kam_ver"
@@ -104,10 +79,6 @@ else
   ok "Installed stirshaken.so into $MPATH"
 fi
 
-### --- Certificate material ---------------------------------------------------------------------
-
-### Signing key and certificate come from an STI-CA. The certificate must be published at a
-### public HTTPS URL (the x5u), because verifying carriers fetch it to check the signature.
 install -d -m 0750 -o root -g kamailio /etc/qwixbox/stir
 
 SS_KEY="${STIR_SHAKEN_KEY:-/etc/qwixbox/stir/signing.key}"
@@ -123,7 +94,6 @@ if [ ! -f "$SS_KEY" ] || [ ! -f "$SS_CERT" ]; then
 else
   chown root:kamailio "$SS_KEY" "$SS_CERT"
   chmod 0640 "$SS_KEY"; chmod 0644 "$SS_CERT"
-  ### An RS256 key here is a common mistake - the SHAKEN profile mandates ES256 on P-256.
   if ! openssl ec -in "$SS_KEY" -noout 2>/dev/null; then
     warn "$SS_KEY is not an EC key. SHAKEN requires ES256 (prime256v1) - signing will fail."
   fi
@@ -131,9 +101,6 @@ else
   ok "Signing material present"
 fi
 
-### The CA bundle used to validate inbound PASSporTs. Populated with the STI-CA roots you
-### trust; falling back to the system store is deliberately not done, because any public CA
-### would then be able to vouch for a caller identity.
 CA_DIR="/etc/qwixbox/stir/ca"
 install -d -m 0755 "$CA_DIR"
 if [ -z "$(ls -A "$CA_DIR" 2>/dev/null)" ]; then
@@ -146,12 +113,6 @@ STIR_X5U_DISPLAY="${STIR_SHAKEN_X5U:-<set STIR_SHAKEN_X5U in /etc/qwixbox/config
 
 deploy_template "$TPL/README" /etc/qwixbox/stir/README 0644 || true
 
-### --- Kamailio configuration fragment ---------------------------------------------------------
-
-### Written as a separate file that 34-kamailio-config.sh imports, so the routing logic can
-### live alongside the feature rather than being conditionally spliced into the main config.
-### The signing key is only configured once a certificate exists; until then the module is
-### loaded for verification alone. Empty leaves a blank line, as the substitution did.
 # shellcheck disable=SC2034  # read by name from the template
 if [ "$SIGNING_READY" = "1" ]; then
   SIGNING_KEY_PARAM="modparam(\"stirshaken\", \"as_default_key\", \"${SS_KEY}\")"

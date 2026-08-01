@@ -1,9 +1,3 @@
-/**
- * Shared success toasts so every page words a save or delete the same way.
- *
- * Failures stay on `ErrorAlert` — it surfaces the API's own message and `detail`, which must
- * not be collapsed into a toast (`components/Resource.tsx`).
- */
 import { notifications } from "@mantine/notifications";
 
 export function notifySaved(what: string) {

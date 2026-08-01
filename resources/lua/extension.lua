@@ -1,19 +1,7 @@
---[[
-  Terminating a call to one extension.
-
-  This is where a user's own call handling applies - do not disturb, the three kinds of
-  forwarding, call waiting, and finally voicemail. It is a script rather than dialplan XML
-  because the decision after the bridge depends on WHY the bridge failed: busy and no-answer
-  are different outcomes with different forward targets, and static XML cannot branch on that.
-
-  Usage:  <action application="lua" data="extension.lua <domain> <number> [depth]"/>
---]]
+-- Per-extension call handling: DND, forwarding, call waiting, voicemail treatment.
 
 local qwixbox = require "qwixbox"
 
---[[ The hop count survives a transfer in a channel variable: qwixbox.go's external branch
-     transfers back into the dialplan, which starts argv over. Without picking it up here, a
-     forwarding loop between two extensions would never hit MAX_DEPTH. ]]
 local domain, number = argv[1], argv[2]
 local depth = tonumber(argv[3] or "") or tonumber(session:getVariable("qwixbox_depth") or "") or 0
 
@@ -24,15 +12,9 @@ if not domain or not number then
   return
 end
 
---[[ Absent settings are not an error. An extension that exists in the directory but has no
-     call-handling entry - a cache still warming, say - should ring normally rather than fail;
-     the defaults below are exactly "ring the phone, then voicemail". ]]
 local ext = qwixbox.fetch("call", domain, number) or {}
 local ring_timeout = ext.ringTimeoutSec or 25
 
---[[ Unconditional forward wins over everything, including DND: a user who has forwarded their
-     phone to their mobile has said where calls go, and quietly sending them to voicemail
-     instead because DND is also set would lose the call. ]]
 if ext.forwardAllTo and ext.forwardAllTo ~= "" then
   qwixbox.log("extension", "info", "%s@%s: forwarded to %s", number, domain, ext.forwardAllTo)
   session:execute("set", "sip_h_X-Forwarded-From=" .. number)
@@ -40,8 +22,6 @@ if ext.forwardAllTo and ext.forwardAllTo ~= "" then
   return
 end
 
---[[ Shared by the DND, busy and no-answer paths. Each has its own forward target, and each
-     falls back to voicemail when none is set. ]]
 local function no_answer_treatment(reason, forward_to)
   if not session:ready() then return end
 
@@ -64,29 +44,11 @@ local function no_answer_treatment(reason, forward_to)
 end
 
 if ext.dnd then
-  --[[ Do not ring at all. The caller still gets the full treatment - a DND user's callers
-       should reach voicemail, not a dead line. ]]
   qwixbox.log("extension", "info", "%s@%s: DND", number, domain)
   no_answer_treatment("dnd", ext.forwardNoAnswerTo)
   return
 end
 
---[[ Call waiting off means a second simultaneous call is busy rather than a second ring.
-
-     Handled here rather than left to the handset, because the handset can only reject the call
-     - it cannot send it to this user's busy-forward number or their mailbox.
-
-     The count is READ with limit_usage and judged here, instead of letting the `limit`
-     application enforce the maximum. `limit ... !USER_BUSY` hangs the channel up outright
-     (mod_dptools.c: switch_channel_hangup on exceed), which would skip the busy treatment
-     below - the caller would get a busy tone and the user's busy-forward would never fire,
-     which is the exact failure this block exists to prevent.
-
-     The read and the increment are not atomic. For "is this one person already on a call" that
-     is fine; two calls landing in the same millisecond is not a case worth a lock.
-
-     The `hash` backend is per-node. With several media nodes this needs the hiredis limit
-     backend instead, which is why the backend is named here rather than left to default. ]]
 local LIMIT_BACKEND = "hash"
 
 if ext.callWaitingEnabled == false then
@@ -100,25 +62,17 @@ if ext.callWaitingEnabled == false then
   end
 end
 
--- Counter only - no maximum, so this never hangs the call up. It exists so the check above can
--- see this call, and it is released automatically when the channel ends.
 session:execute("limit", string.format("%s %s %s", LIMIT_BACKEND, domain, number))
 
 session:execute("set", "call_timeout=" .. tostring(ring_timeout))
 session:execute("set", "hangup_after_bridge=true")
--- Without this a busy or unregistered endpoint hangs up the caller and none of the treatment
--- below runs.
 session:execute("set", "continue_on_fail=true")
 session:execute("set", "ignore_early_media=false")
 
 session:execute("bridge", string.format("user/%s@%s", number, domain))
 
--- Reached only when the bridge failed; an answered call is torn down by hangup_after_bridge.
 if not session:ready() then return end
 
---[[ Busy and no-answer are different outcomes with different forward targets, so the
-     disposition has to be inspected rather than assumed. USER_BUSY covers both a phone
-     rejecting the call and the call-waiting limit above. ]]
 local cause = session:getVariable("originate_disposition") or "NO_ANSWER"
 if cause == "USER_BUSY" or cause == "CALL_REJECTED" then
   no_answer_treatment("busy", ext.forwardBusyTo)

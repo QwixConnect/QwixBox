@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-### Build the React admin portal and publish it for nginx to serve.
-###
-### The portal is a static bundle - Vite compiles it once here and nginx serves the files
-### directly. There is no Node process for the frontend at runtime; it talks to the Hono API
-### over /api.
-###
+# Build the React admin portal and publish it for nginx.
 # step-inputs: resources/conf/portal-web
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
@@ -21,10 +16,6 @@ BUILD_USER="${API_USER:-qwixbox}"
 [ -d "$SRC" ] || die "No portal source at $SRC."
 command -v bun >/dev/null || die "Bun is not installed - run 40-bun.sh first."
 
-### --- Build ---------------------------------------------------------------------------------
-
-### Build in a scratch copy owned by an unprivileged user. Running a build as root means every
-### postinstall script in the dependency tree runs as root too.
 BUILD_DIR="/var/tmp/qwixbox-portal-build"
 rm -rf "$BUILD_DIR"
 install -d -m 0755 -o "$BUILD_USER" -g "$BUILD_USER" "$BUILD_DIR"
@@ -32,8 +23,6 @@ install -d -m 0755 -o "$BUILD_USER" -g "$BUILD_USER" "$BUILD_DIR"
 rsync -a --exclude 'node_modules' --exclude 'dist' "$SRC/" "$BUILD_DIR/"
 chown -R "$BUILD_USER:$BUILD_USER" "$BUILD_DIR"
 
-### The API is same-origin behind nginx, so a relative base keeps the bundle portable between
-### environments - no rebuild needed to change hostname.
 deploy_template "$TPL/env.production" "$BUILD_DIR/.env.production" 0644 "$BUILD_USER:$BUILD_USER" || true
 
 info "Installing portal dependencies"
@@ -47,10 +36,6 @@ bun_as "$BUILD_USER" "$BUILD_DIR" bun run build \
 
 [ -d "$BUILD_DIR/dist" ] || die "Build produced no dist/ directory."
 
-### --- Publish -------------------------------------------------------------------------------
-
-### Swap the built output in atomically. A plain rsync into the live root would serve a
-### half-updated bundle - index.html referencing hashed assets that are not there yet.
 install -d -m 0755 "$(dirname "$WEB_ROOT")"
 rm -rf "${WEB_ROOT}.new"
 cp -a "$BUILD_DIR/dist" "${WEB_ROOT}.new"

@@ -1,76 +1,22 @@
-/**
- * Redis client.
- *
- * Bun ships a native RedisClient, so no third-party dependency. This is the same Redis the
- * FreeSWITCH Lua handler reads from via mod_hiredis - the API writes, Lua reads.
- *
- * Key namespace (Lua depends on these exact shapes, so changing one means changing
- * scripts/xml_handler.lua too):
- *
- *   qwixbox:dir:<domain>:<user>     rendered directory XML for one extension
- *   qwixbox:routes:<domain>         the tenant's outbound route table, JSON
- *   qwixbox:did:<domain>:<number>   inbound DID destination, JSON
- *   qwixbox:tenant:<domain>         tenant settings needed at call time, JSON
- *   qwixbox:num:<domain>:<number>   internal feature number -> call-flow object, JSON
- *   qwixbox:call:<domain>:<number>  per-extension call handling (DND, forwarding), JSON
- *   qwixbox:rg:<domain>:<id>        ring group with its members
- *   qwixbox:ivr:<domain>:<id>       IVR menu with its options, keyed by digit
- *   qwixbox:tc:<domain>:<id>        time condition with its rules
- */
 import { RedisClient } from "bun";
 import { env } from "../env";
 
 export const redis = new RedisClient(env.redisUrl);
 
+// Key shapes are contractual with resources/lua/xml_handler.lua. Changing one changes both.
 export const keys = {
-  /**
-   * Sentinel proving this Redis instance still holds a warmed cache.
-   *
-   * Redis is configured as a pure cache (`save ""`, `appendonly no` in steps/21-redis.sh), so a
-   * restart empties it - and unattended-upgrades is enabled, so a Redis security update does
-   * exactly that, unattended. Nothing else notices: the xml_curl fallback answers from Postgres
-   * but never repopulates Redis, so the cache stayed empty until the API happened to restart or
-   * someone edited a config object. The Lua tier - the thing meant to survive an API outage -
-   * was silently switched off for as long as that lasted.
-   *
-   * Deliberately has no TTL. Its absence is the signal, and an expiring sentinel would fake it.
-   */
   warmSentinel: () => "qwixbox:warm",
   directory: (domain: string, user: string) => `qwixbox:dir:${domain}:${user}`,
   routes: (domain: string) => `qwixbox:routes:${domain}`,
   did: (domain: string, number: string) => `qwixbox:did:${domain}:${number}`,
   tenant: (domain: string) => `qwixbox:tenant:${domain}`,
-  /**
-   * Internal feature number -> call-flow object. Users expect to dial 600 for the sales ring
-   * group or 700 for the auto-attendant from their own desk phone, exactly as they would dial
-   * a colleague's extension. Without this map an internally dialled 600 is not an extension
-   * and not a DID, so it falls through to the outbound routes and dies as UNALLOCATED_NUMBER.
-   */
   featureNumber: (domain: string, number: string) =>
     `qwixbox:num:${domain}:${number}`,
-  /**
-   * How to treat a call TO this extension - DND, forwarding, ring time, call waiting.
-   *
-   * Separate from the directory entry because the two are read by different consumers asking
-   * different questions. The directory is rendered XML that FreeSWITCH's own user lookup
-   * consumes, and it describes the *caller* when they originate; this describes what to do
-   * when someone dials them. Making the dialplan parse XML out of the directory entry to find
-   * a DND flag would be a poor trade for one saved key.
-   */
   extensionCall: (domain: string, number: string) =>
     `qwixbox:call:${domain}:${number}`,
-  /** Call-flow objects, read by the Lua scripts mid-call. */
   ringGroup: (domain: string, id: string) => `qwixbox:rg:${domain}:${id}`,
   ivr: (domain: string, id: string) => `qwixbox:ivr:${domain}:${id}`,
   timeCondition: (domain: string, id: string) => `qwixbox:tc:${domain}:${id}`,
-  /**
-   * Every per-tenant key pattern, for a full purge before a rebuild.
-   *
-   * Enumerated rather than globbed as `qwixbox:*:<domain>*`, because that trailing wildcard would
-   * also match a tenant whose domain merely starts with this one - `acme.test` would wipe
-   * `acme.test.evil.com`. A colon-terminated prefix cannot straddle a domain boundary, and any
-   * new key shape must be added here or it will survive a rebuild as a ghost.
-   */
   tenantPatterns: (domain: string) => [
     `qwixbox:dir:${domain}:*`,
     `qwixbox:did:${domain}:*`,
@@ -84,12 +30,6 @@ export const keys = {
   ],
 } as const;
 
-/**
- * Deletes every key matching a pattern, via SCAN rather than KEYS.
- *
- * KEYS blocks the whole server for the length of the scan, and this Redis is on the call path -
- * a config change in the portal must never stall call setup for another tenant.
- */
 export async function safeDelPattern(pattern: string): Promise<number> {
   let cursor = "0";
   let deleted = 0;
@@ -118,11 +58,6 @@ export async function safeDelPattern(pattern: string): Promise<number> {
   return deleted;
 }
 
-/**
- * Redis is on the call path via Lua, but the API's own writes are not. A failed cache write
- * must not fail the config change that triggered it - the data is already committed to
- * Postgres, and Lua's Postgres fallback will serve correct results until the cache catches up.
- */
 export async function safeSet(
   key: string,
   value: string,
@@ -152,15 +87,6 @@ export async function safeDel(...keysToDelete: string[]): Promise<boolean> {
   }
 }
 
-/**
- * Claims the right to warm the cache, and reports whether this caller won.
- *
- * `SET NX` so that with an API instance on each media node (the recommended split in the plan)
- * a Redis restart produces one rebuild rather than one per node all writing the same keys.
- *
- * Returns false when the sentinel already exists - meaning the cache is warm, or another
- * instance is warming it right now.
- */
 export async function claimWarm(): Promise<boolean> {
   try {
     const reply = await redis.send("SET", [
@@ -170,8 +96,6 @@ export async function claimWarm(): Promise<boolean> {
     ]);
     return reply === "OK";
   } catch (err) {
-    // Redis unreachable. Not a warm opportunity, and not worth failing over - the fall-through
-    // path still answers.
     console.warn(
       "[cache] could not claim the warm sentinel:",
       (err as Error).message,

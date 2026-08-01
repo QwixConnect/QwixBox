@@ -1,18 +1,3 @@
-/**
- * FreeSWITCH XML gateway — the FALLBACK path.
- *
- * scripts/xml_handler.lua serves these lookups from Redis in-process. FreeSWITCH tries
- * bindings in order (switch_xml.c loops over them, continuing past any that returns NULL or
- * `status="not found"`), so mod_xml_curl is bound second and only reaches here when Lua missed
- * or errored.
- *
- * That means this endpoint is for correctness, not throughput — but it must still answer
- * correctly, because when it is being used something has already gone wrong and this is what
- * keeps calls flowing.
- *
- * Authentication is HTTP Basic via mod_xml_curl's `gateway-credentials`. It runs on loopback
- * (or node-local on a split deployment), never exposed.
- */
 import { Hono } from "hono";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
@@ -22,7 +7,6 @@ import { env } from "../env";
 
 export const fsXml = new Hono();
 
-/** FreeSWITCH treats any non-XML or unparseable response as a hard failure, so always answer. */
 const NOT_FOUND = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <document type="freeswitch/xml">
   <section name="result">
@@ -48,10 +32,6 @@ function escapeXml(s: string): string {
     .replace(/'/g, "&apos;");
 }
 
-/**
- * Constant-time comparison. A timing side-channel on a loopback credential is a stretch, but
- * this is the one place a machine credential is checked and the cost is nothing.
- */
 function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -62,7 +42,6 @@ function safeEqual(a: string, b: string): boolean {
 fsXml.use("*", async (c, next) => {
   const expected = process.env.FS_XML_GATEWAY_SECRET;
   if (!expected) {
-    // Fail closed. An unauthenticated XML gateway hands out SIP passwords.
     return c.text("FS_XML_GATEWAY_SECRET is not configured", 500);
   }
   const header = c.req.header("Authorization") ?? "";
@@ -98,8 +77,6 @@ fsXml.post("/", async (c) => {
         return c.text(NOT_FOUND, 200, { "Content-Type": "text/xml" });
     }
   } catch (err) {
-    // Never 500 at FreeSWITCH: a non-XML body is a hard failure that drops the call. Returning
-    // "not found" lets the next binding, or the static fallback directory, answer.
     console.error(`[fs-xml] ${section} lookup failed:`, (err as Error).message);
     return c.text(NOT_FOUND, 200, { "Content-Type": "text/xml" });
   }
@@ -177,7 +154,6 @@ async function handleDialplan(form: Record<string, unknown>): Promise<string> {
   });
   if (!tenant) return NOT_FOUND;
 
-  // Internal extension first - the common case and the cheapest lookup.
   const ext = await db.query.extension.findFirst({
     where: and(
       eq(extension.organizationId, tenant.organizationId),
@@ -199,7 +175,6 @@ async function handleDialplan(form: Record<string, unknown>): Promise<string> {
     );
   }
 
-  // Then an inbound DID.
   const did = await db.query.inboundRoute.findFirst({
     where: and(
       eq(inboundRoute.organizationId, tenant.organizationId),
@@ -225,10 +200,6 @@ async function handleDialplan(form: Record<string, unknown>): Promise<string> {
     }
   }
 
-  // Outbound and the richer destination types (IVR, ring group, time condition) are served by
-  // the Lua handler, which holds the route table and can evaluate patterns. Reaching this
-  // point means Lua was unavailable, so decline rather than guess at routing that could send
-  // a call to the wrong carrier.
   console.warn(
     `[fs-xml] dialplan fallback could not resolve ${destination}@${domain} — ` +
       `Lua handler unavailable and this path does not do pattern routing`,

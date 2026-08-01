@@ -1,14 +1,3 @@
-/**
- * CDR ingest from mod_xml_cdr.
- *
- * Separate from the fs/xml gateway because the failure modes are opposite. The XML gateway is
- * on the call path and must answer fast or fail; this is off it entirely - FreeSWITCH posts
- * after the caller has hung up - so here it is durability that matters and latency that does
- * not.
- *
- * Same shared secret as the XML gateway, since both are FreeSWITCH talking to us over loopback
- * and a second credential to rotate buys nothing.
- */
 import { Hono } from "hono";
 import { ingestCdr } from "../services/cdr";
 
@@ -23,8 +12,6 @@ function safeEqual(a: string, b: string): boolean {
 
 fsCdr.use("*", async (c, next) => {
   const expected = process.env.FS_XML_GATEWAY_SECRET;
-  // Fail closed. CDRs name tenants and dialled numbers; an open endpoint both leaks that shape
-  // and lets anyone forge billing records.
   if (!expected) return c.text("FS_XML_GATEWAY_SECRET is not configured", 500);
 
   const header = c.req.header("Authorization") ?? "";
@@ -41,9 +28,6 @@ fsCdr.use("*", async (c, next) => {
 });
 
 fsCdr.post("/", async (c) => {
-  /* mod_xml_cdr posts either raw text/xml (encode=textxml) or the document in a `cdr` form
-     field (the default url-encoded mode). Accepting both means the encode setting can change
-     without the ingest silently storing nothing. */
   const contentType = c.req.header("Content-Type") ?? "";
   let xml: string;
   if (contentType.includes("xml")) {
@@ -58,17 +42,11 @@ fsCdr.post("/", async (c) => {
   try {
     const result = await ingestCdr(xml);
     if (!result.stored) {
-      /* 200, not 4xx, and deliberately so: mod_xml_cdr retries anything that is not a 2xx, and
-         a CDR we cannot attribute will not become attributable on the tenth attempt. Retrying
-         it for ever costs FreeSWITCH a worker and buries the real failures. The record is
-         logged here and, because err-log-dir is configured, kept on disk by FreeSWITCH too. */
       console.warn(`[cdr] not stored: ${result.reason}`);
       return c.text(`ignored: ${result.reason}`, 200);
     }
     return c.text("OK", 200);
   } catch (err) {
-    // A genuine failure - database down, constraint violation we did not anticipate. 500 tells
-    // FreeSWITCH to retry, which is what we want for something transient.
     console.error(`[cdr] ingest failed: ${(err as Error).message}`);
     return c.text("ingest failed", 500);
   }

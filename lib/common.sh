@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
-#
-# Shared helpers for the step scripts. Source this, do not execute it:
-#
-#   STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-#   . "$STEP_DIR/../lib/common.sh"
-#
-# Everything here is written to be safe to run repeatedly. Helpers that change the system
-# report what they changed and stay quiet when there is nothing to do, so a second run of the
-# installer produces a log that is almost entirely "already correct".
-
+# Shared helpers, sourced by every step. Also sources detect/tui/wizard/dns so a step's single
+# `. lib/common.sh` line gets them all.
 # shellcheck shell=bash
 
 set -euo pipefail
@@ -16,8 +8,6 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_DIR="/etc/qwixbox"
 CONFIG_FILE="$CONFIG_DIR/config.env"
-
-### --- Output ---------------------------------------------------------------------------
 
 if [ -t 1 ]; then
   _C_RESET=$'\033[0m'; _C_RED=$'\033[31m'; _C_GREEN=$'\033[32m'
@@ -32,16 +22,8 @@ warn() { printf '  %s !!%s %s\n' "$_C_YELLOW" "$_C_RESET" "$*"; }
 fail() { printf '  %s XX%s %s\n' "$_C_RED"    "$_C_RESET" "$*" >&2; }
 die()  { fail "$*"; exit 1; }
 
-### Stop because the operator has to supply something, not because anything broke.
-###
-### A distinct exit code so install.sh can tell the two apart. Reporting "the config needs
-### filling in" as `XX Failed during: 00-preflight.sh` trains people to read a red ERROR as
-### normal, which is exactly the habit that makes them miss the run where something did break.
-### 78 is EX_CONFIG from sysexits.h.
 EXIT_NEEDS_CONFIG=78
 needs_config() { printf '  %s>>%s %s\n' "$_C_YELLOW" "$_C_RESET" "$*"; exit "$EXIT_NEEDS_CONFIG"; }
-
-### --- Guards ---------------------------------------------------------------------------
 
 require_root() {
   [ "$(id -u)" -eq 0 ] || die "This must run as root (use sudo)."
@@ -61,37 +43,14 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
 }
 
-### --- Configuration --------------------------------------------------------------------
-
-# Generates a URL-safe secret. Used for values that end up in config files and connection
-# strings, so the alphabet avoids characters that need quoting or escaping.
-#
-# Reads a BOUNDED block rather than the obvious `tr -dc … < /dev/urandom | head -c N`. In that
-# form head closes the pipe once it has N bytes, tr is killed by SIGPIPE and exits 141, and
-# `set -o pipefail` turns that into a failed install. Worse, whether it happens at all depends
-# on pipe buffering, so it fails intermittently. Here head bounds the input and exits cleanly,
-# tr reads to EOF, and no process is ever signalled.
 random_secret() {
   local len="${1:-32}" out=""
   while [ "${#out}" -lt "$len" ]; do
-    # 8x oversample: the alphabet keeps roughly 3/4 of random bytes, so one pass almost always
-    # suffices and the loop is a guard rather than the normal path.
     out="${out}$(LC_ALL=C head -c "$((len * 8))" /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9')"
   done
   printf '%s' "${out:0:len}"
 }
 
-# Writes KEY="value" back into the deployed config, replacing any existing entry. This is how
-# generated secrets persist between runs, and how the wizard records operator input.
-#
-# Rewritten line by line rather than with `sed -i "s|^${key}=.*|...|"`. That form interpolated the
-# value into the replacement text, so a value containing the `|` delimiter, an `&` (which sed
-# expands to the whole match) or a backslash silently corrupted the file. Fine for generated
-# secrets, whose alphabet is A-Za-z0-9 - not fine once a human types an SMTP password here.
-#
-# The value is also escaped for the double-quoted context it lands in: the file is read with
-# `set -a; . "$CONFIG_FILE"`, so an unescaped $, ` or " in a password would be expanded or would
-# end the string early.
 config_set() {
   local key="$1" value="$2" tmp line found=0 esc
 
@@ -109,8 +68,6 @@ config_set() {
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       "$key"=*)
-        ### Only the first occurrence is rewritten; any later duplicate is dropped, so repeated
-        ### writes cannot grow a file where the last definition silently wins.
         if [ "$found" -eq 0 ]; then
           printf '%s="%s"\n' "$key" "$esc"
           found=1
@@ -122,14 +79,10 @@ config_set() {
 
   [ "$found" -eq 1 ] || printf '%s="%s"\n' "$key" "$esc" >> "$tmp"
 
-  ### Copy the content in rather than `mv` the temp over it: that keeps the original inode, and
-  ### with it the 0600 mode this file must never lose.
   cat "$tmp" > "$CONFIG_FILE"
   rm -f "$tmp"
 }
 
-# Ensures a secret exists, generating it on first use. Re-running never rotates a secret -
-# that would break every service already holding the old one.
 config_ensure_secret() {
   local key="$1" len="${2:-32}" current=""
   current="$(eval "printf '%s' \"\${$key:-}\"")"
@@ -142,23 +95,12 @@ config_ensure_secret() {
 }
 
 load_config() {
-  ### 0755, not 0750. Service users need to traverse this directory to reach material we
-  ### deliberately share with them - /etc/qwixbox/tls, group-readable by ssl-cert. With 0750
-  ### root:root the group permission on the files below is unreachable, and Kamailio fails to
-  ### start with an opaque "Permission denied" from OpenSSL. The secret is config.env itself,
-  ### which is 0600 and stays that way.
   if [ ! -d "$CONFIG_DIR" ]; then
     install -d -m 0755 "$CONFIG_DIR"
   else
     chmod 0755 "$CONFIG_DIR"
   fi
 
-  ### On a terminal, offer the wizard rather than the editor. Guarded by tui_available, so every
-  ### automated run - which is all of the container verification - keeps the exit-78 path below.
-  ###
-  ### The "unconfigured" test reads the file directly rather than $PBX_FQDN: the config has not
-  ### been sourced yet at this point, so the variable is unset and would make this fire on every
-  ### single run.
   if tui_available; then
     if [ ! -f "$CONFIG_FILE" ] || grep -q '^PBX_FQDN="pbx.example.com"' "$CONFIG_FILE" 2>/dev/null; then
       run_wizard || true
@@ -186,8 +128,6 @@ load_config() {
   . "$CONFIG_FILE"
   set +a
 
-  ### Also a configuration stop rather than a failure - the operator created the file but has
-  ### not filled it in yet, which is the same situation one step later.
   if [ -z "${PBX_FQDN:-}" ] || [ "${PBX_FQDN:-}" = "pbx.example.com" ]; then
     printf '\n'
     printf '  PBX_FQDN is still the placeholder in %s.\n\n' "$CONFIG_FILE"
@@ -196,11 +136,6 @@ load_config() {
   fi
 }
 
-### --- Interactive configuration ---------------------------------------------------------
-###
-### Sourced last: the wizard calls config_set, require_root and die from above, and tui.sh's
-### validators are shared with the non-interactive path. Loading them here rather than from each
-### step keeps every step's single `. lib/common.sh` line unchanged.
 # shellcheck source=./detect.sh
 . "$REPO_DIR/lib/detect.sh"
 # shellcheck source=./tui.sh
@@ -211,15 +146,9 @@ load_config() {
 . "$REPO_DIR/lib/dns-cloudflare.sh"
 # shellcheck source=./dns-domainconnect.sh
 . "$REPO_DIR/lib/dns-domainconnect.sh"
-### Last of the DNS files: dns.sh dispatches to the two above, so they must already be defined.
 # shellcheck source=./dns.sh
 . "$REPO_DIR/lib/dns.sh"
 
-### --- Roles ----------------------------------------------------------------------------
-
-### True when this machine plays the given role. Steps use this for conditional work inside a
-### step - for example opening a firewall port only on the machine that actually binds it.
-### An all-in-one host ("all") plays every role.
 has_role() {
   local want="$1" r
   case " ${ROLES:-all} " in *" all "*) return 0 ;; esac
@@ -229,15 +158,11 @@ has_role() {
   return 1
 }
 
-### True when every component shares one host, i.e. all inter-component traffic is loopback.
-### Used to decide whether a service should bind loopback only or an internal address.
 is_all_in_one() {
   case " ${ROLES:-all} " in *" all "*) return 0 ;; esac
   return 1
 }
 
-### The address a service should bind for internal traffic. Loopback on an all-in-one box;
-### the host's internal address once roles are split, so peers can actually reach it.
 internal_bind_addr() {
   if is_all_in_one; then
     printf '127.0.0.1'
@@ -245,8 +170,6 @@ internal_bind_addr() {
     ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}' || printf '0.0.0.0'
   fi
 }
-
-### --- Packages -------------------------------------------------------------------------
 
 APT_UPDATED=0
 
@@ -257,7 +180,6 @@ apt_update_once() {
   fi
 }
 
-# Installs only what is actually missing, so a re-run is near-instant and the log stays clean.
 apt_install() {
   local missing=()
   local p
@@ -273,8 +195,6 @@ apt_install() {
   DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=--force-confold "${missing[@]}"
 }
 
-# Adds a third-party apt repository using a dearmoured keyring under /usr/share/keyrings.
-# Signed-by keeps the key scoped to this one repo rather than trusting it globally.
 apt_add_repo() {
   local name="$1" key_url="$2" repo_line="$3"
   local keyring="/usr/share/keyrings/${name}.gpg"
@@ -299,10 +219,6 @@ apt_add_repo() {
   fi
 }
 
-### --- Files ----------------------------------------------------------------------------
-
-# Writes stdin to a path only if the content differs. Returns 0 when changed, 1 when it was
-# already correct - which lets a caller decide whether a service needs reloading.
 write_file() {
   local path="$1" mode="${2:-0644}" owner="${3:-root:root}"
   local tmp
@@ -318,8 +234,6 @@ write_file() {
     return 1
   fi
 
-  # Keep one backup of whatever we are replacing - useful when a config change breaks a
-  # service and you need to see what it looked like before.
   if [ -f "$path" ]; then
     cp -a "$path" "${path}.bak-$(date +%Y%m%d%H%M%S)"
   fi
@@ -330,29 +244,11 @@ write_file() {
   return 0
 }
 
-# Renders a config template from resources/ to stdout, substituting each @NAME@ placeholder with
-# the value of the shell variable NAME. Most callers want deploy_template below.
-#
-# @NAME@ rather than ${NAME}: these files are full of FreeSWITCH's own ${channel_var} and
-# $${global_var}, which have to reach the deployed file untouched. Any $-based placeholder syntax
-# would mean escaping every one of them - the thing that made the heredocs this replaced so easy
-# to get wrong.
-#
-# An unset variable aborts the step. A literal @FS_ESL_PASSWORD@ deployed into a live SIP profile
-# fails later, somewhere else, and looks like anything except a typo in a template.
 render_template() {
   local src="$1" body name value had_patsub=0
   [ -f "$src" ] || die "Template not found: $src"
   body="$(cat "$src")"
 
-  ### bash 5.2 added `patsub_replacement`, on by default, which makes an `&` in the replacement
-  ### of ${var//pattern/replacement} expand to the text that was matched. With it on, a value
-  ### containing `&` - an SMTP password, an API token - renders as the placeholder itself:
-  ### "p|pe&s" became "p|pe@SMTP_PASSWORD@s" in a deployed sasl_passwd. Turned off for the
-  ### substitution and restored afterwards, since shopt is global.
-  ###
-  ### The `shopt -q` guard is what keeps this correct on bash < 5.2, where the option does not
-  ### exist and `&` was never special to begin with.
   if shopt -q patsub_replacement 2>/dev/null; then
     had_patsub=1
     shopt -u patsub_replacement
@@ -371,15 +267,6 @@ render_template() {
   printf '%s\n' "$body"
 }
 
-# Renders a template and installs it, keeping write_file's idempotence, backup and ownership
-# handling and its return contract (0 when the file changed, 1 when it was already correct).
-#
-#   deploy_template "$TPL/vars.xml" "$CONF/vars.xml" 0644 freeswitch:freeswitch || true
-#
-# The temp file is not an accident of style. `render_template x | write_file y` runs the render
-# in a subshell, so a die() on an unset placeholder exits only that subshell - write_file then
-# writes what it got, which is nothing, and the `|| true` every caller needs swallows the
-# failure. An empty SIP profile deployed silently is worse than the typo that caused it.
 deploy_template() {
   local src="$1" dst="$2" mode="${3:-0644}" owner="${4:-root:root}" tmp rc=0
   tmp="$(mktemp)"
@@ -389,8 +276,6 @@ deploy_template() {
   return "$rc"
 }
 
-# Ensures a single directive exists in a config file, replacing any existing (even commented)
-# occurrence. Used for sshd_config and similar key/value files.
 ensure_directive() {
   local file="$1" key="$2" value="$3" sep="${4:- }"
   touch "$file"
@@ -400,8 +285,6 @@ ensure_directive() {
     printf '%s%s%s\n' "$key" "$sep" "$value" >> "$file"
   fi
 }
-
-### --- Services -------------------------------------------------------------------------
 
 enable_service() {
   local unit="$1"
@@ -426,18 +309,6 @@ restart_service() {
   ok "$unit restarted"
 }
 
-### --- Bun helper ----------------------------------------------------------------------
-
-### Runs a bun command as an unprivileged user, with a cache and temp directory that user can
-### actually write.
-###
-### Without this, bun resolves its cache to $BUN_INSTALL/install/cache - which 40-bun.sh creates
-### as root - and every unprivileged `bun install` dies with "AccessDenied accessing temporary
-### directory". Whether it happens depends on whether root ever ran bun first, so it shows up on
-### some machines and not others, and never on one where the tree is already populated.
-###
-### Per-user rather than a shared group-writable cache: two service users sharing a package
-### cache is a way for one to poison the other's dependency tree.
 bun_as() {
   local user="$1" dir="$2"
   shift 2
@@ -452,8 +323,6 @@ bun_as() {
     "cd '$dir' && BUN_INSTALL_CACHE_DIR='$cache' BUN_TMPDIR='$cache/tmp' TMPDIR='$cache/tmp' $*" \
     "$user"
 }
-
-### --- Postgres helper ------------------------------------------------------------------
 
 psql_super() { su - postgres -c "psql -v ON_ERROR_STOP=1 $*"; }
 

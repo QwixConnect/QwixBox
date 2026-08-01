@@ -1,12 +1,3 @@
-/**
- * better-auth managed tables.
- *
- * Kept separate from schema.ts so `bunx @better-auth/cli generate` can regenerate this file
- * when plugins change, without touching the application tables.
- *
- * A tenant IS an organization. Every application table in schema.ts hangs off
- * `organization.id`, and `session.activeOrganizationId` is what scopes a request.
- */
 import { relations } from "drizzle-orm";
 import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
 
@@ -38,10 +29,6 @@ export const session = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    /**
-     * Added by the organization plugin. This is the tenant scope for every request - the
-     * tenant middleware reads it and no query may run without it.
-     */
     activeOrganizationId: text("active_organization_id"),
   },
   (table) => [index("session_user_id_idx").on(table.userId)],
@@ -87,10 +74,6 @@ export const verification = pgTable(
   (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
 
-/* ---------------------------------------------------------------------------------------
- * Organization plugin - this is our tenancy primitive.
- * ------------------------------------------------------------------------------------ */
-
 export const organization = pgTable("organization", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -110,7 +93,6 @@ export const member = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    /** owner | admin | member, plus any custom roles defined via createAccessControl. */
     role: text("role").default("member").notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
@@ -138,16 +120,6 @@ export const invitation = pgTable(
   (table) => [index("invitation_organization_id_idx").on(table.organizationId)],
 );
 
-/**
- * API keys, scoped to an organization. Used for machine access - notably the FreeSWITCH
- * xml_curl gateway credentials, which must not be a human session.
- */
-/**
- * Dormant. The `apiKey` plugin that used this was removed from auth.ts - unused, broken and
- * live. The table is kept so removing the plugin is not a destructive migration; it is empty.
- * Re-enabling means regenerating this definition, since the plugin now expects `configId` and
- * `referenceId` which are absent below.
- */
 export const apikey = pgTable(
   "apikey",
   {
@@ -180,10 +152,6 @@ export const apikey = pgTable(
   },
   (table) => [index("apikey_user_id_idx").on(table.userId)],
 );
-
-/* ---------------------------------------------------------------------------------------
- * Relations
- * ------------------------------------------------------------------------------------ */
 
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),

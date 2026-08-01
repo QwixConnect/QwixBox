@@ -1,9 +1,3 @@
-/**
- * Received faxes.
- *
- * Download uses a same-origin Anchor — `api.get` throws on non-JSON 2xx, and this endpoint
- * returns application/pdf or image/tiff. Permission is `recording` (viewer has none).
- */
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Anchor, Badge, Table, Text } from "@mantine/core";

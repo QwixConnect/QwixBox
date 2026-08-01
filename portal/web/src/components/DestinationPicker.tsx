@@ -1,13 +1,3 @@
-/**
- * Picks the polymorphic destination used by inbound routes, IVR options, ring-group failover
- * and both branches of a time condition.
- *
- * Two fields that must agree, which is exactly the pair the API validates together: a type
- * naming a row plus an id belonging to another tenant is rejected server-side. Presenting them
- * as one control means the second field is always a list of things this tenant actually owns,
- * so the rejectable combination is not reachable by clicking - the server check stays the
- * boundary, this just stops people running into it.
- */
 import { Group, Select, Stack, TextInput } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -45,12 +35,8 @@ export function DestinationPicker({
   allowNone?: boolean;
   description?: string;
 }) {
-  // Enabled only when a row-backed type is selected, so picking "Hang up" does not fire three
-  // list queries that nothing will read.
   const needsRow = value.type ? DESTINATION_NEEDS_ROW.includes(value.type) : false;
 
-  // Also enabled for `voicemail`, which is not a row-backed type - its id is a mailbox number -
-  // but still wants the extension list to choose from.
   const extensions = useQuery({
     queryKey: ["extensions"],
     queryFn: endpoints.extensions,
@@ -116,8 +102,6 @@ export function DestinationPicker({
           description={description}
           data={typeData}
           value={value.type ?? ""}
-          // Clearing the id alongside the type is what keeps the pair consistent. Leaving a
-          // stale id behind is the shape the server rejects, and the one a user cannot see.
           onChange={(next) =>
             onChange({ type: (next || null) as DestinationType | null, id: null })
           }

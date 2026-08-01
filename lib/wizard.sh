@@ -1,38 +1,18 @@
 #!/usr/bin/env bash
 #
-# The first-run configuration wizard. Sourced from lib/common.sh.
-#
-# Replaces "edit /etc/qwixbox/config.env in an editor" for the values an operator must supply.
-# It deliberately does NOT expose every key in the template - the wizard covers what the installer
-# refuses to run without, plus the things people get wrong. Everything else keeps its documented
-# default and stays editable in the file.
-#
-# Two paths. The express one asks four questions and shows what was detected for everything else;
-# the advanced one is the full linear flow and is reachable from the confirmation screen. The
-# split exists because the detected values are almost always right - the timezone, the address
-# you are connected from, the fact that this is a single-server install - and asking about a value
-# you are going to accept is friction that teaches the operator nothing.
-#
-# Writes through config_set, so the file keeps its comments, its 0600 mode, and any secrets that
-# earlier runs generated.
+# First-run configuration wizard. Express path asks four questions and shows what was detected;
+# the advanced path is the full linear flow, reachable from the confirmation screen.
 
 # shellcheck shell=bash
 
-### Everything both paths collect. Declared together because _wizard_write reads them and neither
-### path sets all of them.
+# Both paths collect into these; neither sets all of them.
 _WZ_FQDN=""; _WZ_SIP_DOMAIN=""; _WZ_EMAIL=""; _WZ_CIDR=""; _WZ_TZ=""; _WZ_ROLES="all"
 _WZ_DNS="none"; _WZ_ACME="http"; _WZ_CF_TOKEN=""
 _WZ_ADMIN_EMAIL=""; _WZ_TENANT_NAME=""
 _WZ_SMTP_HOST=""; _WZ_SMTP_PORT="587"; _WZ_SMTP_USER=""; _WZ_SMTP_PASS=""; _WZ_SMTP_FROM=""
 
-### The registered domain to start the express flow from. Empty is fine - and better than a wrong
-### guess, because whiptail puts the cursor after the default rather than selecting it, so someone
-### who types over a pre-filled box gets the two concatenated.
-###
-### Deliberately NOT detect_fqdn: its second source is the reverse DNS of the public address,
-### which on a cloud or residential connection is the provider's PTR. That produced a default of
-### "cpe.net.cable.rogers.com" here - plausible enough to accept, impossible to get a certificate
-### for. `hostname -f` is a different claim: somebody set it on purpose.
+# Not detect_fqdn: its reverse-DNS fallback yields the ISP's PTR, which is plausible enough to
+# accept and impossible to certificate. Empty beats wrong - whiptail appends to a default.
 _wizard_guess_domain() {
   local n
   n="${PBX_FQDN:-}"
@@ -45,7 +25,6 @@ _wizard_guess_domain() {
   dns_zone_name "$n"
 }
 
-### Detected values, applied to anything the express path did not ask about.
 _wizard_apply_detected() {
   local d
   _WZ_SIP_DOMAIN="$_WZ_FQDN"
@@ -60,10 +39,7 @@ _wizard_apply_detected() {
   _WZ_CIDR="${d:-0.0.0.0/0}"
 }
 
-### --- Express -------------------------------------------------------------------------------
-###
-### Returns 0 when the configuration was written, 2 when the operator asked for the full flow,
-### 1 when they backed out.
+# Returns 0 written, 2 operator wants the full flow, 1 backed out.
 _wizard_express() {
   local domain provider guess
 
@@ -85,9 +61,8 @@ The registered name, not the host - 'acme.com' rather than 'pbx.acme.com'. If yo
 supports it, the records can be created for you." \
     "$guess" valid_fqdn)" || return 1
 
-  ### The probe needs these and nothing has installed them yet on a fresh host. Doing it here
-  ### rather than failing the lookup silently: "your provider does not support this" and "dig is
-  ### not installed" look identical from the outside, and only one of them is true.
+  # Nothing has installed these yet on a fresh host, and a missing dig looks identical to an
+  # unsupported provider from the outside.
   if ! command -v dig >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
     tui_info "Checking what your DNS provider supports - installing a few tools first." 8 70
     apt_install curl jq dnsutils >/dev/null 2>&1 || true
@@ -110,8 +85,6 @@ Set DNS up automatically?" 14 74; then
 Endpoints register against it and the TLS certificate is issued for it." \
     "pbx.${domain}" valid_fqdn)" || return 1
 
-  ### Prefilled from the domain's first label, capitalised. A guess, and one the operator is
-  ### looking straight at - it is what the portal shows every user from here on.
   local name_guess="${domain%%.*}"
   name_guess="$(printf '%s' "${name_guess:0:1}" | tr '[:lower:]' '[:upper:]')${name_guess:1}"
   _WZ_TENANT_NAME="$(tui_input_validated \
@@ -122,9 +95,7 @@ Shown in the portal, and the name this system's tenant is created under." \
 
   local email_default="${ADMIN_EMAIL:-${LETSENCRYPT_EMAIL:-}}"
   [ "$email_default" = "admin@example.com" ] && email_default=""
-  ### One address for both. They are the same person on a single-server install, and asking
-  ### twice to set two fields that will match is the kind of question this flow exists to remove.
-  ### The advanced flow separates them for anyone who needs that.
+  # One address for both; the advanced flow separates them.
   _WZ_EMAIL="$(tui_input_validated \
     "Your email address.
 
@@ -137,8 +108,7 @@ A password is generated during the install and shown once at the end." \
 
   _wizard_apply_detected
 
-  ### dns-01 needs a credential we can use unattended at renewal time, and the Domain Connect
-  ### flow needs a human in a browser - so it cannot renew. http-01 it is, which means port 80.
+  # Domain Connect needs a human per approval, so it cannot renew dns-01.
   _WZ_ACME="http"
 
   _wizard_confirm
@@ -146,8 +116,7 @@ A password is generated during the install and shown once at the end." \
 
 _wizard_confirm() {
   local dns_line choice
-  ### Read by tui_menu, which bash's dynamic scoping makes visible to it, and unset again when
-  ### this function returns. See the note there about silent truncation.
+  # Read by tui_menu via dynamic scoping; whiptail truncates a prompt that does not fit.
   # shellcheck disable=SC2034  # read by tui_menu in lib/tui.sh
   local TUI_MENU_HEIGHT=26 TUI_MENU_LIST=3
 
@@ -180,8 +149,7 @@ _wizard_confirm() {
   esac
 }
 
-### A safety interlock rather than a question, which is why it survives into the express path:
-### the cost of getting it wrong is SSH open to the internet on a host that answers SIP.
+# An interlock, not a question - hence it survives into the express path.
 _wizard_check_cidr() {
   [ "$_WZ_CIDR" = "0.0.0.0/0" ] || return 0
   tui_yesno "ADMIN_ALLOW_CIDR is 0.0.0.0/0, which allows SSH from anywhere.
@@ -189,9 +157,7 @@ _wizard_check_cidr() {
 Continue anyway?" || return 1
 }
 
-### --- Advanced ------------------------------------------------------------------------------
-###
-### The original linear flow. Every field the wizard has ever exposed is still reachable here.
+# The full linear flow. Every field the wizard exposes is reachable here.
 _wizard_advanced() {
   local detected
 
@@ -258,8 +224,6 @@ for spreading the stack across several hosts, and each host then needs its own c
   _wizard_confirm_advanced
 }
 
-### Separate from the certificate address, unlike the express flow. Somebody running the advanced
-### path is the person who has a reason for them to differ.
 _wizard_account_advanced() {
   _WZ_TENANT_NAME="$(tui_input \
     "Company name. Shown in the portal, and the name the tenant is created under." \
@@ -312,7 +276,7 @@ Create it at: My Profile > API Tokens > Create Token
 Permissions needed: Zone:Read and DNS:Edit, restricted to the zone for $_WZ_FQDN.")" || return 1
       if [ -n "$_WZ_CF_TOKEN" ]; then
         _WZ_DNS="cloudflare"
-        ### The only tier that can renew unattended, so it is the only one where this is offered.
+        # The only tier that can renew unattended.
         tui_yesno "Obtain certificates over DNS (DNS-01) instead of HTTP?
 
 Choose Yes if port 80 is not open to the internet, or if you want wildcard certificates." \
@@ -346,8 +310,7 @@ Its domain must be one you control and can add SPF/DKIM records for." \
     "${SMTP_FROM:-pbx@${_WZ_FQDN#*.}}" valid_email)" || return 1
 }
 
-### Nothing above this point has touched the file. The operator sees the whole set and can still
-### back out - which is the difference between a wizard and an interrogation.
+# Nothing above has touched the file.
 _wizard_confirm_advanced() {
   tui_yesno "Write this configuration?
 
@@ -366,8 +329,6 @@ Written to $CONFIG_FILE. Generated secrets are left untouched." 22 72 || return 
 
   _wizard_write
 }
-
-### --- Write ---------------------------------------------------------------------------------
 
 _wizard_write() {
   config_set PBX_FQDN           "$_WZ_FQDN"
@@ -399,8 +360,7 @@ run_wizard() {
   require_root
   tui_available || die "The wizard needs a terminal and whiptail (apt install whiptail)."
 
-  ### The file must exist before config_set can rewrite keys in place, and creating it from the
-  ### template is what preserves the explanatory comments around every setting.
+  # config_set rewrites keys in place, so the template has to be there first.
   if [ ! -f "$CONFIG_FILE" ]; then
     install -d -m 0755 "$CONFIG_DIR"
     install -m 0600 "$REPO_DIR/config.env.example" "$CONFIG_FILE"
@@ -411,7 +371,6 @@ run_wizard() {
   _wizard_express; rc=$?
   [ "$rc" -eq 2 ] || return "$rc"
 
-  ### Express collected some of this already; the advanced flow pre-fills from those rather than
-  ### starting blank, so "Change these" edits the answers instead of asking for them twice.
+  # Pre-filled from what express collected, so "Change these" edits rather than re-asks.
   _wizard_advanced
 }

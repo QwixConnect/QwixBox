@@ -39,8 +39,6 @@ function SummaryCards({ from, to }: { from?: string; to?: string }) {
     { label: "Calls", value: data ? String(data.calls) : "—" },
     {
       label: "Answered",
-      // Null rather than 0% when there are no calls: "0% answered" reads like a fault, and a
-      // brand-new tenant with no traffic is not one.
       value:
         data == null
           ? "—"
@@ -90,14 +88,11 @@ function CallsPage() {
   const { data, isPending, isSuccess, isPaused, error } = useQuery({
     queryKey: ["cdr", filters],
     queryFn: () => endpoints.cdr(filters),
-    // Keeps the previous page on screen while the next loads, so paging does not flash empty.
     placeholderData: keepPreviousData,
   });
 
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
 
-  // Any filter change invalidates the current page number - staying on page 7 of a result set
-  // that now has two pages shows nothing and looks broken.
   const resetPage = <T,>(setter: (v: T) => void) => (v: T) => {
     setter(v);
     setPage(1);

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-### Bun runtime, installed system-wide.
-###
+# Bun runtime.
 # step-inputs: resources/conf/bun
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
@@ -13,9 +12,6 @@ TPL="$REPO_DIR/resources/conf/bun"
 BUN_INSTALL="/usr/local/lib/bun"
 BUN_BIN="/usr/local/bin/bun"
 
-### Bun's installer is a shell script from bun.sh. Pin BUN_INSTALL so it lands in a system
-### location rather than root's home, which is where it would otherwise go and would then be
-### invisible to the service user.
 if [ -x "$BUN_BIN" ]; then
   ok "Bun already installed: $("$BUN_BIN" --version)"
 else
@@ -29,7 +25,6 @@ else
   ok "Bun $("$BUN_BIN" --version) installed to $BUN_INSTALL"
 fi
 
-### Make it available to non-login shells and systemd units without each needing PATH tweaks.
 deploy_template "$TPL/bun.sh" /etc/profile.d/bun.sh 0644 || true
 
 "$BUN_BIN" --version >/dev/null || die "Bun is installed but not runnable."

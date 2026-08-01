@@ -1,9 +1,3 @@
-/**
- * Audit log, read-only.
- *
- * Answers "who changed what" for a tenant. Feature-code changes land here with a null userId
- * and an actor string in the action field (see fs-feature.ts) — render that, not a blank who.
- */
 import { Hono } from "hono";
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "../db";
@@ -26,12 +20,6 @@ function parseDate(value: string | undefined): Date | null | "invalid" {
   return Number.isNaN(d.getTime()) ? "invalid" : d;
 }
 
-/**
- * Strip every key ending in `Enc` from before/after blobs.
- *
- * `recordAudit` already redacts on write, but older rows (or a missed pattern) could still
- * carry ciphertext. There is no reason to ship it to a browser.
- */
 function redactEnc(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const out: Record<string, unknown> = {};
@@ -55,7 +43,6 @@ audit.get("/", async (c) => {
     return c.json({ error: "from and to must be parseable dates" }, 400);
   }
 
-  // organizationId first and unconditionally — same isolation shape as cdr.ts.
   const filters = [eq(auditLog.organizationId, organizationId)];
   if (q.entityType) filters.push(eq(auditLog.entityType, q.entityType));
   if (q.action) filters.push(eq(auditLog.action, q.action));

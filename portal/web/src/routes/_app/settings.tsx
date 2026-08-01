@@ -1,9 +1,3 @@
-/**
- * Tenant settings — read table by default, editable when the role has tenant:update.
- *
- * Also hosts two operational actions already live on the API but previously unreachable:
- * rebuild-cache and (when unprovisioned) provision telephony.
- */
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

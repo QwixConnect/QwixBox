@@ -1,8 +1,4 @@
---[[
-  IVR: plays a greeting, collects one digit, routes.
-
-  Usage:  <action application="lua" data="ivr.lua <domain> <id> [depth]"/>
---]]
+-- IVR menu: greeting, digit collection, per-digit destinations.
 
 local qwixbox = require "qwixbox"
 
@@ -23,8 +19,6 @@ if not menu then
 end
 
 session:answer()
--- Callers dial over the greeting constantly. Without a moment of silence first, the first
--- digit lands before the media path is fully up and is simply lost.
 session:execute("playback", "silence_stream://500")
 
 local greeting = menu.greetingSound or "silence_stream://1000"
@@ -37,11 +31,6 @@ local options = menu.options or {}
 for attempt = 1, max_retries do
   if not session:ready() then return end
 
-  --[[ playAndGetDigits(min, max, tries, timeout, terminators, file, invalid_file, regex)
-
-       tries is 1 here and the retry loop is ours, so that an invalid entry and a timeout can
-       be logged differently - "nobody pressed anything" and "they pressed 9 and there is no 9"
-       are different customer problems, and FreeSWITCH's own retry collapses them. ]]
   local digit = session:playAndGetDigits(1, 1, 1, timeout_ms, "#", greeting, invalid, "\\d|\\*|#")
 
   if digit and digit ~= "" then
@@ -59,9 +48,6 @@ for attempt = 1, max_retries do
   end
 end
 
---[[ Out of retries. This is the most common real-world path - rotary phones, callers who put
-     the handset down, speech that never registers - so it has to lead somewhere sensible
-     rather than a hangup. ]]
 qwixbox.log("ivr", "info", "%s: exhausted %d attempts -> %s",
   menu.name, max_retries, tostring(menu.timeoutType))
 

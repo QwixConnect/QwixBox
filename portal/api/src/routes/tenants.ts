@@ -1,14 +1,3 @@
-/**
- * Tenant provisioning.
- *
- * Creating a tenant is not just a database row: the SIP domain has to exist in Kamailio's
- * `domain` table before any extension in it can register, and the tenant's settings have to be
- * in Redis before Lua can route a call for it. Doing those in one place is what stops a
- * half-provisioned tenant that looks fine in the portal and fails on the wire.
- *
- * Organizations themselves are created through better-auth (`/api/auth/organization/create`);
- * this attaches the telephony configuration to one.
- */
 import { Hono } from "hono";
 import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -28,7 +17,6 @@ import {
 export const tenants = new Hono<AppEnv>();
 tenants.use("*", requireTenant);
 
-/** The active tenant's own settings. Any member may read; only admins may change. */
 tenants.get("/", async (c) => {
   const row = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.organizationId, c.get("organizationId")),
@@ -37,12 +25,6 @@ tenants.get("/", async (c) => {
   return c.json(row);
 });
 
-/**
- * Provisions telephony for the active organization.
- *
- * The SIP domain is the tenancy boundary at the SIP layer, so it is unique across the whole
- * platform - two tenants cannot share one, or `use_domain=1` stops distinguishing them.
- */
 tenants.post("/", requireRole("owner", "admin"), async (c) => {
   const organizationId = c.get("organizationId");
   const body = await c.req.json<{
@@ -70,8 +52,6 @@ tenants.post("/", requireRole("owner", "admin"), async (c) => {
     organizationId,
     sipDomain: body.sipDomain,
     tier: body.tier ?? ("shared" as const),
-    // A dedicated tenant gets its own dispatcher set; shared tenants all use set 1. This is
-    // what keeps the two commercial tiers as one architecture.
     dispatcherSetId: body.tier === "dedicated" ? 0 : 1,
     maxConcurrentCalls: body.maxConcurrentCalls ?? 10,
     timezone: body.timezone ?? "Etc/UTC",
@@ -98,7 +78,6 @@ tenants.post("/", requireRole("owner", "admin"), async (c) => {
     );
   }
 
-  // Kamailio must know the domain before anyone can register into it.
   await syncDomain(row.sipDomain);
   await reloadKamailio();
   await rebuildTenant(organizationId);
@@ -114,13 +93,6 @@ tenants.post("/", requireRole("owner", "admin"), async (c) => {
   return c.json(row, existing ? 200 : 201);
 });
 
-/**
- * Updates tenant settings. `sipDomain` is rejected — it is the SIP tenancy boundary; changing
- * it orphans registrations, Kamailio subscriber rows, and every cached key.
- *
- * `tier` stays with provisioning. `dispatcherSetId` is writable so the dedicated-tier 202 path
- * above can be completed from the portal.
- */
 tenants.patch("/", requirePermission("tenant", "update"), async (c) => {
   const organizationId = c.get("organizationId");
   const body = await c.req.json<Record<string, unknown>>();
@@ -194,7 +166,6 @@ tenants.patch("/", requirePermission("tenant", "update"), async (c) => {
     .returning();
   if (!row) return c.json({ error: "Update failed" }, 500);
 
-  // timezone and caller-ID defaults are read at call time from Redis.
   await rebuildTenant(organizationId);
   await recordAudit(c, {
     action: "update",
@@ -207,13 +178,6 @@ tenants.patch("/", requirePermission("tenant", "update"), async (c) => {
   return c.json(row);
 });
 
-/**
- * Add an existing portal account to this tenant, or re-role them.
- *
- * Mirrors cli/add-tenant-user.ts. Invitation UI is deliberately absent — sendInvitationEmail is
- * a no-op and self-service signup is blocked, so an invite button would appear to work and do
- * nothing. When no account exists, return the create-user.ts command as `detail`.
- */
 tenants.post("/members", requireRole("owner", "admin"), async (c) => {
   const organizationId = c.get("organizationId");
   const body = await c.req.json<{ email?: string; role?: string }>();
@@ -309,10 +273,6 @@ tenants.post("/members", requireRole("owner", "admin"), async (c) => {
   );
 });
 
-/**
- * Forces a full cache rebuild for this tenant. The repair action when Redis is suspected
- * stale - after a flush, a restore, or a manual database edit.
- */
 tenants.post("/rebuild-cache", requireRole("owner", "admin"), async (c) => {
   const organizationId = c.get("organizationId");
   await rebuildTenant(organizationId);

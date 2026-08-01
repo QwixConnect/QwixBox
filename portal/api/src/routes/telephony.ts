@@ -1,10 +1,3 @@
-/**
- * Trunks, routes and call-flow objects.
- *
- * All built on lib/crud.ts, so tenant scoping, audit and the after-change hooks are uniform.
- * What differs per resource is only what has to happen *after* a write - which cache to
- * refresh, and whether Kamailio needs to be told.
- */
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db";
@@ -39,19 +32,6 @@ import {
   type AppEnv,
 } from "../middleware/tenant";
 
-/**
- * Validates a polymorphic destination reference against the tenant.
- *
- * Destinations appear on inbound routes, IVR options, ring-group failover and both branches of
- * a time condition, and every one of them is an id the client supplies. Without this a tenant
- * can point their call flow at another tenant's ring group or IVR.
- *
- * `prevType`/`prevId` are the values already on the row, and passing them is not optional on an
- * update. A PATCH carries only what is changing, so `{destinationId: "<other tenant's id>"}`
- * arrives with no type at all - and checking the body alone reads that as "no destination
- * given" and waves it through. The pair has to be validated as it will exist after the write,
- * not as it appears in the request.
- */
 async function badDestination(
   type: unknown,
   id: unknown,
@@ -63,8 +43,6 @@ async function badDestination(
   const effectiveId = id !== undefined ? id : prevId;
 
   if (effectiveType === undefined || effectiveType === null) {
-    // An id with nothing to interpret it is not a harmless no-op: it is the shape the
-    // cross-tenant write takes, and there is no legitimate request that produces it.
     if (
       effectiveId !== undefined &&
       effectiveId !== null &&
@@ -75,7 +53,6 @@ async function badDestination(
     return null;
   }
 
-  // These carry no row reference: `external` holds a literal number, the others nothing.
   if (
     effectiveType === "external" ||
     effectiveType === "hangup" ||
@@ -143,10 +120,6 @@ async function badDestination(
     : `destination ${String(type_)}/${String(id_)} does not belong to this tenant`;
 }
 
-/* ---------------------------------------------------------------------------------------
- * Trunks
- * ------------------------------------------------------------------------------------ */
-
 export const trunks = crudRoutes({
   table: trunk,
   orgColumn: trunk.organizationId,
@@ -167,7 +140,6 @@ export const trunks = crudRoutes({
     "carrierSigns",
     "enabled",
   ],
-  // Carrier credentials never go back to a client, same rule as SIP passwords.
   present: ({ passwordEnc: _p, ...rest }) => rest,
   validate: async (body) => {
     if (body.authMode === "register" && !body.username) {
@@ -176,29 +148,18 @@ export const trunks = crudRoutes({
     return null;
   },
   afterChange: async (organizationId, row, action) => {
-    // An IP-authenticated trunk has to exist in Kamailio's address table before it can send
-    // us calls - and 14-responsive-firewall.sh reads the same table, so this is also what
-    // stops the firewall rate-limiting a carrier.
     if (action === "delete") {
       await removeTrunkAddress(row.id as string);
     } else if (row.authMode === "ip") {
       await syncTrunkAddress(row as never);
     }
-    // permissions holds the address list in memory and will not notice the write otherwise.
     await reloadKamailio();
     await cacheRouteTable(organizationId);
   },
 });
 
-/**
- * Trunk credentials are set through a dedicated endpoint rather than the generic patch, so
- * the plaintext never appears in an audit diff and cannot be echoed back by a list call.
- */
 const trunkSecrets = new Hono<AppEnv>();
 trunkSecrets.use("*", requireTenant);
-/* Carrier credentials are one of the two things the statement in auth.ts deliberately withholds
-   from a general admin, so this is guarded explicitly - it is a PUT on a sub-path and does not
-   inherit the crudRoutes gate above. */
 trunkSecrets.use("*", requirePermission("trunk", "update"));
 trunkSecrets.put("/:id/password", async (c) => {
   const { password } = await c.req.json<{ password?: string }>();
@@ -216,10 +177,6 @@ trunkSecrets.put("/:id/password", async (c) => {
     .returning();
   if (!row) return c.json({ error: "Not found" }, 404);
 
-  // Rotating a carrier credential is exactly what an audit trail is for - "who changed the
-  // trunk password before it stopped authenticating" is unanswerable otherwise. The record
-  // deliberately carries no before/after, so the secret is never written anywhere but the
-  // encrypted column.
   await recordAudit(c, {
     action: "rotate-password",
     entityType: "trunk",
@@ -230,10 +187,6 @@ trunkSecrets.put("/:id/password", async (c) => {
   return c.json({ status: "updated" });
 });
 trunks.route("/", trunkSecrets);
-
-/* ---------------------------------------------------------------------------------------
- * Routing
- * ------------------------------------------------------------------------------------ */
 
 export const inboundRoutes = crudRoutes({
   table: inboundRoute,
@@ -282,8 +235,6 @@ export const outboundRoutes = crudRoutes({
     "enabled",
   ],
   validate: async (body, organizationId, existing) => {
-    // A trunk belonging to another tenant would route this tenant's calls out through
-    // someone else's carrier, billed to them.
     if (body.trunkId !== undefined && body.trunkId !== null) {
       const owned = await tenantOwns(
         trunk,
@@ -294,8 +245,6 @@ export const outboundRoutes = crudRoutes({
       );
       if (!owned) return "trunkId does not belong to this tenant";
     }
-    // An invalid pattern is not caught until a call matches it, at which point the Lua
-    // handler silently skips the route and the call fails with no route. Reject it here.
     if (typeof body.pattern === "string") {
       try {
         new RegExp(body.pattern);
@@ -303,11 +252,6 @@ export const outboundRoutes = crudRoutes({
         return `pattern is not a valid regular expression: ${body.pattern}`;
       }
     }
-    // Emergency routes bypass concurrent limits and time conditions by design, so flagging
-    // one is a deliberate act that should not be possible by accident on a normal route.
-    // Merged with the stored row for the same reason as the destination pairs: marking an
-    // existing route as emergency sends only isEmergency, and reading the body alone would
-    // reject it for having no trunk when it has had one all along.
     const effectiveTrunk =
       body.trunkId !== undefined ? body.trunkId : existing?.trunkId;
     const effectiveEmergency =
@@ -318,15 +262,9 @@ export const outboundRoutes = crudRoutes({
     return null;
   },
   afterChange: async (organizationId) => {
-    // The Lua handler matches patterns against this table locally, so it is the ruleset that
-    // is cached, not per-number answers.
     await cacheRouteTable(organizationId);
   },
 });
-
-/* ---------------------------------------------------------------------------------------
- * Call flow
- * ------------------------------------------------------------------------------------ */
 
 export const ringGroups = crudRoutes({
   table: ringGroup,
@@ -357,12 +295,8 @@ export const ringGroups = crudRoutes({
   },
 });
 
-/** Membership is its own resource - a ring group's members change far more often than the
- *  group itself, and a nested array would mean rewriting the whole group to add one person. */
 const ringGroupMembers = new Hono<AppEnv>();
 ringGroupMembers.use("*", requireTenant);
-/* Sub-path routes do not inherit the parent's crudRoutes gate. Membership changes who a call
-   rings, so it is a callflow update, not a read. */
 ringGroupMembers.use("*", async (c, next) =>
   requirePermission("callflow", c.req.method === "GET" ? "read" : "update")(
     c,
@@ -403,8 +337,6 @@ ringGroupMembers.post("/:id/members", async (c) => {
   if (!body.extensionId)
     return c.json({ error: "extensionId is required" }, 400);
 
-  // Both the group AND the extension must belong to this tenant - checking only one would let
-  // a tenant add another tenant's extension to their own ring group.
   const [group] = await db
     .select()
     .from(ringGroup)
@@ -455,8 +387,6 @@ ringGroupMembers.delete("/:id/members/:memberId", async (c) => {
     );
   if (!group) return c.json({ error: "Ring group not found" }, 404);
 
-  // Scoped to the verified group, not just the member id. Verifying only the group let a
-  // tenant delete ANY member row by pairing their own group id with someone else's member id.
   const removed = await db
     .delete(ringGroupMember)
     .where(
@@ -505,8 +435,6 @@ export const ivrMenus = crudRoutes({
   },
 });
 
-/** IVR options hang off a menu rather than the organization, so they need their own scoping
- *  via the parent - crudRoutes cannot express that. */
 const ivrOptions = new Hono<AppEnv>();
 ivrOptions.use("*", requireTenant);
 ivrOptions.use("*", async (c, next) =>
@@ -645,8 +573,6 @@ export const timeConditions = crudRoutes({
     );
     if (noMatchProblem) return noMatchProblem;
 
-    // The rules are evaluated by Lua at call time, where a malformed shape means the condition
-    // silently never matches and calls quietly take the wrong branch. Check it on the way in.
     if (body.rules !== undefined) {
       if (!Array.isArray(body.rules)) return "rules must be an array";
       for (const rule of body.rules as Record<string, unknown>[]) {

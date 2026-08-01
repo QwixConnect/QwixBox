@@ -1,11 +1,3 @@
-/**
- * Per-user call handling: DND, the three forwards, ring time and call waiting.
- *
- * The same settings users change from their handset with *78 and *72, so the feature codes are
- * printed alongside each control. Someone reading this dialog is often on the phone to the user
- * who set something by accident and cannot remember how - having the code in front of them is
- * the difference between fixing it and guessing.
- */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Button,

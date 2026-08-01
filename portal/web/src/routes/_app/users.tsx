@@ -1,10 +1,3 @@
-/**
- * Tenant members.
- *
- * List / role change / remove go through better-auth's organization client. Add-by-email uses
- * POST /api/tenant/members — invitations are deliberately not offered (sendInvitationEmail is a
- * no-op and signup is blocked).
- */
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

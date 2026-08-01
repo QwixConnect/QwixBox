@@ -1,15 +1,3 @@
-/**
- * The authenticated part of the portal.
- *
- * A pathless layout route, so every page under `_app/` inherits the guard below and nothing
- * renders — not the shell, not the navigation, not even the page names — until there is a
- * session. Before this existed the whole console was visible to anyone who found the hostname;
- * only the data was protected, by the API returning 401.
- *
- * nginx returns 404 for these paths to anonymous visitors as well (steps/42-nginx.sh). This guard
- * is the client-side half: it is what handles a session that expires while the tab is open, and
- * what makes the redirect land somewhere useful instead of a bare 404.
- */
 import { createFileRoute, Link, Outlet, redirect, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -32,20 +20,11 @@ import { endpoints, type Health } from "../lib/api";
 import { useActiveMemberRoleQuery, useRole, type PermissionAction, type PermissionResource } from "../lib/use-role";
 
 export const Route = createFileRoute("/_app")({
-  /**
-   * Runs before any child route renders, including on a direct deep link.
-   *
-   * `getSession` rather than the `useSession` hook, because this has to resolve before the page
-   * mounts — a hook would flash the console for a frame before redirecting, which is exactly the
-   * exposure this route exists to prevent. The server's cookie cache (5 minutes, set in
-   * auth.ts) keeps this off the database on most navigations.
-   */
   beforeLoad: async ({ location }) => {
     const session = await authClient.getSession();
     if (!session.data?.user) {
       throw redirect({
         to: "/login",
-        // So a deep link survives the round trip through sign-in.
         search: { redirect: location.href },
       });
     }
@@ -53,14 +32,6 @@ export const Route = createFileRoute("/_app")({
   component: AppLayout,
 });
 
-/**
- * Health indicator in the shell.
- *
- * The API reports each dependency separately and that distinction is surfaced rather than
- * flattened: "Redis down" means calls are on the slow path but still working, whereas
- * "database down" means config changes fail. Collapsing both into "degraded" would hide the
- * difference at exactly the moment it matters.
- */
 function HealthBadge() {
   const { data, isError } = useQuery<Health>({
     queryKey: ["health"],
@@ -115,9 +86,6 @@ function AccountMenu() {
         <Menu.Item
           onClick={async () => {
             await authClient.signOut();
-            // Full reload rather than a router navigation: it drops the React Query cache with
-            // the session, so the next user of this browser cannot see the previous tenant's
-            // data flash on screen before the refetch.
             window.location.href = "/login";
           }}
         >
@@ -128,13 +96,9 @@ function AccountMenu() {
   );
 }
 
-/* Ordered the way a call travels: it arrives on a trunk, a route decides where it lands, a
-   call flow answers it, and the result shows up in Calls. Faxes / Users / Audit are ops pages
-   that sit outside that path. */
 const NAV: {
   to: string;
   label: string;
-  /** When set, the entry is hidden unless the role can perform this action. */
   require?: { resource: PermissionResource; action: PermissionAction };
 }[] = [
   { to: "/", label: "Dashboard" },
@@ -149,13 +113,6 @@ const NAV: {
   { to: "/settings", label: "Settings" },
 ];
 
-/**
- * Shown when the account exists but belongs to no organization.
- *
- * A real state rather than an error: `provision-tenant.ts` has not been run for this user yet.
- * Worth its own panel because the alternative is every page on the dashboard returning 403,
- * which reads as a broken system rather than an unfinished setup.
- */
 function NoTenant({ email }: { email: string }) {
   return (
     <Alert color="yellow" title="No tenant assigned to this account">
@@ -182,9 +139,6 @@ function AppLayout() {
   const { data: session } = authClient.useSession();
   const { can } = useRole();
 
-  /* Every API call is scoped by the session's active organization, and a session restored from a
-     cookie on a fresh page load has none set — so this runs on entry rather than only after
-     sign-in. Without it a reload leaves every panel returning 403. */
   const org = useQuery({
     queryKey: ["active-organization", session?.user.id],
     queryFn: ensureActiveOrganization,
@@ -193,7 +147,6 @@ function AppLayout() {
     retry: false,
   });
 
-  /* Role once per session — nginx rate-limits /api/auth/* to 5 r/m. See docs/portal-ui-plan.md. */
   useActiveMemberRoleQuery(session?.user.id);
 
   const nav = NAV.filter((item) => !item.require || can(item.require.resource, item.require.action));

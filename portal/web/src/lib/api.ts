@@ -1,16 +1,6 @@
-/**
- * API client.
- *
- * Same-origin: nginx serves this bundle and proxies /api to the Hono API on loopback, so a
- * relative base keeps the build portable between environments - no rebuild to change hostname.
- */
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
-/**
- * Fields are declared explicitly rather than using constructor parameter properties: the app
- * tsconfig sets `erasableSyntaxOnly`, which disallows syntax that needs a runtime transform.
- */
 export class ApiError extends Error {
   status: number;
   detail?: string;
@@ -26,7 +16,6 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    // Session cookie must travel; better-auth is cookie-based.
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
@@ -34,17 +23,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
 
-  /* A 401 means the session went away — expired (8 hours, set in auth.ts), signed out in
-     another tab, or the server restarted. Sending the user to sign in again is the only useful
-     response; the alternative is a stale error alert on a page they can no longer load.
-
-     Guarded against firing while already on /login, or a failed sign-in would reload the page
-     and discard the error message the user needs to read. */
   if (res.status === 401 && !window.location.pathname.startsWith("/login")) {
     const back = encodeURIComponent(window.location.pathname + window.location.search);
     window.location.href = `/login?redirect=${back}`;
-    // Never settles — the navigation is already underway, and resolving would let callers render
-    // an error for a page that is being replaced.
     return new Promise<never>(() => {});
   }
 
@@ -56,17 +37,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       message = body.error ?? message;
       detail = body.detail;
     } catch {
-      /* non-JSON error body */
+      // non-JSON error body
     }
     throw new ApiError(res.status, message, detail);
   }
 
   if (res.status === 204) return undefined as T;
 
-  /* A 2xx that is not JSON means something other than the API answered - nginx serving the SPA
-     fallback for a mistyped path, a captive portal, a proxy error page. Letting res.json()
-     throw surfaces "Unexpected token '<'" to an operator, which describes the symptom and
-     hides the cause. */
   const contentType = res.headers.get("Content-Type") ?? "";
   if (!contentType.includes("json")) {
     throw new ApiError(
@@ -95,11 +72,6 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
-/* ---------------------------------------------------------------------------------------
- * Types mirroring the API. Kept hand-written rather than generated: the surface is small and
- * a generator is another build step to keep working.
- * ------------------------------------------------------------------------------------ */
-
 export type Extension = {
   id: string;
   organizationId: string;
@@ -112,7 +84,6 @@ export type Extension = {
   codecPrefs: string | null;
   maxConcurrentCalls: number | null;
   deviceMac: string | null;
-  /** Per-user call handling. Users change these themselves with *78 / *72 and friends. */
   dnd: boolean;
   forwardAllTo: string | null;
   forwardBusyTo: string | null;
@@ -122,17 +93,10 @@ export type Extension = {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
-  /** Returned only on create - the plaintext is not recoverable afterwards. */
   sipPassword?: string;
-  /** Returned on create, and on the patch that resets it. Same deal. */
   voicemailPin?: string;
 };
 
-/**
- * The polymorphic destination that inbound routes, IVR options, ring-group failover and both
- * branches of a time condition all point at. `external` carries a literal number in the id;
- * `hangup` carries nothing.
- */
 export type DestinationType =
   | "extension"
   | "ring_group"
@@ -144,7 +108,6 @@ export type DestinationType =
   | "external"
   | "hangup";
 
-/** Types whose id names a row we own, as opposed to a literal or nothing. */
 export const DESTINATION_NEEDS_ROW: DestinationType[] = [
   "extension", "ring_group", "ivr", "time_condition", "queue",
 ];
@@ -340,7 +303,6 @@ export type Fax = {
   callUuid: string | null;
   receivedAt: string;
   deliveredAt: string | null;
-  /** False when retention pruned the file but the row remains. */
   onDisk: boolean;
 };
 
@@ -404,7 +366,6 @@ export const endpoints = {
   createTrunk: (body: Partial<Trunk>) => api.post<Trunk>("/trunks", body),
   updateTrunk: (id: string, body: Partial<Trunk>) => api.patch<Trunk>(`/trunks/${id}`, body),
   deleteTrunk: (id: string) => api.delete<void>(`/trunks/${id}`),
-  /** Separate endpoint so the plaintext never appears in a patch body or an audit diff. */
   setTrunkPassword: (id: string, password: string) =>
     api.put<void>(`/trunks/${id}/password`, { password }),
 
@@ -480,10 +441,6 @@ export const endpoints = {
     const qs = q.toString();
     return api.get<CdrSummary>(`/cdr/summary${qs ? `?${qs}` : ""}`);
   },
-  /**
-   * CSV download URL — same-origin so the session cookie travels. Do not fetch through `api.get`:
-   * that helper throws on non-JSON 2xx bodies.
-   */
   cdrExportUrl: (filters: CdrFilters = {}) => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(filters)) {

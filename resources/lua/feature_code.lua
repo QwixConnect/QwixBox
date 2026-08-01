@@ -1,22 +1,4 @@
---[[
-  Feature codes a user dials from their own handset to change their call handling.
-
-    *78          do not disturb on
-    *79          do not disturb off
-    *72<number>  forward all calls to <number>
-    *73          cancel forward all
-    *90<number>  forward to <number> when busy
-    *91          cancel busy forward
-    *92<number>  forward to <number> when there is no answer
-    *93          cancel no-answer forward
-
-  The change is written through the API rather than straight to Redis. Redis is a cache: a
-  write there would be correct until the next rebuild silently reverted it, and the user would
-  have no idea their phone had stopped forwarding. The API owns Postgres and repopulates the
-  cache, so this is the only path that makes the change stick.
-
-  Usage:  <action application="lua" data="feature_code.lua <domain> <user> <action> [value]"/>
---]]
+-- Feature codes (*72, *78, ...). Subject is the authenticated user, never From:.
 
 local qwixbox = require "qwixbox"
 
@@ -32,10 +14,6 @@ end
 session:answer()
 session:execute("playback", "silence_stream://300")
 
---[[ A forward target is dialled digits, so it is whatever the user's fingers produced. It ends
-     up in a JSON body and then in a bridge string, so anything that is not a diallable
-     character is rejected rather than escaped - there is no legitimate forward target
-     containing a quote. ]]
 if value and value ~= "" and not value:match("^[0-9*#+]+$") then
   qwixbox.log("feature", "warning", "%s@%s: refusing forward target %q", user, domain, value)
   session:streamFile("ivr/ivr-that_was_an_invalid_entry.wav")
@@ -61,8 +39,6 @@ if not change then
   return
 end
 
--- Setting a forward with no digits is a mis-dial, not a request to clear it: *72 on its own
--- should complain rather than silently cancelling a forward the user meant to keep.
 if what:match("_set$") and (not value or value == "") then
   session:streamFile("ivr/ivr-that_was_an_invalid_entry.wav")
   session:hangup("NORMAL_CLEARING")
@@ -85,12 +61,8 @@ local applied, reply = qwixbox.api_post("/fs/feature", payload)
 
 if applied then
   qwixbox.log("feature", "info", "%s@%s: %s -> %s", user, domain, change.field, tostring(change.value))
-  -- Confirmation tone rather than a spoken prompt: the vanilla sound set has no phrase for
-  -- most of these, and a wrong prompt is worse than a tone the user learns.
   session:streamFile("tone_stream://%(200,100,600);%(200,100,800)")
 else
-  --[[ Say so. A feature code that appears to work but did not is the kind of failure a user
-       only discovers when they miss a call. ]]
   qwixbox.log("feature", "err", "%s@%s: %s NOT applied (%s)",
     user, domain, change.field, tostring(reply))
   session:streamFile("ivr/ivr-call_cannot_be_completed_at_this_time.wav")

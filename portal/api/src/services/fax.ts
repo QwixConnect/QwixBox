@@ -1,9 +1,3 @@
-/**
- * Fax post-processing.
- *
- * FreeSWITCH receives to TIFF because that is what T.30 transmits. Nobody wants a TIFF, so it
- * is converted to PDF and delivered - that conversion is the feature, not the receiving.
- */
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
@@ -24,13 +18,6 @@ export type FaxReport = {
   remoteStationId?: string;
 };
 
-/**
- * TIFF to PDF via tiff2pdf (libtiff-tools).
- *
- * Returns null rather than throwing: a failed conversion must not lose the fax. The TIFF is
- * already on disk and the database row records where, so a conversion problem is recoverable
- * by hand where a thrown exception mid-transaction would not be.
- */
 async function convertToPdf(tiffPath: string): Promise<string | null> {
   const pdfPath = tiffPath.replace(/\.tif{1,2}$/i, ".pdf");
   try {
@@ -51,13 +38,6 @@ async function convertToPdf(tiffPath: string): Promise<string | null> {
   }
 }
 
-/**
- * Delivery by email.
- *
- * Uses the system MTA via `sendmail`. Debian installs none by default, so this is expected to
- * be absent on a fresh box - it warns rather than failing, because the fax is already stored
- * and downloadable from the portal. steps/15-mail.sh installs Postfix, which provides it.
- */
 async function deliverByEmail(
   to: string,
   subject: string,
@@ -65,9 +45,6 @@ async function deliverByEmail(
   attachment: { path: string; filename: string } | null,
 ): Promise<boolean> {
   const boundary = `----qwixboxfax-${randomUUID()}`;
-  /* From and Date are set explicitly rather than left to the MTA. Postfix would otherwise
-     rewrite From to the local system user, and a message with no Date is scored as spam by most
-     receivers. The From domain must also match the DKIM signing domain or alignment fails. */
   const replyTo = env.mailReplyTo ? `Reply-To: ${env.mailReplyTo}\r\n` : "";
   let message =
     `From: "${env.mailFromName}" <${env.mailFrom}>\r\n${replyTo}` +
@@ -94,18 +71,9 @@ async function deliverByEmail(
   }
   message += `\r\n--${boundary}--\r\n`;
 
-  /* The fax is already stored and downloadable from the portal, so a missing MTA is a warning
-     rather than a failure - sendRaw says so and returns false. */
   return sendRaw(message, "fax");
 }
 
-/**
- * Records a received fax and delivers it.
- *
- * Writes the row FIRST, before conversion or delivery. A fax that arrived but whose PDF
- * conversion failed is a support ticket; a fax that arrived and left no trace is a lost
- * document, and the sender has no way to know.
- */
 export async function recordInboundFax(
   report: FaxReport,
 ): Promise<string | null> {

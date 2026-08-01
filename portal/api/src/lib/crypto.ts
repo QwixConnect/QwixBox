@@ -1,12 +1,3 @@
-/**
- * Encryption for the `*Enc` columns (SIP passwords, voicemail PINs, trunk credentials).
- *
- * AES-256-GCM: authenticated, so a tampered ciphertext fails to decrypt rather than silently
- * yielding garbage that then gets written into Kamailio's subscriber table.
- *
- * Plaintext SIP passwords never leave the API. The Kamailio projection decrypts here, computes
- * the HA1 digest, and stores only the digest - see services/kamailio-sync.ts.
- */
 import {
   createCipheriv,
   createDecipheriv,
@@ -16,17 +7,6 @@ import {
 } from "node:crypto";
 import { env } from "../env";
 
-/**
- * Constant-time string comparison, for secrets.
- *
- * Lives here rather than beside one of its callers because both FreeSWITCH-facing endpoints
- * (`/fs/feature` and `/fs/fax`) authenticate the same gateway secret, and a private copy in one
- * of them is how they came to disagree: one compared in constant time and the other used `===`.
- *
- * The length check leaks the length of the secret, which is unavoidable with this approach and
- * not worth defending - the secret is 32 generated characters and its length is not the part
- * worth guessing.
- */
 export function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a, "utf8");
   const right = Buffer.from(b, "utf8");
@@ -38,13 +18,8 @@ const ALGORITHM = "aes-256-gcm";
 const IV_BYTES = 12; // GCM standard
 const TAG_BYTES = 16;
 
-/**
- * The configured key is an arbitrary-length secret from config.env, so hash it to exactly the
- * 32 bytes AES-256 requires rather than demanding the operator produce a 32-byte value.
- */
 const key = createHash("sha256").update(env.encryptionKey).digest();
 
-/** Returns `<iv>:<tag>:<ciphertext>`, all base64. Self-describing so the format can change. */
 export function encrypt(plaintext: string): string {
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, key, iv);
@@ -75,12 +50,6 @@ export function decrypt(encoded: string): string {
   ]).toString("utf8");
 }
 
-/**
- * SIP digest HA1 = MD5(username:realm:password).
- *
- * MD5 is not a choice - RFC 2617 digest authentication specifies it, and Kamailio's
- * `subscriber.ha1` column expects exactly this. It is not being used as a password hash.
- */
 export function computeHa1(
   username: string,
   realm: string,
@@ -91,7 +60,6 @@ export function computeHa1(
     .digest("hex");
 }
 
-/** HA1b variant, keyed on user@domain. Kamailio stores both for flexible auth. */
 export function computeHa1b(
   username: string,
   realm: string,
@@ -102,10 +70,6 @@ export function computeHa1b(
     .digest("hex");
 }
 
-/**
- * Generates a SIP password. Deliberately avoids characters that need escaping in SIP headers,
- * XML attributes or shell arguments - all three of which this value passes through.
- */
 export function generateSipPassword(length = 24): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
   const bytes = randomBytes(length);
@@ -116,16 +80,6 @@ export function generateSipPassword(length = 24): string {
   return out;
 }
 
-/**
- * Generates a voicemail PIN.
- *
- * Digits only, because it is entered on a phone keypad - the SIP password cannot serve here
- * even though mod_voicemail will fall back to it, since an alphanumeric secret is untypable on
- * a handset and the mailbox is then simply unreachable.
- *
- * Rejects the two PINs a user would report as broken rather than as a coincidence: all-same
- * digits and the extension-shaped ascending run.
- */
 export function generateVoicemailPin(length = 6): string {
   for (;;) {
     const bytes = randomBytes(length);

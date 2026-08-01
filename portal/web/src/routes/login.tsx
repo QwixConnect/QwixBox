@@ -1,11 +1,3 @@
-/**
- * Sign in.
- *
- * The only route an anonymous visitor can reach. There is no registration link because there is
- * no self-service registration — accounts are created by an operator with
- * `src/cli/create-user.ts`, since a portal account administers telephony and a compromise means
- * toll fraud billed to a tenant.
- */
 import { useState } from "react";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import {
@@ -25,16 +17,11 @@ import { authClient, ensureActiveOrganization } from "../lib/auth-client";
 type LoginSearch = { redirect?: string };
 
 export const Route = createFileRoute("/login")({
-  /* Already signed in? Go to the app. Otherwise the browser back button after signing in lands
-     on a login form that looks like the session was lost. */
   beforeLoad: async () => {
     const session = await authClient.getSession();
     if (session.data?.user) throw redirect({ to: "/" });
   },
   validateSearch: (search: Record<string, unknown>): LoginSearch => ({
-    /* Only ever a path on this origin. An absolute URL here would turn the login page into an
-       open redirect — attacker sends you a link to your own PBX, you sign in, and land on their
-       site with your guard down. */
     redirect:
       typeof search.redirect === "string" && search.redirect.startsWith("/")
         ? search.redirect
@@ -52,11 +39,6 @@ function Login() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  /**
-   * The reply is the same whether or not the address exists — better-auth answers identically on
-   * purpose, and saying "no such account" here would hand an attacker a list of which addresses
-   * are worth attacking. So the message below is deliberately non-committal.
-   */
   async function requestReset() {
     setError(null);
     setNotice(null);
@@ -67,8 +49,6 @@ function Login() {
     }
 
     setBusy(true);
-    // The API validates the token and redirects here with it; 42-nginx.sh serves this path to
-    // anonymous visitors so the emailed link does not land on the session gate.
     const res = await authClient.requestPasswordReset({
       email,
       redirectTo: "/reset-password",
@@ -96,9 +76,6 @@ function Login() {
     const result = await authClient.signIn.email({ email, password });
 
     if (result.error) {
-      /* Deliberately not distinguishing "no such account" from "wrong password" — that
-         difference tells an attacker which addresses are worth attacking. nginx also limits this
-         path to 5 requests a minute per source address. */
       setError(
         result.error.status === 429
           ? "Too many attempts. Wait a minute and try again."
@@ -108,8 +85,6 @@ function Login() {
       return;
     }
 
-    // A fresh session has no active organization; set it before the app mounts so the first page
-    // does not fire a wave of 403s.
     await ensureActiveOrganization();
     await navigate({ to: redirect ?? "/" });
   }

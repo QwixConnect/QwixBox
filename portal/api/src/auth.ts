@@ -1,9 +1,3 @@
-/**
- * Authentication and tenancy.
- *
- * A tenant IS an organization. `session.activeOrganizationId` is the scope for every request,
- * and middleware/tenant.ts refuses to run a query without it.
- */
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -15,13 +9,6 @@ import { env } from "./env";
 import { sendMail } from "./lib/mail";
 import { consumeSignupPermission } from "./lib/signup-gate";
 
-/**
- * Permissions. Deliberately coarse: a PBX admin either manages telephony or does not. Finer
- * grained control is a support burden without a matching customer demand.
- *
- * `billing` and `security` are separated because they are the two a customer most often wants
- * to withhold from a general admin - CDR exports and trunk credentials respectively.
- */
 const statement = {
   extension: ["create", "read", "update", "delete"],
   trunk: ["create", "read", "update", "delete"],
@@ -35,7 +22,6 @@ const statement = {
 
 const ac = createAccessControl(statement);
 
-/** Read-only. For a support desk that must diagnose without being able to change routing. */
 const viewer = ac.newRole({
   extension: ["read"],
   trunk: ["read"],
@@ -45,7 +31,6 @@ const viewer = ac.newRole({
   tenant: ["read"],
 });
 
-/** Day-to-day telephony administration, without trunk credentials or billing exports. */
 const member = ac.newRole({
   extension: ["create", "read", "update", "delete"],
   trunk: ["read"],
@@ -78,14 +63,6 @@ const owner = ac.newRole({
   audit: ["read"],
 });
 
-/**
- * The roles, exported so middleware can enforce them.
- *
- * Exported deliberately rather than duplicated: these definitions were decorative for a while -
- * every role was declared here in detail and then never consulted, so a `viewer` could create
- * trunks, set carrier credentials and delete extensions. middleware/tenant.ts checks against
- * THIS object, so the statement above is the one and only description of who may do what.
- */
 export const ROLES = { owner, admin, member, viewer } as const;
 export type RoleName = keyof typeof ROLES;
 
@@ -98,23 +75,8 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
-    // Telephony admin credentials are worth more than a typical app login: a compromise means
-    // toll fraud on someone else's bill.
     minPasswordLength: 12,
 
-    /**
-     * Without this, better-auth's reset flow is inert: `/api/auth/forget-password` answers
-     * "check your email" and no email is ever sent, so a forgotten password meant deleting the
-     * account and recreating it - which drops its tenant with it.
-     *
-     * `url` is built by better-auth as {baseURL}/reset-password/{token}?callbackURL=... - an API
-     * endpoint that validates the token and then redirects to the SPA route with it. So the link
-     * only works because `/reset-password` is served to anonymous visitors in 42-nginx.sh; it is
-     * behind the session gate otherwise, and the whole flow dead-ends at a 404.
-     *
-     * One hour, better-auth's default. Deliberately not extended: this is the reset path for a
-     * console that can place calls billed to a customer.
-     */
     async sendResetPassword({ user, url }) {
       const sent = await sendMail({
         to: user.email,
@@ -127,9 +89,6 @@ export const auth = betterAuth({
           `If this was not you, nothing has changed and you can ignore this message.\n`,
       });
 
-      /* Logged, not thrown. Throwing would turn a mail outage into a 500 that an anonymous
-         caller could use to tell which addresses exist - better-auth answers identically either
-         way on purpose, and this keeps that true. The operator still needs to know. */
       if (!sent) {
         console.error(
           `[auth] could not email a reset link to ${user.email}. ` +
@@ -139,15 +98,6 @@ export const auth = betterAuth({
     },
   },
 
-  /**
-   * No self-service registration. See lib/signup-gate.ts for why this is a hook rather than
-   * `emailAndPassword.disableSignUp` - that option would also block the operator CLI, since it
-   * is enforced in the same handler `auth.api.signUpEmail()` calls.
-   *
-   * This is the application-layer control. steps/42-nginx.sh also returns 404 for the signup
-   * path, so the endpoint is not reachable from the internet at all; this catches anything that
-   * reaches the API directly on loopback.
-   */
   databaseHooks: {
     user: {
       create: {
@@ -173,31 +123,12 @@ export const auth = betterAuth({
 
   trustedOrigins: [`https://${env.pbxFqdn}`],
 
-  /**
-   * Where to find the real client address behind nginx.
-   *
-   * Without this, better-auth logs "Rate limiting could not determine a client IP" and falls
-   * back to ONE shared bucket per path - which is worse than no limiter, because a single
-   * attacker exhausts the bucket and locks every legitimate user out of signing in.
-   *
-   * `x-real-ip`, NOT `x-forwarded-for`. nginx sets X-Forwarded-For with
-   * `$proxy_add_x_forwarded_for`, which APPENDS to whatever the client sent, so a client can
-   * prepend a fake address and be rate-limited as that instead. X-Real-IP is assigned from
-   * `$remote_addr` and overwrites, so it cannot be spoofed. See /etc/nginx/proxy_params,
-   * written by steps/42-nginx.sh.
-   */
   advanced: {
     ipAddress: {
       ipAddressHeaders: ["x-real-ip"],
     },
   },
 
-  /**
-   * Second layer under nginx's `limit_req zone=api_auth` (5r/m per source address), which is the
-   * primary brute-force control. This one still matters: it is the only limiter in front of the
-   * API when something reaches it directly on loopback, and it is keyed per-path so sign-in gets
-   * a tighter budget than everything else.
-   */
   rateLimit: {
     enabled: true,
     window: 60,
@@ -215,17 +146,6 @@ export const auth = betterAuth({
       allowUserToCreateOrganization: false, // tenants are provisioned, not self-served
       organizationLimit: 1,
       creatorRole: "owner",
-      /**
-       * Not yet wired to a transport.
-       *
-       * This was an empty function whose comment said invitations were "accepted via a link
-       * surfaced in the portal" - there is no such link, and no invitation UI, so inviting
-       * someone silently did nothing at all and the invitee never learned they had been invited.
-       *
-       * Logging the accept URL is not the finished feature, but it converts a silent no-op into
-       * something an operator can act on: hand the link over, and the invitation works. When mail
-       * is wired end to end (steps/15-mail.sh gives the host a relay) this becomes a real send.
-       */
       async sendInvitationEmail(data) {
         const url = `https://${env.pbxFqdn}/accept-invitation/${data.id}`;
         console.warn(
@@ -235,22 +155,6 @@ export const auth = betterAuth({
       },
     }),
 
-    /*
-     * The `apiKey` plugin was here, described as machine credentials for the FreeSWITCH xml_curl
-     * gateway. Removed, because all three parts of that were untrue:
-     *
-     *   - Nothing used it. The gateway authenticates with HTTP Basic against
-     *     FS_XML_GATEWAY_SECRET (routes/fs-xml.ts, fs-cdr.ts, fs-feature.ts, fax.ts).
-     *   - It did not work. Its endpoints returned 500 - the `apikey` table in db/auth-schema.ts
-     *     predates the plugin's current shape and is missing `configId` and `referenceId`.
-     *   - It was live anyway. /api/auth/api-key/* was reachable by any signed-in user, which is
-     *     auth surface on an internet-facing path earning nothing.
-     *
-     * When machine credentials are genuinely needed - a customer-facing API, or per-node
-     * credentials once roles split across hosts - add it back deliberately with a regenerated
-     * schema and a test. The `apikey` table is left in place (it is empty) so that removing this
-     * does not turn into a destructive migration on the next deploy.
-     */
   ],
 });
 

@@ -274,8 +274,6 @@ function TrunksPage() {
 
       {creating && <TrunkModal trunk={null} opened onClose={() => setCreating(false)} />}
       {editing && (
-        // Keyed so the form state resets when a different trunk is picked - without it the
-        // fields keep the previous row's values.
         <TrunkModal key={editing.id} trunk={editing} opened onClose={() => setEditing(null)} />
       )}
     </>

@@ -1,6 +1,3 @@
-/**
- * Fax: the receive hook FreeSWITCH calls, and tenant-facing listing/download.
- */
 import { Hono } from "hono";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
@@ -14,24 +11,11 @@ import {
   type AppEnv,
 } from "../middleware/tenant";
 
-/* ---------------------------------------------------------------------------------------
- * Machine endpoint: fax_receive.lua reports here after rxfax completes.
- * Authenticated with the same gateway credential as the XML fallback - it is a machine, not
- * a user session.
- * ------------------------------------------------------------------------------------ */
-
 export const faxHook = new Hono();
 
 faxHook.use("*", async (c, next) => {
   const expected = process.env.FS_XML_GATEWAY_SECRET;
   if (!expected) return c.text("FS_XML_GATEWAY_SECRET is not configured", 500);
-  /* X-Gateway-Secret is what the Lua scripts send: mod_curl's `append_headers` splits on
-     whitespace, so it cannot carry "Authorization: Basic <b64>". mod_xml_curl sends real Basic
-     auth, so both are accepted.
-
-     Both compared with safeEqual, the same helper /fs/feature uses. This route previously used
-     `===` on the Basic password, which is a timing oracle on the one secret that authenticates
-     every FreeSWITCH-to-API call. */
   const direct = c.req.header("X-Gateway-Secret");
   if (direct && safeEqual(direct, expected)) return next();
 
@@ -58,22 +42,13 @@ faxHook.post("/", async (c) => {
     const id = await recordInboundFax(report);
     return c.json({ id, status: "recorded" }, id ? 201 : 202);
   } catch (err) {
-    // Never fail loudly at FreeSWITCH: the TIFF is already on disk, and the Lua side is
-    // fire-and-forget by design. Log so the discrepancy is visible.
     console.error("[fax] hook failed:", (err as Error).message);
     return c.json({ error: "recorded to disk only" }, 202);
   }
 });
 
-/* ---------------------------------------------------------------------------------------
- * Tenant-facing
- * ------------------------------------------------------------------------------------ */
-
 export const faxes = new Hono<AppEnv>();
 faxes.use("*", requireTenant);
-/* A received fax is a recording of customer content, so it sits under the `recording` resource
-   in the statement rather than getting a category of its own - viewer has no access, member can
-   read, admin can delete. */
 faxes.use("*", async (c, next) =>
   requirePermission("recording", actionForMethod(c.req.method))(c, next),
 );
@@ -84,9 +59,6 @@ faxes.get("/", async (c) => {
     orderBy: [desc(fax.receivedAt)],
     limit: 200,
   });
-  // filePath is a server path - useful to us, meaningless and mildly leaky to a client.
-  // onDisk tells the UI whether Download will work, so a pruned file shows "no longer on disk"
-  // instead of an anchor that navigates to a JSON 410.
   const out = await Promise.all(
     rows.map(async ({ filePath, ...rest }) => ({
       ...rest,
@@ -107,8 +79,6 @@ faxes.get("/:id/download", async (c) => {
 
   const file = Bun.file(row.filePath);
   if (!(await file.exists())) {
-    // The row outliving the file is a real state - retention may have pruned it - and saying
-    // so precisely beats a bare 404 that looks like a permissions problem.
     return c.json(
       {
         error: "The document is no longer on disk",

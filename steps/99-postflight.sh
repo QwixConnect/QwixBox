@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-### Final verification. Checks the system actually works rather than that the installer ran.
-###
-### This step deliberately does not change anything - it only reports. A non-zero exit means
-### the install completed but the result is not sound.
+# Verify services, listening ports, TLS validity; print summary. The [ERR]/[CRIT] count is
+# scoped to the current FreeSWITCH run - the log appends across restarts.
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
@@ -29,11 +27,6 @@ port_listening() {
   ss -ltnu 2>/dev/null | grep -qE "[:.]$1\b"
 }
 
-### Enumerate ONCE into a variable rather than piping systemctl into `grep -q` per unit.
-### `grep -q` exits at the first match, systemctl is killed by SIGPIPE, and under `pipefail`
-### the pipeline reports failure - so `|| continue` silently skipped every single service
-### check while the section still printed as if it had passed. Nothing is worse in a
-### verification step than one that quietly checks nothing.
 UNIT_FILES="$(systemctl list-unit-files --no-legend 2>/dev/null || true)"
 
 printf '\n--- Services ---\n'
@@ -58,31 +51,14 @@ if [ -x "$PREFIX/bin/fs_cli" ]; then
   check "Opus codec loaded"          bash -c "$PREFIX/bin/fs_cli -p $FS_ESL_PASSWORD -x 'show codec' | grep -qi opus"
   check "SIP profile up"             bash -c "$PREFIX/bin/fs_cli -p $FS_ESL_PASSWORD -x 'sofia status' | grep -qi RUNNING"
 
-  ### A clean boot log is a much stronger signal than 'the process is alive'.
-  ###
-  ### Scoped to the CURRENT run, not the whole file. FreeSWITCH appends across restarts, so the
-  ### unscoped version reported errors from a previous life for as long as the file survived -
-  ### and it reliably failed a perfectly good install, because FreeSWITCH starts at step 30 and
-  ### anything it depends on that is installed later logs an error in the meantime. An error
-  ### from a run that has already been restarted away is history, not a finding.
-  ###
-  ### The comparison is lexicographic on 'YYYY-MM-DD HH:MM:SS', which sorts correctly and needs
-  ### no epoch arithmetic - mawk (Debian's default awk) has no mktime(). Both sides are local
-  ### time: FreeSWITCH logs local, and `date -d` renders systemd's timestamp as local.
   fs_since=""
   if fs_started="$(systemctl show freeswitch -p ActiveEnterTimestamp --value 2>/dev/null)" \
      && [ -n "$fs_started" ]; then
     fs_since="$(date -d "$fs_started" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || true)"
   fi
 
-  ### No timestamp available (FreeSWITCH not under systemd, or an unparseable value): fall back
-  ### to the whole file rather than skipping the check. Over-reporting is the safe direction.
   fs_log_errors() {
     if [ -n "$fs_since" ]; then
-      ### The timestamp prefix is required, not assumed. The log also carries untimestamped
-      ### console output (the startup banner, module lists), and comparing those first 19
-      ### characters against a date puts every one of them inside the window - letters sort
-      ### above digits. Every level-tagged line does carry a timestamp, so this loses nothing.
       awk -v since="$fs_since" \
         '/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}/ && /\[(ERR|CRIT)\]/ \
            && (substr($0, 1, 19) "") >= (since "")' \
@@ -109,8 +85,6 @@ check "rtpengine control socket" bash -c "ss -lun | grep -q ':${RTPENGINE_NG_POR
 
 if [ "${ENABLE_WEBRTC:-1}" = "1" ]; then
   check "WSS ${WSS_PORT} listening" port_listening "${WSS_PORT}"
-  ### A browser refuses a WSS socket whose certificate does not match, so this is worth
-  ### checking separately from the port being open.
   check "WSS presents a valid certificate" \
     bash -c "echo | openssl s_client -connect 127.0.0.1:${WSS_PORT} -servername ${PBX_FQDN} 2>/dev/null | grep -q 'Verify return code: 0'"
 fi
@@ -129,22 +103,16 @@ check "fail2ban jails loaded"    bash -c "fail2ban-client status | grep -q 'Jail
 check "Redis needs a password"   bash -c "! redis-cli ping 2>/dev/null | grep -q PONG"
 check "Postgres is loopback-only" bash -c "! ss -ltn | grep ':5432' | grep -qv '127.0.0.1\|::1'"
 
-### Only meaningful once 15-mail.sh has run; a host with no MTA is a supported state.
 if [ -x /usr/sbin/sendmail ]; then
   printf '\n--- Mail ---\n'
   check "postfix running" systemctl is-active --quiet postfix
   check "sendmail available" test -x /usr/sbin/sendmail
 
-  ### The property that keeps a SIP edge from becoming an open relay. Asserted rather than
-  ### assumed, because a stray inet_interfaces edit would not show up anywhere else.
   check "postfix is loopback-only" \
     bash -c "! ss -ltn 2>/dev/null | awk '\$4 ~ /:25\$/' | grep -qv '127.0.0.1\|::1'"
 
   if systemctl is-active --quiet opendkim 2>/dev/null; then
     check "opendkim running" systemctl is-active --quiet opendkim
-    ### Compares the published TXT record against the private key. Catches the case where the
-    ### key was regenerated but DNS still carries the old public half - mail then goes out
-    ### signed with a key nobody can verify, and only the receiver notices.
     _dkim_domain="${MAIL_DOMAIN:-}"
     if [ -z "$_dkim_domain" ]; then
       case "${SMTP_FROM:-}" in *@*) _dkim_domain="${SMTP_FROM#*@}" ;; *) _dkim_domain="${PBX_FQDN#*.}" ;; esac
@@ -191,8 +159,6 @@ if [ "$problems" -eq 0 ]; then
   info "Health:      qwixbox-healthcheck"
   printf '\n'
 
-  ### Where the password went. Printing it again here would put it in the install log, which is
-  ### the one place 44-admin-account.sh went out of its way to keep it out of.
   if [ -f "${CONFIG_DIR}/first-login" ]; then
     info "Sign in as ${ADMIN_EMAIL:-the account you created}"
     info "  Password:  sudo cat ${CONFIG_DIR}/first-login"

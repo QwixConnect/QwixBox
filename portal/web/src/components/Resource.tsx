@@ -1,13 +1,3 @@
-/**
- * Shared page furniture for the resource screens.
- *
- * Extracted because four pages otherwise repeat the same loading/error/empty handling, and the
- * error case is the one that matters: the API rejects cross-tenant references and invalid
- * patterns with a 400 and a specific message, and swallowing that into "something went wrong"
- * would leave someone guessing at a rule the server is willing to explain.
- *
- * `RoleGate` is convenience only — the server check stays the boundary. See `lib/use-role.ts`.
- */
 import type { ReactElement, ReactNode } from "react";
 import { cloneElement } from "react";
 import { Alert, Button, Center, Group, Loader, Stack, Text, Title, Tooltip } from "@mantine/core";
@@ -38,7 +28,6 @@ export function PageHeader({
   );
 }
 
-/** Surfaces the API's own message. See the note at the top of this file. */
 export function ErrorAlert({ error, title }: { error: unknown; title?: string }) {
   if (!error) return null;
   const api = error instanceof ApiError ? error : null;
@@ -56,21 +45,8 @@ export function ErrorAlert({ error, title }: { error: unknown; title?: string })
   );
 }
 
-/**
- * Loading / error / empty for a list query.
- *
- * **Callers must destructure the query in their own render and pass these as separate props.**
- * Passing the whole `useQuery` result object through does not work: React Query v5 tracks which
- * result properties a component reads *during that component's render* and only re-renders it
- * when those change. Handing the object to a child means the parent only ever touches `data`,
- * never subscribes to `error` or `isPending`, and the page stays frozen on the spinner while
- * the query sits in an error state behind it.
- *
- * `isSuccess` rather than a caller-computed `isEmpty` for the same reason the props are split:
- * `(data ?? []).length === 0` is true while data is still undefined, so a failed fetch rendered
- * "No trunks yet" and told an operator a tenant had nothing configured when in fact the API was
- * unreachable. Emptiness can only be claimed when the API actually answered.
- */
+// Callers must destructure and pass these separately. Handing the whole useQuery result to a
+// child breaks React Query v5's property tracking and the page freezes on the spinner.
 export function QueryState<T>({
   data,
   error,
@@ -85,19 +61,13 @@ export function QueryState<T>({
   error: unknown;
   isPending: boolean;
   isSuccess: boolean;
-  /** True when React Query has parked the fetch instead of running it. */
   isPaused?: boolean;
   emptyMessage: string;
   emptyAction?: ReactNode;
   children: ReactNode;
 }) {
-  // Error first: a query that failed after retries is not "still loading", and a spinner that
-  // never resolves is how a broken page disguises itself as a slow one.
   if (error) return <ErrorAlert error={error} />;
 
-  /* A paused query is pending and will stay pending - no request is in flight and none is
-     scheduled. networkMode: "always" in main.tsx should mean this never happens, but if it
-     ever does, say so instead of spinning for ever. */
   if (isPaused) {
     return (
       <Alert color="yellow" title="Waiting for a connection" mb="md">
@@ -129,13 +99,6 @@ export function QueryState<T>({
   return <>{children}</>;
 }
 
-/**
- * Delete confirmation.
- *
- * A plain confirm() would do, but these deletes cascade into live call routing - removing a
- * ring group an inbound route points at changes what happens to the next call - so the name is
- * repeated back rather than relying on someone reading a generic prompt.
- */
 export function DeleteButton({
   what,
   onConfirm,
@@ -176,15 +139,6 @@ export function DeleteButton({
   return button;
 }
 
-/**
- * Conditionally render or disable UI based on the caller's role.
- *
- * - `hide` (default): omit the control entirely — use for create buttons and nav.
- * - `disable`: keep the control visible but inert, with a tooltip — use for Edit/Delete so an
- *   operator who cannot act does not assume the page is broken.
- *
- * Children must be a single element that accepts `disabled` when mode is `disable`.
- */
 export function RoleGate({
   resource,
   action,

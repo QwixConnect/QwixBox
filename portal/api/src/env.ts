@@ -1,10 +1,3 @@
-/**
- * Environment, validated once at startup.
- *
- * These are written into /opt/qwixbox-api/.env by steps/41-api-deploy.sh, which builds them from
- * /etc/qwixbox/config.env. Failing loudly here beats a null-reference three layers deep on
- * the first call.
- */
 
 function required(name: string): string {
   const v = process.env[name];
@@ -39,30 +32,13 @@ export const env = {
   pbxFqdn: optional("PBX_FQDN", "localhost"),
   pbxSipDomain: optional("PBX_SIP_DOMAIN", "localhost"),
 
-  /**
-   * Kamailio's egress listener, used in the directory dial-string this API serves as the
-   * mod_xml_curl fallback. Endpoints register to Kamailio, so FreeSWITCH cannot reach them
-   * directly and sends calls for an extension back out to Kamailio instead.
-   */
   kamEgress: optional("KAM_EGRESS", "127.0.0.1:5070"),
 
-  /**
-   * Key for the `*Enc` columns. Distinct from the auth secret: rotating a session secret
-   * should not make every stored SIP password undecryptable.
-   */
   encryptionKey: required("ENCRYPTION_KEY"),
   authSecret: required("AUTH_SECRET"),
 
-  /** Kamailio's database, which we project into. Separate from ours by design. */
   kamailioDatabaseUrl: optional("KAMAILIO_DATABASE_URL", ""),
 
-  /**
-   * Sender for fax and voicemail notifications.
-   *
-   * Must be an address on a domain we control, with SPF and DKIM - never the tenant's SIP
-   * domain or the caller's number. This one sender covers every tenant, so alignment is the
-   * only thing keeping the mail out of spam folders.
-   */
   mailFrom: optional("SMTP_FROM", `pbx@${optional("PBX_FQDN", "localhost")}`),
   mailFromName: optional("MAIL_FROM_NAME", "Phone System"),
   mailReplyTo: optional("MAIL_REPLY_TO", ""),

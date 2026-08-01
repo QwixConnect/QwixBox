@@ -33,10 +33,6 @@ function Dashboard() {
     retry: false,
   });
 
-  /**
-   * A 404 on the tenant is not a failure — it means the organization exists but telephony has
-   * not been provisioned. Saying so names the next action, which a generic error would not.
-   */
   if (tenant.error instanceof ApiError && tenant.error.status === 404) {
     return (
       <Alert color="yellow" title="Telephony is not provisioned for this organization">

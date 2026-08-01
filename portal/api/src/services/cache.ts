@@ -1,22 +1,3 @@
-/**
- * Redis write-through.
- *
- * This service is why Lua does not need to know our schema. The API is the only writer of the
- * cache that scripts/xml_handler.lua reads: it renders directory entries, route tables and DID
- * maps into Redis on every config change, and Lua just fetches them.
- *
- * Two things follow from that division:
- *
- * 1. **Cache shape is chosen per lookup, not uniformly.** Directory, internal calls and inbound
- *    DIDs have bounded key spaces, so the rendered answer is cached. Outbound destinations do
- *    not - every new number dialled would be a miss - so the tenant's *route table* is cached
- *    and Lua matches patterns locally. Caching outbound per-number would fill Redis with
- *    single-use keys and still hit the database on nearly every call.
- *
- * 2. **A cache write failing must not fail the config change.** The data is already in
- *    Postgres, and Lua falls back to Postgres then to mod_xml_curl. Cache staleness degrades
- *    latency, never correctness.
- */
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import {
@@ -35,17 +16,6 @@ import { decrypt } from "../lib/crypto";
 import { esl } from "./esl";
 import { keys, safeDel, safeDelPattern, safeSet } from "./redis";
 
-/* ---------------------------------------------------------------------------------------
- * Directory
- * ------------------------------------------------------------------------------------ */
-
-/**
- * The rendered `<user>` document for one extension.
- *
- * `cacheable` is emitted here because FreeSWITCH core honours it in
- * switch_xml_locate_user_merged - a second cache layer above Redis, inside FreeSWITCH itself.
- * A just-edited extension gets 0 so the next registration re-reads it.
- */
 function renderDirectoryUser(
   ext: typeof extension.$inferSelect,
   tenant: typeof tenantSettings.$inferSelect,
@@ -59,14 +29,9 @@ function renderDirectoryUser(
   const callerNumber =
     ext.callerIdNumber ?? tenant.defaultCallerIdNumber ?? ext.number;
 
-  /* mod_voicemail falls back to the `password` param when `vm-password` is absent, which means
-     an unset PIN silently makes the mailbox require the 24-character random SIP password on a
-     numeric keypad - unreachable rather than insecure, and confusing to diagnose. */
   const vmPin = voicemailPin
     ? `<param name="vm-password" value="${escapeXml(voicemailPin)}"/>`
     : "";
-  /* vm-attach-file is what makes the notification useful; without it the email says a message
-     arrived and the user still has to call in to hear it. */
   const vmEmail = ext.voicemailEmail
     ? `<param name="vm-email-all-messages" value="true"/>
     <param name="vm-attach-file" value="true"/>
@@ -96,7 +61,6 @@ function renderDirectoryUser(
 </user>`;
 }
 
-/** XML attribute values are attacker-influenced (display names, emails) - escape them. */
 function escapeXml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -141,8 +105,6 @@ export async function cacheExtension(extensionId: string): Promise<void> {
       voicemailEnabled: ext.voicemailEnabled,
     }),
   );
-  // Drop FreeSWITCH's own copy so the edit is visible on the next lookup rather than after
-  // the cacheable TTL expires.
   await esl.flushXmlCache(ext.number, tenant.sipDomain);
 }
 
@@ -157,10 +119,6 @@ export async function invalidateExtension(
   );
   await esl.flushXmlCache(number, sipDomain);
 }
-
-/* ---------------------------------------------------------------------------------------
- * Route table
- * ------------------------------------------------------------------------------------ */
 
 export type CachedRoute = {
   id: string;
@@ -179,15 +137,6 @@ export type CachedRoute = {
   } | null;
 };
 
-/**
- * The tenant's outbound routes, ordered so Lua can evaluate top-down and stop at the first
- * match.
- *
- * Emergency routes sort first unconditionally. That ordering is the mechanism by which an
- * emergency call bypasses concurrent-call limits and time conditions - if it sorted by
- * priority alongside everything else, a misconfigured priority could put a fraud check ahead
- * of a 911 call.
- */
 export async function cacheRouteTable(organizationId: string): Promise<void> {
   const tenant = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.organizationId, organizationId),
@@ -235,10 +184,6 @@ export async function cacheRouteTable(organizationId: string): Promise<void> {
   await safeSet(keys.routes(tenant.sipDomain), JSON.stringify(routes));
 }
 
-/* ---------------------------------------------------------------------------------------
- * Inbound DIDs and tenant settings
- * ------------------------------------------------------------------------------------ */
-
 export async function cacheInboundRoutes(
   organizationId: string,
 ): Promise<void> {
@@ -254,7 +199,6 @@ export async function cacheInboundRoutes(
     ),
   });
 
-  // Bounded key space, so one key per DID is fine and gives Lua an O(1) lookup.
   await Promise.all(
     rows.map(async (r) =>
       safeSet(
@@ -271,7 +215,6 @@ export async function cacheInboundRoutes(
   );
 }
 
-/** Settings Lua needs at call time. Kept small - this is read on the hot path. */
 export async function cacheTenantSettings(
   organizationId: string,
 ): Promise<void> {
@@ -296,32 +239,6 @@ export async function cacheTenantSettings(
   );
 }
 
-/* ---------------------------------------------------------------------------------------
- * Call-flow objects
- *
- * These are read by the Lua scripts at call time (ring_group.lua, ivr.lua,
- * time_condition.lua). Cached whole - a ring group with its members, a menu with its options -
- * because the alternative is the script making several round trips mid-call, and each one is
- * dead air the caller can hear.
- * ------------------------------------------------------------------------------------ */
-
-/**
- * Rewrites a destination pair into what the call-time scripts can actually use.
- *
- * Every other destination type is addressed by its own id - `ivr.lua` looks up
- * `qwixbox:ivr:<domain>:<id>`, `ring_group.lua` looks up `qwixbox:rg:<domain>:<id>`. An
- * **extension** is the exception: `extension.lua` takes a NUMBER, because that is what
- * `qwixbox:call:<domain>:<number>`, `bridge user/<number>@<domain>` and the voicemail mailbox
- * are all keyed by. Caching the extension's UUID meant `extension.lua <uuid>`, which found no
- * call-handling row, could not bridge, and offered voicemail on a mailbox named after a UUID.
- *
- * It went unnoticed because the mod_xml_curl fallback in routes/fs-xml.ts does this same
- * resolution in SQL and answers correctly - so an inbound DID worked while the identical
- * destination behind an IVR option or a ring-group failover did not.
- *
- * Done here, once, rather than in each of the five writers below: a destination pair is
- * cached in five places and they must agree.
- */
 async function resolveDestinationId(
   type: string | null,
   id: string | null,
@@ -333,9 +250,6 @@ async function resolveDestinationId(
   });
   if (target) return target.number;
 
-  /* Already a number (the portal may send one directly), or the extension was deleted. Passing
-     it through unchanged keeps the old behaviour rather than silently dropping the destination;
-     the script logs a miss, which is the visible failure we want. */
   return id;
 }
 
@@ -377,8 +291,6 @@ export async function cacheRingGroups(organizationId: string): Promise<void> {
           group.failoverType,
           group.failoverId,
         ),
-        // Disabled extensions are filtered here rather than in Lua: a disabled member should
-        // not even be attempted, and doing it at cache time keeps the call path simple.
         members: members
           .filter((m) => m.enabled)
           .sort((a, b) => a.position - b.position)
@@ -395,13 +307,6 @@ export async function cacheRingGroups(organizationId: string): Promise<void> {
   }
 }
 
-/**
- * Makes a call-flow object reachable by dialling its number from inside the tenant.
- *
- * Deliberately a separate small key rather than folding the number into the object: the
- * dialplan lookup starts from a dialled string and has no id to work with, so it needs an
- * index in that direction.
- */
 async function cacheFeatureNumber(
   domain: string,
   number: string | null,
@@ -444,7 +349,6 @@ export async function cacheIvrMenus(organizationId: string): Promise<void> {
         maxRetries: menu.maxRetries,
         timeoutType: menu.timeoutType,
         timeoutId: await resolveDestinationId(menu.timeoutType, menu.timeoutId),
-        // Keyed by digit so Lua can look up in one step rather than scanning.
         options: Object.fromEntries(
           await Promise.all(
             options.map(async (o) => [
@@ -498,18 +402,6 @@ export async function cacheTimeConditions(
   }
 }
 
-/**
- * Rebuilds everything for one tenant. Used on provisioning, after a bulk import, and as the
- * repair action when the cache is suspected stale.
- *
- * Purges first, because the individual cache builders only ever SET. Without the purge a
- * deleted ring group keeps answering, and a ring group renumbered from 600 to 610 answers on
- * both - the sort of ghost that survives every subsequent rebuild and is diagnosed by nobody.
- *
- * The gap between purge and repopulate is deliberate and safe: a lookup landing in it misses
- * Redis and falls through to mod_xml_curl, which serves the same answer from Postgres. Slower
- * for a few milliseconds, never wrong.
- */
 export async function rebuildTenant(organizationId: string): Promise<void> {
   const existing = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.organizationId, organizationId),

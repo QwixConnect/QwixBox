@@ -1,15 +1,3 @@
-/**
- * Set a new password from an emailed link.
- *
- * The second of two routes an anonymous visitor can reach, and it only works because
- * 42-nginx.sh serves it without the session gate — everything else under `/` returns 404 until
- * you sign in, which is exactly what would happen to this link otherwise.
- *
- * The token does not come from the email directly. better-auth's link points at
- * `/api/auth/reset-password/{token}?callbackURL=/reset-password`; that endpoint validates the
- * token and redirects here with `?token=`, or with `?error=INVALID_TOKEN` when it has expired
- * or been used. Both land on this page, so both are handled here rather than at the API.
- */
 import { useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
@@ -45,8 +33,6 @@ function ResetPassword() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
-  /* A dead link is its own screen. Rendering the form and failing on submit would waste the
-     one thing the person has - they need to request a new link, not type a password twice. */
   if (!token || linkError) {
     return (
       <Shell>
@@ -77,12 +63,10 @@ function ResetPassword() {
   async function submit() {
     setError(null);
 
-    // Checked here as well as by the server so the second field is not a silent no-op.
     if (password !== confirm) {
       setError("The two passwords do not match.");
       return;
     }
-    // Matches minPasswordLength in portal/api/src/auth.ts.
     if (password.length < 12) {
       setError("Use at least 12 characters.");
       return;
@@ -98,8 +82,6 @@ function ResetPassword() {
     }
 
     setDone(true);
-    /* Not signed in automatically. Proving you can receive mail at the address is not the same
-       as proving you know the new password, and this console can place billable calls. */
     setTimeout(() => void navigate({ to: "/login" }), 2500);
   }
 

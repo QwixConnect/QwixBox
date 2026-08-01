@@ -1,18 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Provision a tenant.
- *
- * Organizations are deliberately not self-served (`allowUserToCreateOrganization: false` in
- * auth.ts) - a tenant is a commercial relationship, and letting any signed-up user mint one
- * would also let them claim a SIP domain. This is the platform-operator path that replaces it.
- *
- * It does the whole job, because a half-provisioned tenant looks fine in the portal and fails
- * on the wire: organization, owner membership, telephony settings, Kamailio's domain table,
- * and the Redis cache the Lua handler reads.
- *
- *   bun run src/cli/provision-tenant.ts \
- *     --name "Acme Corp" --slug acme --domain acme.example.com --owner admin@acme.test
- */
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
@@ -48,8 +34,6 @@ if (!owner) {
   process.exit(1);
 }
 
-// The SIP domain is the tenancy boundary, so it is unique platform-wide: two tenants sharing
-// one would make use_domain=1 stop distinguishing them.
 const clash = await db.query.tenantSettings.findFirst({
   where: eq(tenantSettings.sipDomain, domain),
 });
@@ -74,10 +58,6 @@ if (!existing) {
   console.log(`  organization ${slug} already exists (${orgId})`);
 }
 
-/* Scoped by organization AND user. Scoping by organization alone meant that once the tenant had
-   any member, a later run naming a different --owner was silently skipped: no error, no message,
-   and the operator reasonably concluded it had worked. A tenant was therefore permanently one
-   person. Use add-tenant-user.ts to give anyone else access, with a role. */
 const membership = await db.query.member.findFirst({
   where: and(eq(member.organizationId, orgId), eq(member.userId, owner.id)),
 });
@@ -111,7 +91,6 @@ console.log(
   `  telephony configured: ${domain} (${tier}, max ${maxCalls} concurrent)`,
 );
 
-// Kamailio must know the domain before anyone in it can register.
 await syncDomain(domain);
 await reloadKamailio();
 await rebuildTenant(orgId);

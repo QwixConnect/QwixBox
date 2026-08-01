@@ -1,8 +1,3 @@
-/**
- * QwixBox API.
- *
- * Binds loopback only — nginx terminates TLS and proxies in (steps/42-nginx.sh).
- */
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { auth } from "./auth";
@@ -33,14 +28,6 @@ const app = new Hono();
 
 app.use("*", logger());
 
-/**
- * Bounds a probe with its own deadline.
- *
- * The pools' normal timeouts are tuned for real work (Postgres allows 5s to connect), which is
- * far too long for a health check — a monitor polling every 5s reads a slow answer as an
- * outage. Each probe gets a short budget of its own, and "did not answer in time" is reported
- * as unhealthy, which is what it means operationally.
- */
 function probe(p: Promise<boolean>, ms = 750): Promise<boolean> {
   return Promise.race([
     p.catch(() => false),
@@ -48,11 +35,6 @@ function probe(p: Promise<boolean>, ms = 750): Promise<boolean> {
   ]);
 }
 
-/**
- * Health, for steps/52-monitoring.sh. Reports each dependency separately: "the API is up but
- * Redis is unreachable" is a materially different situation from "everything is fine", and a
- * single boolean hides exactly the case worth paging on.
- */
 app.get("/health", async (c) => {
   const [dbOk, redisOk, eslOk] = await Promise.all([
     probe(pool.query("SELECT 1").then(() => true)),
@@ -66,52 +48,27 @@ app.get("/health", async (c) => {
       status: healthy ? "ok" : "degraded",
       database: dbOk,
       redis: redisOk,
-      // ESL being down means the portal cannot see live calls or flush the XML cache, but
-      // config changes still land in Postgres and Redis - degraded, not unhealthy.
       freeswitch: eslOk,
     },
     healthy ? 200 : 503,
   );
 });
 
-// better-auth owns /api/auth/** including the organization endpoints.
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
-/**
- * Session probe for nginx's `auth_request` (steps/42-nginx.sh).
- *
- * nginx branches on the status code alone, which is why this exists rather than using
- * better-auth's own `/api/auth/get-session` - that answers 200 with a null body when there is no
- * session, giving nginx nothing to act on.
- *
- * Deliberately NOT under /api/, so it can never be confused with a tenant-scoped route, and
- * `internal` in the nginx block keeps it unreachable from outside.
- *
- * It checks for a session and nothing more. A user who exists but has no organization yet must
- * still reach the app to be told that - 401ing them here would 404 the whole console with no
- * explanation. The organization requirement belongs to requireTenant, which returns a precise 403.
- */
 app.get("/internal/session", async (c) => {
   try {
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
     return session?.user ? c.body(null, 200) : c.body(null, 401);
   } catch (err) {
-    /* Fail closed. If the session store is unreachable we cannot prove the caller is
-       authenticated, and serving the console to an unproven caller is the wrong way to be
-       wrong. The portal is unreachable until the database is back, which is already true of
-       everything else it does. */
     console.error("[auth] session probe failed:", (err as Error).message);
     return c.body(null, 401);
   }
 });
 
-// The FreeSWITCH XML fallback. Machine-authenticated, not a user session.
 app.route("/fs/xml", fsXml);
-// fax_receive.lua reports completed receives here, with the same machine credential.
 app.route("/fs/fax", faxHook);
-// mod_xml_cdr posts here on hangup. Off the call path - the caller has already gone.
 app.route("/fs/cdr", fsCdr);
-// Feature codes dialled from a handset. Narrow by design - see the route.
 app.route("/fs/feature", fsFeature);
 
 app.route("/api/tenant", tenants);
@@ -130,22 +87,9 @@ app.notFound((c) => c.json({ error: "Not found" }, 404));
 
 app.onError((err, c) => {
   console.error("[api] unhandled:", err);
-  // Never leak internals to a client; the detail is in the journal.
   return c.json({ error: "Internal error" }, 500);
 });
 
-/**
- * Warm the cache on startup.
- *
- * Redis is configured as a pure cache (`save ""`, `appendonly no` in steps/21-redis.sh), so a
- * Redis restart loses every key. Nothing else rebuilds them: the write-through path only fires
- * on a config change, so without this the cache stays empty until someone happens to edit
- * something, and every lookup takes the slow fall-through path in the meantime.
- *
- * Deliberately non-fatal and not awaited. A cold cache is a performance problem, not a
- * correctness one - the fall-through chain still resolves - so failing to warm must not stop
- * the API from serving.
- */
 async function warmCache(): Promise<void> {
   try {
     const tenants = await db.query.tenantSettings.findMany();
@@ -161,23 +105,6 @@ async function warmCache(): Promise<void> {
   }
 }
 
-/**
- * Re-warms the cache whenever Redis has been emptied under us.
- *
- * The startup warm above is not enough on its own. Redis holds nothing durable
- * (steps/21-redis.sh sets `save ""` and `appendonly no`), so any Redis restart empties it - and
- * `unattended-upgrades` is enabled, so a Redis security update does that unattended, at night.
- * The xml_curl fallback keeps answering from Postgres but never repopulates Redis, so before
- * this the cache stayed empty until the API happened to restart or someone edited something.
- *
- * Two consequences, both silent: every call setup took the HTTP path indefinitely, and the Lua
- * tier that exists to survive an API outage was switched off for the duration. Verified by
- * restarting Redis and watching DBSIZE stay at 0.
- *
- * A poll rather than keyspace notifications: notifications need `notify-keyspace-events`
- * configured and a second connection held open, and would still miss the case where Redis was
- * down when the event fired. Checking a sentinel is cheap and cannot miss.
- */
 const WARM_CHECK_INTERVAL_MS = 60_000;
 
 async function warmIfCacheLost(): Promise<void> {
@@ -193,7 +120,6 @@ async function warmIfCacheLost(): Promise<void> {
 }
 
 void warmCache().then(() => claimWarm());
-/* unref so this timer never holds the process open on shutdown. */
 setInterval(warmIfCacheLost, WARM_CHECK_INTERVAL_MS).unref();
 
 export default {

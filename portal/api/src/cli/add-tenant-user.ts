@@ -1,21 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Give an existing account access to an existing tenant, with a role.
- *
- * `provision-tenant.ts` creates a tenant and makes one person its owner. It deliberately does
- * not do this job: adding somebody to a tenant that already exists is a different operation, and
- * conflating the two is how the previous version ended up silently ignoring a second `--owner`.
- *
- * This is also the only way to hand out any role other than owner. The roles in auth.ts
- * (owner, admin, member, viewer) were unreachable before this existed, because nothing could
- * write a `member` row with a role of the operator's choosing.
- *
- *   bun run src/cli/add-tenant-user.ts --email them@example.com --tenant acme --role admin
- *   bun run src/cli/add-tenant-user.ts --email them@example.com --tenant acme --role viewer
- *
- * Run from /opt/qwixbox-api, not the git checkout - the checkout has neither .env nor
- * dependencies.
- */
 import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db";
@@ -38,10 +21,6 @@ if (!email || !tenant) {
   process.exit(2);
 }
 
-/* Checked against the exported role table rather than a hard-coded list, so adding a role in
-   auth.ts makes it assignable here without a second edit. An unknown role is refused rather
-   than defaulted - a typo that silently produced a `viewer` would look like a permissions bug
-   later, and one that silently produced an `owner` would be worse. */
 if (!(role in ROLES)) {
   console.error(
     `Unknown role "${role}". Known roles: ${Object.keys(ROLES).join(", ")}`,
@@ -67,8 +46,6 @@ if (!org) {
   process.exit(1);
 }
 
-/* Scoped by BOTH organization and user. Scoping by organization alone - which is what
-   provision-tenant.ts did - means the first member makes every later one a no-op. */
 const existing = await db.query.member.findFirst({
   where: and(eq(member.organizationId, org.id), eq(member.userId, account.id)),
 });
@@ -93,7 +70,5 @@ if (existing) {
   console.log(`Added ${email} to ${tenant} as ${role}.`);
 }
 
-/* The role is read from this row on every request, so it takes effect immediately - there is no
-   cache to clear and no need for the user to sign out. */
 console.log("They can sign in and select the tenant now.");
 process.exit(0);

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-### SSH hardening. Refuses to lock you out: password auth is only disabled once at least one
-### authorised key actually exists.
+# Key-only SSH, no root login, restricted auth.
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
@@ -10,10 +9,6 @@ load_config
 CONF=/etc/ssh/sshd_config.d/90-hardening.conf
 install -d -m 0755 /etc/ssh/sshd_config.d
 
-### --- Key check ------------------------------------------------------------------------
-
-### Disabling password auth on a host where nobody has uploaded a key is how you lose access
-### to a production box. Count keys for every non-system account plus root first.
 key_count=0
 while IFS=: read -r user _ uid _ _ home _; do
   [ "$uid" -ge 1000 ] || [ "$user" = "root" ] || continue
@@ -32,8 +27,6 @@ if [ "$key_count" -eq 0 ]; then
   warn "Add a key, then re-run: sudo ./install.sh --only 10-ssh-hardening.sh --force"
   DISABLE_PASSWORDS=0
 fi
-
-### --- Config --------------------------------------------------------------------------
 
 {
   echo "# Managed by the QwixBox installer."
@@ -60,16 +53,12 @@ fi
   echo "MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com"
 } | write_file "$CONF" 0644 || true
 
-### Drop weak Diffie-Hellman moduli. Cheap, and removes a whole class of downgrade attack.
 if [ -f /etc/ssh/moduli ] && awk '$5 < 3071' /etc/ssh/moduli | grep -q .; then
   awk '$5 >= 3071' /etc/ssh/moduli > /etc/ssh/moduli.strong
   mv /etc/ssh/moduli.strong /etc/ssh/moduli
   info "Removed weak DH moduli"
 fi
 
-### If there is no SSH server there is nothing to harden. That is a legitimate state on a
-### node provisioned by an image pipeline or console, so warn and move on rather than failing
-### the whole install. The config is already written and takes effect if sshd is added later.
 if ! command -v sshd >/dev/null 2>&1; then
   warn "No SSH server installed - hardening config written but not applied."
   ok "SSH hardening skipped (sshd absent)"

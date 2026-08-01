@@ -1,9 +1,3 @@
-/**
- * Audit log viewer.
- *
- * before/after blobs are already Enc-stripped by the API. A null userId means a feature-code
- * actor — the action string carries `feature-code:<number>@<domain>`.
- */
 import { Fragment, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -79,7 +73,6 @@ function formatVal(v: unknown): string {
 
 function who(row: AuditEntry): string {
   if (row.userEmail) return row.userEmail;
-  // Feature-code rows: action is "update (feature-code:1001@domain)" with null userId.
   const m = row.action.match(/\((feature-code:[^)]+)\)/);
   if (m) return m[1]!;
   if (row.userId) return row.userId;

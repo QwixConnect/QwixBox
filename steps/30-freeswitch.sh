@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-### FreeSWITCH built from source - the media server and PBX core.
-###
+# FreeSWITCH from source. The module selection below is the intent-carrying part; every enabled
+# module needs its dev library in the apt list or the build dies mid-make.
 # step-inputs: resources/freeswitch.service
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
@@ -8,7 +8,6 @@ set -euo pipefail
 require_root
 load_config
 
-### $1 still overrides the tag for a one-off build; otherwise it comes from config.env.
 FS_VERSION="${1:-${FS_VERSION:-v1.11.1}}"
 FS_SOUND_RATES="${FS_SOUND_RATES:-8000 48000}"
 BUILD_DIR="/usr/src"
@@ -21,7 +20,6 @@ sudo apt -y update
 sudo apt -y install htop curl git sngrep ca-certificates \
   gpg vim-tiny tcpdump rsyslog apt-transport-https gnupg2 lsb-release wget
 
-### Freeswitch dependencies
 sudo apt -y install \
   git build-essential automake autoconf wget libtool \
   libncurses-dev libjpeg-dev libsqlite3-dev libcurl4-openssl-dev \
@@ -31,20 +29,15 @@ sudo apt -y install \
   libpq-dev libshout3-dev libmp3lame-dev libmpg123-dev \
   libhiredis-dev
 
-### Clone repositories.
 cd "$BUILD_DIR"
 [ -d "$BUILD_DIR/libks" ]      || sudo git clone https://github.com/signalwire/libks.git
 [ -d "$BUILD_DIR/spandsp" ]    || sudo git clone https://github.com/freeswitch/spandsp.git
 [ -d "$BUILD_DIR/freeswitch" ] || sudo git clone -b "$FS_VERSION" https://github.com/signalwire/freeswitch.git
 [ -d "$BUILD_DIR/sofia-sip" ]  || sudo git clone https://github.com/freeswitch/sofia-sip.git
 
-### The systemd unit template comes from this repo's own checkout ($REPO_DIR, set by
-### lib/common.sh). This used to clone the repo from GitHub onto the target, which meant a
-### local edit did nothing until it was pushed - a genuinely confusing failure mode.
 UNIT_TEMPLATE="$REPO_DIR/resources/freeswitch.service"
 [ -f "$UNIT_TEMPLATE" ] || die "Missing $UNIT_TEMPLATE - is the repo checkout complete?"
 
-### Install spandsp
 cd "$BUILD_DIR/spandsp"
 
 sudo ./bootstrap.sh
@@ -52,13 +45,11 @@ sudo ./configure
 sudo make -j"$JOBS"
 sudo make install
 
-### Install libks
 cd "$BUILD_DIR/libks"
 sudo cmake .
 sudo make -j"$JOBS"
 sudo make install
 
-### Install sofia-sip
 cd "$BUILD_DIR/sofia-sip"
 sudo ./bootstrap.sh
 sudo ./configure --enable-debug
@@ -67,24 +58,10 @@ sudo make install
 
 sudo ldconfig
 
-### Install freeswitch
 cd "$BUILD_DIR/freeswitch"
 
-### --- mod_hiredis format-string fix ---------------------------------------------------------
-###
-### Upstream passes the Redis reply straight into write_function, which is printf-style - so the
-### reply IS the format string:
-###
-###     stream->write_function(stream, response);
-###
-### Two consequences, both real here. Any cached value containing '%' comes back corrupted: an
-### outbound route pattern "^1%d%d..." is returned with the %d sequences expanded into garbage
-### numbers, so it never matches and every outbound call dies as UNALLOCATED_NUMBER. And it is a
-### format-string vulnerability - %n writes to memory - reachable from data a tenant controls,
-### because route patterns, extension names and caller IDs all flow through this cache.
-###
-### Patched with a grep guard rather than a .patch file so that a re-run over an already-patched
-### tree is a no-op and an upstream fix makes this loudly skip instead of silently reversing.
+# Upstream passes the Redis reply as a printf format string, so any cached value containing %
+# comes back corrupted. Reachable from tenant-controlled data. Must stay patched.
 HIREDIS_SRC="$BUILD_DIR/freeswitch/src/mod/applications/mod_hiredis/mod_hiredis.c"
 if [ -f "$HIREDIS_SRC" ]; then
   if grep -q 'write_function(stream, response);' "$HIREDIS_SRC"; then
@@ -100,9 +77,6 @@ fi
 
 sudo ./bootstrap.sh -j
 
-### Modules to build, over and above the stock modules.conf selection. The path prefixes must
-### match build/modules.conf.in exactly or the sed silently does nothing, so each edit is
-### verified below.
 FS_ENABLE_MODULES="
 applications/mod_callcenter
 applications/mod_cidlookup
@@ -142,13 +116,6 @@ for m in $FS_DISABLE_MODULES; do
   sudo sed -i "s|^${m}\$|#${m}|" modules.conf
 done
 
-### --disable-libvpx: this is a voice-only switch, so we do not build the VP8/VP9 video
-### codecs. Besides dropping dead weight, it avoids libvpx's external assembler requirement
-### (yasm/nasm) on x86_64 - without it the build fails at "Neither yasm nor nasm have been
-### found". libvpx is otherwise built unconditionally, and the arm64 build never needs the
-### assembler, so that failure only shows up on x86_64 servers.
-### Video is gated on SWITCH_HAVE_VPX in the core, mod_av is disabled above, and
-### mod_video_filter is off by default, so nothing here expects video to be present.
 sudo ./configure -C \
   --disable-dependency-tracking --enable-debug --enable-core-pgsql-support \
   --disable-libvpx
@@ -156,18 +123,10 @@ sudo ./configure -C \
 sudo make -j"$JOBS"
 sudo make install
 
-### Install freeswitch sounds, one rate at a time. Do NOT use the hd-/uhd-/cd- convenience
-### targets: they chain downwards (cd- depends on uhd- depends on hd- depends on 8k), so
-### 'cd-sounds-install' quietly drags down all four rates (~383MB). The per-rate targets below
-### go through the Makefile's .DEFAULT rule and fetch exactly one tarball each.
-### 8000 covers G.711/PSTN legs, 48000 covers Opus. Add 16000/32000 here if you ever need them.
 for rate in $FS_SOUND_RATES; do
   sudo make "sounds-en-us-callie-${rate}-install" "sounds-music-${rate}-install"
 done
 
-### Replace the stock vanilla config with the minimal one. 'make install' only lays down a
-### config when $PREFIX/conf is absent, and 'config-minimal' will not overwrite existing
-### files, so the old tree has to go first.
 sudo rm -rf "$PREFIX/conf"
 sudo make config-minimal
 
@@ -176,9 +135,6 @@ if [ ! -f "$PREFIX/conf/freeswitch.xml" ]; then
   exit 1
 fi
 
-### The stock minimal config autoloads mod_xml_rpc, which we deliberately do not build.
-### Left alone it logs a [CRIT] on every start. Comment out any autoloaded module that
-### was not built so a disabled module never turns into boot noise.
 FS_AUTOLOAD_CONF="$PREFIX/conf/autoload_configs/modules.conf.xml"
 for m in $FS_DISABLE_MODULES; do
   mod_name="${m##*/}"
@@ -188,19 +144,12 @@ for m in $FS_DISABLE_MODULES; do
   echo "Un-autoloaded '$mod_name' - it is not built"
 done
 
-### The minimal config's "Codec Interfaces" section is empty, so only the core G.711
-### (PCMU/PCMA) codecs are available - mod_opus gets built but is never loaded. Opus is what
-### keeps quality sane over WiFi/mobile, where G.711 has no packet loss concealment and no
-### bandwidth adaptation, so autoload it.
 FS_AUTOLOAD_ADD="mod_opus"
 for mod_name in $FS_AUTOLOAD_ADD; do
   if [ ! -f "$PREFIX/mod/${mod_name}.so" ]; then
     echo "ERROR: ${mod_name}.so was not built but is required" >&2
     exit 1
   fi
-  ### A module's own config comes from the vanilla tree - the minimal one does not ship it,
-  ### and without it the module logs an error and falls back to built-in defaults. For opus
-  ### that config is what turns on FEC and VBR, which is exactly what makes it usable on WiFi.
   conf_name="${mod_name#mod_}.conf.xml"
   src_conf="$BUILD_DIR/freeswitch/conf/vanilla/autoload_configs/$conf_name"
   if [ -f "$src_conf" ] && [ ! -f "$PREFIX/conf/autoload_configs/$conf_name" ]; then
@@ -214,7 +163,6 @@ for mod_name in $FS_AUTOLOAD_ADD; do
   echo "Autoloaded '$mod_name'"
 done
 
-### Create freeswitch group & user and give permissions.
 getent group freeswitch >/dev/null || sudo groupadd freeswitch
 id -u freeswitch >/dev/null 2>&1 || sudo adduser --quiet --system  \
   --gecos 'FreeSWITCH open source softswitch' --ingroup freeswitch --disabled-password freeswitch
@@ -224,8 +172,6 @@ for admin_group in sudo admin; do
   members="$(getent group "$admin_group" | cut -d: -f4 | tr ',' ' ')" || members=""
   FS_ADMINS="$FS_ADMINS $members"
 done
-### The invoking user is usually also a member of the sudo group - dedupe so we do not
-### call usermod twice for them.
 FS_ADMINS="$(echo "$FS_ADMINS" | tr ' ' '\n' | sort -u)"
 
 # shellcheck disable=SC2086 # word splitting is intentional here
@@ -243,21 +189,11 @@ done
 sudo ln -sf "$PREFIX/bin/fs_cli" /usr/bin/fs_cli
 sudo ln -sf "$PREFIX/bin/freeswitch" /usr/sbin/freeswitch
 
-### FreeSWITCH runs as the freeswitch user and writes to db/, log/, run/ and recordings/
-### underneath the prefix, so the whole tree is owned by it. Admins get write access through
-### the freeswitch group (added above); everyone else keeps read + traverse.
-###
-### Deliberately NOT locking out "other" here. Anyone with sudo can read these files anyway,
-### so removing world access buys no real protection - it only makes routine inspection
-### (tail -f the log, less a config) fail unless every command is prefixed with sudo.
 sudo chown -R freeswitch:freeswitch "$PREFIX"
 sudo chmod -R u+rwX,g+rwX,o+rX "$PREFIX"
 
-### setgid on the config tree so a file an admin creates stays in the freeswitch group and
-### remains readable by the service, instead of landing under that admin's primary group.
 sudo find "$PREFIX/conf" -type d -exec chmod g+s {} +
 
-### Conventional location for the config, for anyone who goes looking in /etc.
 sudo ln -sfn "$PREFIX/conf" /etc/freeswitch
 
 if [ ! -x "$PREFIX/bin/freeswitch" ]; then
@@ -265,7 +201,6 @@ if [ ! -x "$PREFIX/bin/freeswitch" ]; then
   exit 1
 fi
 
-### Create freeswitch service
 sudo sed "s|\${PREFIX}|$PREFIX|g" "$UNIT_TEMPLATE" \
   | sudo tee /etc/systemd/system/freeswitch.service >/dev/null
 

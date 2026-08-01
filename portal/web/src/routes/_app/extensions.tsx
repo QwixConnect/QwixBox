@@ -66,11 +66,6 @@ function CreateExtensionModal({
     onClose();
   }
 
-  /**
-   * The SIP password is shown exactly once. It is stored encrypted and projected into Kamailio
-   * only as an HA1 digest, so it genuinely cannot be recovered afterwards — saying so plainly
-   * is better than letting someone close the dialog and find out later.
-   */
   if (created) {
     return (
       <Modal opened={opened} onClose={reset} title={`Extension ${created.number} created`}>
@@ -256,8 +251,6 @@ function Extensions() {
 
       <CreateExtensionModal opened={modalOpen} onClose={() => setModalOpen(false)} />
       {callHandling && (
-        // Keyed so switching rows resets the form rather than keeping the previous user's
-        // forwarding numbers in the fields.
         <CallHandlingModal
           key={callHandling.id}
           extension={callHandling}

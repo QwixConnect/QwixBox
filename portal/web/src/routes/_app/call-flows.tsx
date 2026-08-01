@@ -28,10 +28,6 @@ import { notifyRemoved, notifySaved } from "../../lib/notify";
 import { DeleteButton, ErrorAlert, PageHeader, QueryState, RoleGate } from "../../components/Resource";
 import { DestinationPicker, type DestinationValue } from "../../components/DestinationPicker";
 
-/* ---------------------------------------------------------------------------------------
- * Ring groups
- * ------------------------------------------------------------------------------------ */
-
 type RingGroupFormValues = {
   number: string;
   name: string;
@@ -363,10 +359,6 @@ function RingGroupsTab() {
   );
 }
 
-/* ---------------------------------------------------------------------------------------
- * IVR menus
- * ------------------------------------------------------------------------------------ */
-
 type IvrFormValues = {
   number: string;
   name: string;
@@ -689,10 +681,6 @@ function IvrTab() {
     </>
   );
 }
-
-/* ---------------------------------------------------------------------------------------
- * Time conditions
- * ------------------------------------------------------------------------------------ */
 
 const WEEKDAYS = [
   { value: 0, label: "Sun" },

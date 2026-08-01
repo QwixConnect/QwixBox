@@ -23,10 +23,6 @@ import { notifyRemoved, notifySaved } from "../../lib/notify";
 import { DeleteButton, ErrorAlert, PageHeader, QueryState, RoleGate } from "../../components/Resource";
 import { DestinationPicker, type DestinationValue } from "../../components/DestinationPicker";
 
-/* ---------------------------------------------------------------------------------------
- * Inbound
- * ------------------------------------------------------------------------------------ */
-
 type InboundFormValues = {
   didPattern: string;
   description: string;
@@ -225,10 +221,6 @@ function InboundTab() {
   );
 }
 
-/* ---------------------------------------------------------------------------------------
- * Outbound
- * ------------------------------------------------------------------------------------ */
-
 type OutboundFormValues = {
   name: string;
   pattern: string;
@@ -417,8 +409,6 @@ function OutboundTab() {
           <Table.Tbody>
             {(data ?? [])
               .slice()
-              // Emergency first, then by priority — the order the dialplan evaluates them in,
-              // so the table reads the way the system behaves.
               .sort((a, b) =>
                 a.isEmergency === b.isEmergency
                   ? a.priority - b.priority

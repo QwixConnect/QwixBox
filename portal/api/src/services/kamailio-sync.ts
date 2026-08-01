@@ -1,14 +1,3 @@
-/**
- * Projection into Kamailio's database.
- *
- * Kamailio owns its own schema, created by kamdbctl, in a SEPARATE database. This schema is the
- * source of truth; Kamailio's tables are derived. The projection is deliberately one-way — if
- * these ever disagree, ours wins and a rebuild fixes it.
- *
- * A separate pool from db/index.ts, on purpose: different database, different credentials, and
- * keeping them apart makes an accidental cross-schema write impossible rather than merely
- * unlikely.
- */
 import pg from "pg";
 import { env } from "../env";
 import { computeHa1, computeHa1b } from "../lib/crypto";
@@ -37,13 +26,6 @@ function getPool(): pg.Pool | null {
   return pool;
 }
 
-/**
- * Writes a subscriber Kamailio can authenticate.
- *
- * Only the HA1 digests are stored — never the plaintext password. Kamailio is configured with
- * `calculate_ha1=yes` against these columns, and the SIP realm is the tenant's domain, which is
- * what makes user@tenantA and user@tenantB distinct credentials.
- */
 export async function syncSubscriber(
   ext: ExtensionRow,
   sipDomain: string,
@@ -89,8 +71,6 @@ export async function removeSubscriber(
       `DELETE FROM subscriber WHERE username = $1 AND domain = $2`,
       [username, sipDomain],
     );
-    // Drop live registrations too, or a deleted extension stays reachable until its
-    // registration expires.
     await p.query(`DELETE FROM location WHERE username = $1 AND domain = $2`, [
       username,
       sipDomain,
@@ -105,10 +85,6 @@ export async function removeSubscriber(
   }
 }
 
-/**
- * Registers the tenant's SIP domain with Kamailio's `domain` module, which is what makes
- * multi-tenancy work: `use_domain=1` means lookups are scoped by it.
- */
 export async function syncDomain(sipDomain: string): Promise<boolean> {
   const p = getPool();
   if (!p) return false;
@@ -127,11 +103,6 @@ export async function syncDomain(sipDomain: string): Promise<boolean> {
   }
 }
 
-/**
- * A carrier that authenticates by source IP goes in the `address` table, which the permissions
- * module reads. steps/14-responsive-firewall.sh reads the same table, so the proxy and the
- * firewall cannot disagree about who is a trunk.
- */
 export async function syncTrunkAddress(trunk: TrunkRow): Promise<boolean> {
   const p = getPool();
   if (!p || trunk.authMode !== "ip") return false;
@@ -167,20 +138,7 @@ export async function removeTrunkAddress(trunkId: string): Promise<boolean> {
   }
 }
 
-/**
- * Tells Kamailio to re-read the tables it caches in memory.
- *
- * `permissions` and `dispatcher` both hold their data in memory and will not notice a database
- * write on their own. Without this, a trunk added in the portal is invisible until restart.
- *
- * Uses kamcmd over the binrpc control socket rather than an HTTP RPC port, so nothing extra is
- * exposed. Best-effort: a failure here means stale in-memory data, not a broken write.
- */
 export async function reloadKamailio(): Promise<boolean> {
-  /* `domain` is here for the same reason as the other two, and matters more than it looks: the
-     egress pass uses is_domain_local() to tell an internal call from a carrier-bound one, so a
-     tenant whose domain is not in the cache has every call to its extensions treated as outbound
-     and killed looking for a trunk. */
   const commands = [
     "permissions.addressReload",
     "dispatcher.reload",
@@ -197,11 +155,6 @@ export async function reloadKamailio(): Promise<boolean> {
       const stderr = await new Response(proc.stderr).text();
       await proc.exited;
 
-      /* kamcmd exits 0 even when it cannot open the control socket, so the exit code alone
-         reports success for a reload that never happened. That is exactly how this went
-         unnoticed: the API's service account was not in the kamailio group, every reload failed
-         with "Permission denied", and nothing said so - a trunk or tenant change simply did not
-         take effect until Kamailio was restarted. Inspect the output, not the status. */
       if (proc.exitCode !== 0 || /ERROR|Permission denied/i.test(stderr)) {
         console.warn(
           `[kamailio-sync] ${command} failed: ${stderr.trim() || `exit ${proc.exitCode}`}`,

@@ -1,22 +1,6 @@
 #!/usr/bin/env bash
-#
-# QwixBox - master installer for the VoIP PBX stack.
-#
-# Runs the numbered step scripts in order. Safe to re-run: each step records a marker keyed
-# on the script's own checksum, so a completed step is skipped until its script changes.
-# Everything is logged to /var/log/qwixbox/.
-#
-# Usage:
-#   sudo ./install.sh                 # run every pending step
-#   sudo ./install.sh --list          # show the plan and each step's state
-#   sudo ./install.sh --only 30-freeswitch.sh
-#   sudo ./install.sh --from 40-bun.sh
-#   sudo ./install.sh --force         # ignore markers, re-run everything
-#   sudo ./install.sh --dry-run
-#   sudo ./install.sh --configure     # interactive setup, then exit
-#   sudo ./install.sh --menu          # interactive menu
-#   sudo ./install.sh --quiet         # suppress the banner
-#
+# Master installer. Runs steps/*.sh in order; each step's marker holds the SHA-256 of the
+# script that satisfied it, so editing a step re-runs it.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,20 +10,6 @@ STATE_DIR="/var/lib/qwixbox"
 BANNER_FILE="$SCRIPT_DIR/resources/banner.txt"
 CONFIG_FILE="/etc/qwixbox/config.env"
 
-### The install order. Dependencies flow downwards - do not reorder without checking that
-### nothing later depends on something earlier (Kamailio needs its database; the API needs
-### Bun and Postgres; TLS certs must exist before anything binds a TLS port).
-###
-### Format: "script|roles|description". A step runs when ROLES contains "all", when the
-### step's role is "all", or when the step's role appears in ROLES. The all-in-one machine
-### is simply ROLES="all" - the degenerate case where every role lands on one host.
-###
-### Roles:
-###   all     - host-level work every machine needs regardless of what it runs
-###   db      - PostgreSQL and Redis
-###   sip     - Kamailio and rtpengine (the SIP edge)
-###   media   - FreeSWITCH (the media/PBX core)
-###   portal  - the API, the web portal and nginx
 STEPS=(
   "00-preflight.sh|all|Host validation, hostname/FQDN, timezone, NTP, kernel and limit tuning"
   "01-base-packages.sh|all|Common tooling, CA certificates, unattended security upgrades"
@@ -77,12 +47,7 @@ STEPS=(
   "99-postflight.sh|all|Verify services, listening ports, TLS validity; print summary"
 )
 
-### ----------------------------------------------------------------------------------------
-### Helpers
-### ----------------------------------------------------------------------------------------
-
-### Evaluated before the tee redirect below, so this reflects the real terminal rather than the
-### pipe stdout becomes. Everything interactive - banner, live progress - is gated on it.
+# Evaluated before the tee redirect below; testing it after always says "not a terminal".
 IS_TTY=0
 [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && IS_TTY=1
 
@@ -101,13 +66,7 @@ fail()  { log "${C_RED}[ERROR]${C_RESET} $*" >&2; }
 
 die() { fail "$*"; exit 1; }
 
-### 2,17 is the header comment block above. Bounded to it deliberately - a looser range spills
-### `set -euo pipefail` and the variable assignments into --help output.
 usage() { sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
-
-### ----------------------------------------------------------------------------------------
-### Argument parsing
-### ----------------------------------------------------------------------------------------
 
 DO_LIST=0; DO_FORCE=0; DO_DRYRUN=0; DO_QUIET=0; DO_CONFIGURE=0; DO_MENU=0
 ONLY_STEP=""; FROM_STEP=""
@@ -128,16 +87,10 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-### Printed before the log redirect further down, so the wordmark never reaches the log file -
-### 50 columns of ASCII art in a file you grep for errors is noise. Missing banner is not an
-### error: a partial checkout should still install.
 if [ "$IS_TTY" -eq 1 ] && [ "$DO_QUIET" -eq 0 ] && [ -f "$BANNER_FILE" ]; then
   printf '\n%s' "$C_BLUE"; cat "$BANNER_FILE"; printf '%s\n' "$C_RESET"
 fi
 
-### Run the wizard and stop. In a subshell because lib/common.sh defines its own info/ok/warn
-### with the steps' indented format, which would otherwise replace this script's timestamped one
-### for the rest of the run.
 if [ "$DO_CONFIGURE" -eq 1 ]; then
   ( # shellcheck source=lib/common.sh
     . "$SCRIPT_DIR/lib/common.sh"
@@ -148,17 +101,11 @@ if [ "$DO_CONFIGURE" -eq 1 ]; then
   exit "$rc"
 fi
 
-### The menu is a front-end over the flags above and nothing more: each choice re-executes this
-### same script with the flag it corresponds to. It deliberately has no execution path of its own
-### - one that duplicated the step loop would drift out of step with the CLI the moment either
-### changed, and the CLI is what every automated run uses.
 if [ "$DO_MENU" -eq 1 ]; then
   # shellcheck source=lib/tui.sh
   . "$SCRIPT_DIR/lib/tui.sh"
   tui_available || die "--menu needs a terminal and whiptail (apt install whiptail)."
 
-  ### "$DO_QUIET" is 0 or 1, and 0 is a non-empty string - so ${DO_QUIET:+--quiet} would pass
-  ### --quiet in both cases. Build the argument from an explicit test instead.
   quiet_arg=()
   [ "$DO_QUIET" -eq 1 ] && quiet_arg=(--quiet)
 
@@ -180,8 +127,6 @@ if [ "$DO_MENU" -eq 1 ]; then
       log)       ls -t "$LOG_DIR"/install-*.log 2>/dev/null | head -1 | xargs -r ${PAGER:-less} -R ;;
       quit)      exit 0 ;;
       step)
-        ### Built from the same STEPS array the runner uses, so a step added there appears here
-        ### without a second list to keep in sync.
         args=()
         for entry in "${STEPS[@]}"; do
           args+=("${entry%%|*}" "${entry##*|}")
@@ -195,8 +140,6 @@ if [ "$DO_MENU" -eq 1 ]; then
   done
 fi
 
-### Reads one key from the deployed config without sourcing it. install.sh deliberately does not
-### source lib/common.sh - that would replace its timestamped log format with the steps' own.
 config_peek() {
   [ -r "$CONFIG_FILE" ] || return 0
   sed -n "s/^$1=[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}.*/\1/p" "$CONFIG_FILE" | tail -1
@@ -206,13 +149,9 @@ step_name()  { printf '%s' "${1%%|*}"; }
 step_desc()  { printf '%s' "${1##*|}"; }
 step_roles() { local r="${1#*|}"; printf '%s' "${r%%|*}"; }
 
-### Which roles this machine plays. Read from the deployed config so --list works before the
-### installer has ever run; "all" (the all-in-one case) is the default.
 ROLES="$(config_peek ROLES)"
 [ -n "$ROLES" ] || ROLES="all"
 
-### A step runs when this host is all-in-one, when the step applies to every host regardless
-### of role, or when any of the step's roles is one this host plays.
 step_applies() {
   local roles="$1" r h
   case " $ROLES " in *" all "*) return 0 ;; esac
@@ -225,14 +164,6 @@ step_applies() {
   return 1
 }
 
-### Markers record the checksum of the script that satisfied the step. If the script is later
-### edited, the checksum no longer matches and the step runs again - which is what makes
-### re-running the installer after a change do the right thing.
-###
-### A step whose real content lives in resources/ declares those paths in a `# step-inputs:`
-### line, and they are hashed alongside the script. Without that, editing a config template
-### would leave the script byte-identical, the marker would still match, and the installer would
-### skip the very step that deploys the file you just changed.
 marker_for() { printf '%s/%s.done' "$STATE_DIR" "$1"; }
 script_hash() {
   local path="$1" input
@@ -241,8 +172,6 @@ script_hash() {
     # shellcheck disable=SC2013  # word splitting is the point: one line, several paths
     for input in $(sed -n 's/^#[[:space:]]*step-inputs:[[:space:]]*//p' "$path"); do
       [ -e "$SCRIPT_DIR/$input" ] || die "$(basename "$path"): step-inputs path not found: $input"
-      ### Relative paths, so a rename still changes the hash but relocating the checkout
-      ### does not re-run every step.
       ( cd "$SCRIPT_DIR" && find "$input" -type f -exec sha256sum {} + | sort -k2 )
     done
   } | sha256sum | cut -d' ' -f1
@@ -255,10 +184,6 @@ step_state() {
   [ -f "$marker" ] || { echo "pending"; return; }
   if [ "$(cat "$marker")" = "$(script_hash "$path")" ]; then echo "done"; else echo "changed"; fi
 }
-
-### ----------------------------------------------------------------------------------------
-### --list
-### ----------------------------------------------------------------------------------------
 
 if [ "$DO_LIST" -eq 1 ]; then
   printf '\n%sInstall plan%s  (steps in %s, roles: %s%s%s)\n\n' \
@@ -285,28 +210,19 @@ if [ "$DO_LIST" -eq 1 ]; then
   exit 0
 fi
 
-### ----------------------------------------------------------------------------------------
-### Execution
-### ----------------------------------------------------------------------------------------
-
 [ "$(id -u)" -eq 0 ] || die "Run this with sudo."
 
 mkdir -p "$LOG_DIR" "$STATE_DIR" "$STEP_DIR"
 LOG_FILE="$LOG_DIR/install-$(date '+%Y%m%d-%H%M%S').log"
 
-### fd 3 keeps a handle on the real stdout before it becomes the tee pipe below. Live progress
-### has to go here: written to stdout it would be teed, filling the log with thousands of \r
-### frames and escape sequences in the file you grep when something breaks.
+# fd 3 keeps the real stdout. Everything after the tee below lands in the log too, so output
+# that must not be logged (a generated password) goes to fd 3.
 exec 3>&1
 
-### Everything from here on is teed to the log, so a step's own output is captured too.
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 CURRENT_STEP="startup"
 
-### Best-effort completion notice. Both sinks are optional and a failure to notify must never
-### change the install's own exit status - reporting "install failed" because the webhook was
-### unreachable would be worse than saying nothing.
 notify_result() {
   local status="$1" detail="$2" to hook subject
   to="$(config_peek INSTALL_NOTIFY_EMAIL)"
@@ -326,20 +242,10 @@ notify_result() {
   fi
 }
 
-### Any non-zero exit - including one from set -e inside a step - reports which step broke
-### and where to read the log, rather than leaving a bare stack-free failure.
-###
-### EXIT_NEEDS_CONFIG is deliberately not treated as a failure. A first run that stops to let
-### the operator fill in config.env is the designed path, and printing "XX Failed during:
-### 00-preflight.sh" for it teaches people that a red ERROR from this installer is normal -
-### which is precisely the habit that makes them scroll past the run where something did break.
 # shellcheck disable=SC2329 # invoked indirectly by the EXIT trap below
 on_exit() {
   local rc=$?
   if [ "$rc" -eq "${EXIT_NEEDS_CONFIG:-78}" ]; then
-    ### Still non-zero on the way out, so a wrapper script or CI job does not mistake "not
-    ### configured yet" for "installed successfully". Deliberately not notified: waiting for
-    ### the operator to fill in the config is not an event worth paging anyone about.
     exit "$rc"
   fi
   if [ "$rc" -ne 0 ]; then
@@ -347,8 +253,6 @@ on_exit() {
     fail "Log: $LOG_FILE"
     notify_result "FAILED" "Failed during $CURRENT_STEP (exit $rc)"
   else
-    ### Defaulted: the trap is installed before these counters exist, and a success path that
-    ### somehow exits early must not die on an unbound variable inside the exit handler.
     notify_result "OK" "Completed: ${ran:-0} run, ${skipped:-0} already complete."
   fi
   exit "$rc"
@@ -361,9 +265,6 @@ info "Logging to $LOG_FILE"
 
 info "Roles on this machine: $ROLES"
 
-### Count what this invocation will actually attempt, so the progress denominator matches the
-### run rather than the size of the STEPS array. --only narrows it to one; --from drops
-### everything before the named step; role filtering removes the rest.
 total_steps=0
 counting=0
 for entry in "${STEPS[@]}"; do
@@ -389,21 +290,16 @@ for entry in "${STEPS[@]}"; do
   roles="$(step_roles "$entry")"
   path="$STEP_DIR/$name"
 
-  ### --only runs exactly one step; --from starts the run at a given step.
   if [ -n "$ONLY_STEP" ] && [ "$name" != "$ONLY_STEP" ]; then continue; fi
   if [ -n "$FROM_STEP" ] && [ "$started" -eq 0 ]; then
     if [ "$name" = "$FROM_STEP" ]; then started=1; else continue; fi
   fi
 
-  ### --only is an explicit instruction, so it overrides role filtering: an operator asking
-  ### for one step by name should get it rather than a silent skip.
   if [ -z "$ONLY_STEP" ] && ! step_applies "$roles"; then
     notmyrole=$((notmyrole + 1))
     continue
   fi
 
-  ### Counted here rather than at the top of the loop: everything above this point was
-  ### filtered out and is not part of the run, so it must not consume a progress slot.
   step_no=$((step_no + 1))
   prog="$(printf '[%d/%d %d%%]' "$step_no" "$total_steps" "$((step_no * 100 / total_steps))")"
 
@@ -433,7 +329,6 @@ for entry in "${STEPS[@]}"; do
   start_ts=$(date +%s)
 
   chmod +x "$path"
-  ### A failing step aborts the run: set -e plus the EXIT trap report which one broke.
   "$path"
 
   printf '%s' "$(script_hash "$path")" > "$(marker_for "$name")"
