@@ -1,0 +1,19 @@
+{
+  "name": "qwixbox-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prebuild": "cp ../bootstrap.sh public/bootstrap.sh",
+    "dev": "npm run prebuild && astro dev",
+    "build": "astro build",
+    "test": "node --experimental-strip-types worker_test.mjs",
+    "preview": "astro build && wrangler dev",
+    "deploy": "astro build && wrangler deploy"
+  },
+  "dependencies": {
+    "astro": "^6.3.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

@@ -95,7 +95,7 @@ portal/web/             the React admin portal
 ## Quick start
 
 ```bash
-curl -fsSL https://get.qwixbox.io | sudo bash
+curl -fsSL https://get.qwixbox.com | sudo bash
 ```
 
 Or clone it first, if you would rather read what you are about to run as root:

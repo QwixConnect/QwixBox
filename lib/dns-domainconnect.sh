@@ -8,7 +8,7 @@
 
 # providerId must match what was onboarded with each DNS provider; changing it invalidates
 # every agreement.
-DC_PROVIDER_ID="${DC_PROVIDER_ID:-qwixbox.io}"
+DC_PROVIDER_ID="${DC_PROVIDER_ID:-qwixbox.com}"
 DC_SERVICE_HOST="${DC_SERVICE_HOST:-pbx-host}"
 DC_SERVICE_MAIL="${DC_SERVICE_MAIL:-pbx-mail}"
 

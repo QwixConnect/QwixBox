@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-line installer: curl -fsSL https://get.qwixbox.io | sudo bash
+# One-line installer: curl -fsSL https://get.qwixbox.com | sudo bash
 set -euo pipefail
 
 REPO="${QWIXBOX_REPO:-https://github.com/QwixConnect/QwixBox.git}"

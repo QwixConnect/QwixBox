@@ -1,0 +1,69 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+const { title, description = "Open-source, multi-tenant VoIP PBX for Debian 13. Kamailio at the edge, FreeSWITCH behind it, installed with one command." } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap"
+    />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="wrap topbar-inner">
+        <a class="mark" href="/">QwixBox</a>
+        <nav>
+          <a href="/docs/">Docs</a>
+          <a href="https://github.com/QwixConnect/QwixBox">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main><slot /></main>
+
+    <footer class="band foot">
+      <div class="wrap foot-inner">
+        <p>
+          QwixBox is open source. Read the code before you run it —
+          <a href="https://get.qwixbox.com">the install script</a> is one file.
+        </p>
+        <p class="foot-links">
+          <a href="https://github.com/QwixConnect/QwixBox">Source</a>
+          <a href="/docs/">Docs</a>
+          <a href="/docs/mvp/">Status</a>
+        </p>
+      </div>
+    </footer>
+
+    <style>
+      .topbar { border-bottom: 1px solid var(--rule); position: sticky; top: 0; background: color-mix(in srgb, var(--ink) 88%, transparent); backdrop-filter: blur(8px); z-index: 10; }
+      .topbar-inner { display: flex; align-items: center; justify-content: space-between; height: 58px; }
+      .mark { font-family: var(--display); font-weight: 700; font-size: 1.05rem; color: var(--paper); text-decoration: none; letter-spacing: -0.02em; }
+      .topbar nav { display: flex; gap: 1.5rem; font-family: var(--mono); font-size: 0.85rem; }
+      .topbar nav a { text-decoration: none; color: var(--slate); }
+      .topbar nav a:hover { color: var(--paper); }
+
+      .foot { color: var(--slate); font-size: 0.9rem; }
+      .foot-inner { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content: space-between; align-items: baseline; }
+      .foot p { margin: 0; max-width: var(--measure); }
+      .foot-links { display: flex; gap: 1.5rem; font-family: var(--mono); font-size: 0.85rem; }
+    </style>
+  </body>
+</html>

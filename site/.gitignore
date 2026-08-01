@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.astro/
+.wrangler/
+# Copied from ../bootstrap.sh by the prebuild step; the repo root holds the original.
+public/bootstrap.sh

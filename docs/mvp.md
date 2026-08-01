@@ -10,7 +10,7 @@ Verified by doing it, in a Debian 13 arm64 container, not by reading code:
 
 | | How it was proven |
 |---|---|
-| Install from bare Debian | 27 steps, exit 0, idempotent re-run, 38 postflight checks |
+| Install from bare Debian | 28 steps, exit 0, idempotent re-run, 38 postflight checks |
 | All services start | postgres, redis, freeswitch, kamailio, rtpengine, nginx, api, postfix, opendkim |
 | FreeSWITCH boots clean | zero `[ERR]`/`[CRIT]` scoped to the run; Opus loaded |
 | Tenant provisioning | CLI creates org + tenant, projects domain and subscribers into Kamailio |

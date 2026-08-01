@@ -1,0 +1,56 @@
+/* Palette reads a call, not a brand deck: cyan is a request travelling outward, amber is a
+   response coming back. The two accents are used for that and nothing else. */
+:root {
+  --ink: #0e1428;
+  --ink-2: #141c36;
+  --rule: #222e4e;
+  --paper: #f2f4f8;
+  --slate: #8493b3;
+  --cyan: #43d9c8;
+  --amber: #f0a64a;
+
+  --display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+
+  --measure: 62ch;
+  --gutter: clamp(1.25rem, 5vw, 4rem);
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--body);
+  font-size: 1rem;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--cyan); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { color: var(--paper); }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; border-radius: 2px; }
+
+h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; margin: 0; }
+
+code, pre, kbd { font-family: var(--mono); }
+
+.wrap { max-width: 1140px; margin-inline: auto; padding-inline: var(--gutter); }
+
+/* Eyebrows label what a section IS, which on a page this dense is navigation rather than
+   decoration. */
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--slate);
+  margin: 0 0 1.25rem;
+}
+
+.band { border-top: 1px solid var(--rule); padding-block: clamp(3.5rem, 9vw, 6.5rem); }

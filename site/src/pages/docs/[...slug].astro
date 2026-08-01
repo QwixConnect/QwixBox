@@ -1,0 +1,48 @@
+---
+import Base from "../../layouts/Base.astro";
+import { getCollection, render } from "astro:content";
+import { TITLES } from "../../lib/docs";
+
+export async function getStaticPaths() {
+  const entries = await getCollection("docs");
+  return entries.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+const title = TITLES[entry.id] ?? entry.id;
+---
+
+<Base title={`${title} — QwixBox docs`}>
+  <section class="band">
+    <div class="wrap doc-wrap">
+      <p class="eyebrow"><a href="/docs/">Docs</a> / {title}</p>
+      <article class="prose"><Content /></article>
+      <p class="src">
+        <a href={`https://github.com/QwixConnect/QwixBox/blob/main/docs/${entry.id}.md`}>
+          Edit this page on GitHub
+        </a>
+      </p>
+    </div>
+  </section>
+
+  <style is:global>
+    .doc-wrap { max-width: 760px; }
+    .prose { font-size: 1rem; }
+    .prose h1 { font-size: clamp(1.9rem, 4vw, 2.6rem); margin: 0 0 1.5rem; }
+    .prose h2 { font-size: 1.4rem; margin: 3rem 0 1rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
+    .prose h3 { font-size: 1.1rem; margin: 2rem 0 0.75rem; }
+    .prose p, .prose li { color: #c2ccdf; }
+    .prose strong { color: var(--paper); font-weight: 500; }
+    .prose code { background: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.86em; color: var(--amber); }
+    .prose pre { background: var(--ink-2); border: 1px solid var(--rule); border-radius: 4px; padding: 1rem; overflow-x: auto; }
+    .prose pre code { background: none; border: 0; padding: 0; color: var(--paper); }
+    .prose table { width: 100%; border-collapse: collapse; font-size: 0.92rem; margin: 1.5rem 0; display: block; overflow-x: auto; }
+    .prose th, .prose td { text-align: left; padding: 0.7rem 1rem 0.7rem 0; border-top: 1px solid var(--rule); vertical-align: baseline; }
+    .prose th { font-weight: 500; color: var(--paper); }
+    .prose blockquote { border-left: 2px solid var(--amber); margin: 1.5rem 0; padding-left: 1.25rem; color: var(--slate); }
+    .prose hr { border: 0; border-top: 1px solid var(--rule); margin: 2.5rem 0; }
+    .prose del { color: var(--slate); }
+    .src { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); font-family: var(--mono); font-size: 0.85rem; }
+  </style>
+</Base>

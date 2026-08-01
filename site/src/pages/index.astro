@@ -1,0 +1,273 @@
+---
+import Base from "../layouts/Base.astro";
+
+const INSTALL = "curl -fsSL https://get.qwixbox.com | sudo bash";
+
+// x positions of the three lifelines; the phone never touches the third, which is the point.
+const LANES = { phone: 58, kam: 252, fs: 446 };
+
+const FLOW = [
+  { y: 86,  from: "phone", to: "kam",   label: "REGISTER",       kind: "req" },
+  { y: 119, from: "kam",   to: "phone", label: "401 challenge",  kind: "res" },
+  { y: 152, from: "phone", to: "kam",   label: "REGISTER + auth", kind: "req" },
+  { y: 185, from: "kam",   to: "phone", label: "200 OK",         kind: "res" },
+  { y: 236, from: "phone", to: "kam",   label: "INVITE",         kind: "req" },
+  { y: 269, from: "kam",   to: "fs",    label: "INVITE",         kind: "req" },
+  { y: 302, from: "fs",    to: "kam",   label: "200 OK",         kind: "res" },
+  { y: 335, from: "kam",   to: "phone", label: "200 OK",         kind: "res" },
+];
+
+const STATUS = [
+  ["Installs and configures", "proven", "28 steps from bare Debian, idempotent, 38 postflight checks"],
+  ["Registration", "proven", "A softphone completes digest auth against the projected HA1"],
+  ["Call setup", "proven", "Extension-to-extension, inbound DID and outbound-to-carrier"],
+  ["Two-way audio", "open", "rtpengine is wired and answers; no call has been listened to end to end"],
+  ["Admin portal", "proven", "Extensions, trunks, routing, call flows, calls, faxes, users, audit"],
+  ["Voicemail, fax, IVR digits", "open", "Written and deployed; each needs the media path first"],
+];
+---
+
+<Base title="QwixBox — open-source multi-tenant VoIP PBX">
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <h1>Two engines.<br />One install.</h1>
+        <p class="lede">
+          An open-source, multi-tenant VoIP PBX for Debian 13. Kamailio takes the public SIP
+          ports; FreeSWITCH sits behind it on loopback and never faces the internet.
+        </p>
+
+        <div class="cmd">
+          <code>{INSTALL}</code>
+          <button type="button" data-copy={INSTALL} aria-label="Copy install command">Copy</button>
+        </div>
+        <p class="cmd-note">
+          Debian 13, 2 vCPU, 4 GB. Opens a four-question wizard and hands you a login.
+        </p>
+      </div>
+
+      <figure class="ladder">
+        <svg viewBox="0 0 500 366" role="img" aria-labelledby="ladder-title">
+          <title id="ladder-title">
+            A SIP call flow. The phone registers with Kamailio and places a call; only Kamailio
+            talks to FreeSWITCH.
+          </title>
+          <defs>
+            <marker id="ar-req" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L8 4 L0 8 z" fill="var(--cyan)" />
+            </marker>
+            <marker id="ar-res" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L8 4 L0 8 z" fill="var(--amber)" />
+            </marker>
+          </defs>
+
+          {Object.entries(LANES).map(([, x]) => (
+            <line x1={x} y1={44} x2={x} y2={352} class="lifeline" />
+          ))}
+
+          <text x={LANES.phone} y={28} class="lane">phone</text>
+          <text x={LANES.kam}   y={28} class="lane">Kamailio</text>
+          <text x={LANES.fs}    y={28} class="lane">FreeSWITCH</text>
+          <text x={LANES.phone} y={41} class="lane-sub">on the internet</text>
+          <text x={LANES.kam}   y={41} class="lane-sub">the edge</text>
+          <text x={LANES.fs}    y={41} class="lane-sub">loopback only</text>
+
+          {FLOW.map((m, i) => {
+            const x1 = LANES[m.from as keyof typeof LANES];
+            const x2 = LANES[m.to as keyof typeof LANES];
+            const dir = x2 > x1 ? 1 : -1;
+            return (
+              <g class="msg" style={`--i:${i}`}>
+                <line
+                  x1={x1 + 4 * dir} y1={m.y} x2={x2 - 9 * dir} y2={m.y}
+                  class={m.kind}
+                  marker-end={m.kind === "req" ? "url(#ar-req)" : "url(#ar-res)"}
+                />
+                <text x={(x1 + x2) / 2} y={m.y - 8} class={`label ${m.kind}`}>{m.label}</text>
+              </g>
+            );
+          })}
+        </svg>
+        <figcaption>
+          The phone never reaches FreeSWITCH. That is the security boundary, not a diagram
+          convention.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="band" id="why">
+    <div class="wrap">
+      <p class="eyebrow">Why it is built this way</p>
+      <div class="why-grid">
+        <article>
+          <h3>Two engines, not one</h3>
+          <p>
+            Kamailio does registration, digest auth and flood control on 5060. FreeSWITCH does
+            media and PBX logic, bound to 127.0.0.1. A scanner that finds your SIP port cannot
+            reach the media core at all.
+          </p>
+        </article>
+        <article>
+          <h3>Multi-tenant by construction</h3>
+          <p>
+            A tenant is an organization, and the API refuses to run a query that is not scoped to
+            one. An unscoped query is a data breach, so it raises an error instead of returning
+            everything.
+          </p>
+        </article>
+        <article>
+          <h3>A stack you can extend</h3>
+          <p>
+            TypeScript on Bun, React, PostgreSQL, Redis. The portal is a client of the same REST
+            API you get, so there is no admin action that only exists as a form.
+          </p>
+        </article>
+        <article>
+          <h3>The installer is the product</h3>
+          <p>
+            28 idempotent steps from a bare server. Re-running is quiet, not destructive, because
+            each step records a checksum of the script that satisfied it.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="features">
+    <div class="wrap">
+      <p class="eyebrow">What you get</p>
+      <dl class="features">
+        <div>
+          <dt>Telephony</dt>
+          <dd>
+            Extensions with encrypted SIP credentials, trunks with IP or registration auth,
+            inbound DID routing, outbound routing with regex patterns and digit manipulation, ring
+            groups with failover, IVR menus, and time conditions for business hours and holidays.
+          </dd>
+        </div>
+        <div>
+          <dt>Per-user control</dt>
+          <dd>
+            Do not disturb, call forwarding on all, busy and no answer, call waiting and ring
+            timeout — from the portal or from the handset with <code>*72</code>, <code>*78</code>
+            and friends.
+          </dd>
+        </div>
+        <div>
+          <dt>Portal</dt>
+          <dd>
+            Extensions, trunks, routing, call flows, call history with CSV export, faxes, users
+            and an audit trail. Four roles enforced server-side on every request.
+          </dd>
+        </div>
+        <div>
+          <dt>Platform</dt>
+          <dd>
+            SIP-domain isolation, per-tenant call limits, TLS throughout with automatic Let's
+            Encrypt, nftables and fail2ban, DKIM-signed mail, scheduled backups, and DNS records
+            created for you at nine providers via Domain Connect.
+          </dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="band" id="status">
+    <div class="wrap">
+      <p class="eyebrow">Where it actually is</p>
+      <h2 class="status-head">Not everything here is finished, and the list says which.</h2>
+      <table class="status">
+        <tbody>
+          {STATUS.map(([what, mark, note]) => (
+            <tr>
+              <th scope="row">{what}</th>
+              <td><span class={`pill ${mark}`}>{mark === "proven" ? "proven" : "not yet"}</span></td>
+              <td class="note">{note}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p class="status-foot">
+        Two-way audio is the one that gates the rest — voicemail recording, IVR digit selection
+        and fax all sit behind it. <a href="/docs/mvp/">The full list is in the repo</a>, kept
+        current rather than aspirational.
+      </p>
+    </div>
+  </section>
+
+  <style>
+    .hero { padding-block: clamp(3rem, 8vw, 6rem) clamp(2rem, 6vw, 4rem); }
+    .hero-grid { display: grid; gap: clamp(2.5rem, 6vw, 5rem); grid-template-columns: 1fr; align-items: center; }
+    @media (min-width: 940px) { .hero-grid { grid-template-columns: 1fr 1fr; } }
+
+    .hero-copy { min-width: 0; }
+    .hero-copy h1 { font-size: clamp(2.6rem, 7vw, 4.4rem); }
+    .lede { font-size: clamp(1.05rem, 2vw, 1.2rem); color: var(--slate); max-width: 46ch; margin: 1.5rem 0 2rem; }
+
+    .cmd { display: flex; align-items: stretch; gap: 0; border: 1px solid var(--rule); border-radius: 4px; background: var(--ink-2); overflow: hidden; max-width: 100%; }
+    .cmd code { padding: 0.85rem 1rem; font-size: 0.83rem; overflow-x: auto; white-space: nowrap; flex: 1; min-width: 0; color: var(--paper); }
+    .cmd code::before { content: "$ "; color: var(--cyan); }
+    .cmd button { border: 0; flex: none; border-left: 1px solid var(--rule); background: transparent; color: var(--slate); font-family: var(--mono); font-size: 0.78rem; padding-inline: 1rem; cursor: pointer; }
+    .cmd button:hover { background: var(--rule); color: var(--paper); }
+    .cmd-note { font-size: 0.85rem; color: var(--slate); margin: 0.85rem 0 0; }
+
+    .ladder { margin: 0; }
+    .ladder svg { width: 100%; height: auto; overflow: visible; }
+    .lifeline { stroke: var(--rule); stroke-width: 1; }
+    .lane { font-family: var(--mono); font-size: 11px; fill: var(--paper); text-anchor: middle; }
+    .lane-sub { font-family: var(--mono); font-size: 8.5px; fill: var(--slate); text-anchor: middle; }
+    .msg line { stroke-width: 1.5; }
+    .msg line.req { stroke: var(--cyan); }
+    .msg line.res { stroke: var(--amber); }
+    .label { font-family: var(--mono); font-size: 9.5px; text-anchor: middle; }
+    .label.req { fill: var(--cyan); }
+    .label.res { fill: var(--amber); }
+    .ladder figcaption { font-size: 0.85rem; color: var(--slate); margin-top: 1.25rem; max-width: 42ch; }
+
+    /* The one orchestrated moment on the page: the call assembles itself once, in order. */
+    .msg { opacity: 0; animation: draw 0.4s ease-out forwards; animation-delay: calc(0.35s + var(--i) * 0.16s); }
+    @keyframes draw { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .msg { opacity: 1; animation: none; } }
+
+    .why-grid { display: grid; gap: 2.75rem 4rem; grid-template-columns: 1fr; }
+    @media (min-width: 760px) { .why-grid { grid-template-columns: 1fr 1fr; } }
+    .why-grid h3 { font-size: 1.15rem; margin-bottom: 0.6rem; }
+    .why-grid h3::before { content: ""; display: block; width: 24px; height: 2px; background: var(--cyan); margin-bottom: 0.9rem; }
+    .why-grid p { color: var(--slate); margin: 0; max-width: 44ch; }
+
+    .features { display: grid; gap: 2.25rem 4rem; grid-template-columns: 1fr; margin: 0; }
+    @media (min-width: 760px) { .features { grid-template-columns: 1fr 1fr; } }
+    .features dt { font-family: var(--display); font-weight: 600; font-size: 1.05rem; margin-bottom: 0.5rem; }
+    .features dd { margin: 0; color: var(--slate); max-width: 46ch; }
+    .features code { font-size: 0.85em; color: var(--amber); }
+
+    .status-head { font-size: clamp(1.4rem, 3vw, 1.9rem); max-width: 24ch; margin-bottom: 2.25rem; }
+    .status { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+    .status tr { border-top: 1px solid var(--rule); }
+    .status tr:last-child { border-bottom: 1px solid var(--rule); }
+    .status th { text-align: left; font-weight: 500; padding: 0.9rem 1rem 0.9rem 0; white-space: nowrap; }
+    .status td { padding: 0.9rem 1rem 0.9rem 0; vertical-align: baseline; }
+    .status .note { color: var(--slate); }
+    .pill { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em; padding: 0.15rem 0.5rem; border-radius: 2px; white-space: nowrap; }
+    .pill.proven { color: var(--cyan); border: 1px solid color-mix(in srgb, var(--cyan) 40%, transparent); }
+    .pill.open { color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent); }
+    .status-foot { color: var(--slate); margin: 1.75rem 0 0; max-width: var(--measure); }
+
+    @media (max-width: 620px) {
+      .status th { white-space: normal; }
+      .status .note { display: none; }
+    }
+  </style>
+
+  <script>
+    document.querySelectorAll<HTMLButtonElement>("button[data-copy]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(btn.dataset.copy ?? "");
+        const was = btn.textContent;
+        btn.textContent = "Copied";
+        setTimeout(() => { btn.textContent = was; }, 1600);
+      });
+    });
+  </script>
+</Base>
