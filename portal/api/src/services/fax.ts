@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { fax, tenantSettings } from "../db/schema";
 import { env } from "../env";
+import { encodeHeader, sendRaw } from "../lib/mail";
 
 export type FaxReport = {
   callUuid: string;
@@ -57,34 +58,12 @@ async function convertToPdf(tiffPath: string): Promise<string | null> {
  * be absent on a fresh box - it warns rather than failing, because the fax is already stored
  * and downloadable from the portal. steps/15-mail.sh installs Postfix, which provides it.
  */
-/**
- * RFC 2047 encodes a header value if it is not plain ASCII.
- *
- * The subject carries the sender's caller ID, which is remote-supplied - a non-ASCII byte in a
- * raw header is a protocol violation, and a CR or LF there is header injection.
- */
-function encodeHeader(value: string): string {
-  const clean = value.replace(/[\r\n]/g, " ");
-  // eslint-disable-next-line no-control-regex
-  if (!/[^\x20-\x7E]/.test(clean)) return clean;
-  return `=?UTF-8?B?${Buffer.from(clean, "utf8").toString("base64")}?=`;
-}
-
 async function deliverByEmail(
   to: string,
   subject: string,
   body: string,
   attachment: { path: string; filename: string } | null,
 ): Promise<boolean> {
-  const sendmail = Bun.which("sendmail");
-  if (!sendmail) {
-    console.warn(
-      `[fax] no MTA installed - not delivering to ${to}. ` +
-        `The fax is stored and available in the portal. Run steps/15-mail.sh to enable email.`,
-    );
-    return false;
-  }
-
   const boundary = `----qwixboxfax-${randomUUID()}`;
   /* From and Date are set explicitly rather than left to the MTA. Postfix would otherwise
      rewrite From to the local system user, and a message with no Date is scored as spam by most
@@ -115,20 +94,9 @@ async function deliverByEmail(
   }
   message += `\r\n--${boundary}--\r\n`;
 
-  try {
-    const proc = Bun.spawn([sendmail, "-t"], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    proc.stdin.write(message);
-    await proc.stdin.end();
-    await proc.exited;
-    return proc.exitCode === 0;
-  } catch (err) {
-    console.error(`[fax] sendmail failed: ${(err as Error).message}`);
-    return false;
-  }
+  /* The fax is already stored and downloadable from the portal, so a missing MTA is a warning
+     rather than a failure - sendRaw says so and returns false. */
+  return sendRaw(message, "fax");
 }
 
 /**

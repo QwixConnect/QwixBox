@@ -12,6 +12,7 @@ import { createAccessControl } from "better-auth/plugins/access";
 import { db } from "./db";
 import * as schema from "./db/auth-schema";
 import { env } from "./env";
+import { sendMail } from "./lib/mail";
 import { consumeSignupPermission } from "./lib/signup-gate";
 
 /**
@@ -100,6 +101,42 @@ export const auth = betterAuth({
     // Telephony admin credentials are worth more than a typical app login: a compromise means
     // toll fraud on someone else's bill.
     minPasswordLength: 12,
+
+    /**
+     * Without this, better-auth's reset flow is inert: `/api/auth/forget-password` answers
+     * "check your email" and no email is ever sent, so a forgotten password meant deleting the
+     * account and recreating it - which drops its tenant with it.
+     *
+     * `url` is built by better-auth as {baseURL}/reset-password/{token}?callbackURL=... - an API
+     * endpoint that validates the token and then redirects to the SPA route with it. So the link
+     * only works because `/reset-password` is served to anonymous visitors in 42-nginx.sh; it is
+     * behind the session gate otherwise, and the whole flow dead-ends at a 404.
+     *
+     * One hour, better-auth's default. Deliberately not extended: this is the reset path for a
+     * console that can place calls billed to a customer.
+     */
+    async sendResetPassword({ user, url }) {
+      const sent = await sendMail({
+        to: user.email,
+        subject: "Reset your Qwixbox password",
+        tag: "auth",
+        text:
+          `Someone asked to reset the password for ${user.email} on ${env.pbxFqdn}.\n\n` +
+          `${url}\n\n` +
+          `The link expires in one hour and can be used once.\n\n` +
+          `If this was not you, nothing has changed and you can ignore this message.\n`,
+      });
+
+      /* Logged, not thrown. Throwing would turn a mail outage into a 500 that an anonymous
+         caller could use to tell which addresses exist - better-auth answers identically either
+         way on purpose, and this keeps that true. The operator still needs to know. */
+      if (!sent) {
+        console.error(
+          `[auth] could not email a reset link to ${user.email}. ` +
+            `Check the MTA (steps/15-mail.sh) - the link was not delivered.`,
+        );
+      }
+    },
   },
 
   /**

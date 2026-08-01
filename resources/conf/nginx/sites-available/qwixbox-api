@@ -111,6 +111,18 @@ server {
         add_header Cache-Control "no-store, must-revalidate";
     }
 
+    # Where the emailed password-reset link lands, so it must be reachable without a session -
+    # the whole point is that the person cannot sign in. The API endpoint validates the token
+    # first and redirects here with it; this page never sees an unvalidated one, and holding a
+    # valid token is what it treats as authorisation.
+    #
+    # Without this location the link falls into the gated prefix below and returns 404, which is
+    # how the invitation link already behaves and why invitations are not offered in the portal.
+    location = /reset-password {
+        try_files /index.html =404;
+        add_header Cache-Control "no-store, must-revalidate";
+    }
+
     location = /favicon.svg {
         try_files $uri =404;
     }

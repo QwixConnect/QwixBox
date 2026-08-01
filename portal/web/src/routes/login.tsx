@@ -10,6 +10,7 @@ import { useState } from "react";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import {
   Alert,
+  Anchor,
   Button,
   Card,
   Center,
@@ -49,6 +50,43 @@ function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  /**
+   * The reply is the same whether or not the address exists — better-auth answers identically on
+   * purpose, and saying "no such account" here would hand an attacker a list of which addresses
+   * are worth attacking. So the message below is deliberately non-committal.
+   */
+  async function requestReset() {
+    setError(null);
+    setNotice(null);
+
+    if (!email) {
+      setError("Enter your email address first, then choose this again.");
+      return;
+    }
+
+    setBusy(true);
+    // The API validates the token and redirects here with it; 42-nginx.sh serves this path to
+    // anonymous visitors so the emailed link does not land on the session gate.
+    const res = await authClient.requestPasswordReset({
+      email,
+      redirectTo: "/reset-password",
+    });
+    setBusy(false);
+
+    if (res.error) {
+      setError(
+        res.error.status === 429
+          ? "Too many attempts. Wait a minute and try again."
+          : "Could not send a reset link.",
+      );
+      return;
+    }
+    setNotice(
+      `If ${email} has an account, a reset link is on its way. It expires in an hour.`,
+    );
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -92,6 +130,11 @@ function Login() {
               {error}
             </Alert>
           )}
+          {notice && (
+            <Alert color="blue" variant="light">
+              {notice}
+            </Alert>
+          )}
 
           <TextInput
             label="Email"
@@ -113,6 +156,17 @@ function Login() {
           <Button type="submit" loading={busy} disabled={!email || !password} fullWidth>
             Sign in
           </Button>
+
+          <Anchor
+            component="button"
+            type="button"
+            size="xs"
+            ta="center"
+            disabled={busy}
+            onClick={() => void requestReset()}
+          >
+            Forgot your password?
+          </Anchor>
 
           <Text size="xs" c="dimmed" ta="center">
             Accounts are created by your administrator.
