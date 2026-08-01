@@ -30,7 +30,9 @@ const name = arg("name");
 const supplied = arg("password");
 
 if (!email || !name) {
-  console.error("Usage: create-user.ts --email <email> --name <name> [--password <password>]");
+  console.error(
+    "Usage: create-user.ts --email <email> --name <name> [--password <password>]",
+  );
   process.exit(2);
 }
 
@@ -41,10 +43,15 @@ if (supplied && supplied.length < 12) {
   process.exit(1);
 }
 
-const existing = await db.query.user.findFirst({ where: eq(user.email, email) });
+const existing = await db.query.user.findFirst({
+  where: eq(user.email, email),
+});
 if (existing) {
   console.error(`${email} already exists (${existing.id}).`);
-  console.error("To attach a tenant to them:  bun run src/cli/provision-tenant.ts --owner " + email);
+  console.error(
+    "To attach a tenant to them:  bun run src/cli/provision-tenant.ts --owner " +
+      email,
+  );
   process.exit(1);
 }
 
@@ -62,7 +69,9 @@ try {
 
 const created = await db.query.user.findFirst({ where: eq(user.email, email) });
 if (!created) {
-  console.error("Signup reported success but no user row exists - check the API logs.");
+  console.error(
+    "Signup reported success but no user row exists - check the API logs.",
+  );
   process.exit(1);
 }
 

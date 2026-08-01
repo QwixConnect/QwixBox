@@ -23,9 +23,21 @@ import {
 import { crudRoutes, tenantOwns } from "../lib/crud";
 import { recordAudit } from "../lib/audit";
 import { encrypt } from "../lib/crypto";
-import { cacheInboundRoutes, cacheRouteTable, rebuildTenant } from "../services/cache";
-import { reloadKamailio, removeTrunkAddress, syncTrunkAddress } from "../services/kamailio-sync";
-import { requirePermission, requireTenant, type AppEnv } from "../middleware/tenant";
+import {
+  cacheInboundRoutes,
+  cacheRouteTable,
+  rebuildTenant,
+} from "../services/cache";
+import {
+  reloadKamailio,
+  removeTrunkAddress,
+  syncTrunkAddress,
+} from "../services/kamailio-sync";
+import {
+  requirePermission,
+  requireTenant,
+  type AppEnv,
+} from "../middleware/tenant";
 
 /**
  * Validates a polymorphic destination reference against the tenant.
@@ -53,7 +65,11 @@ async function badDestination(
   if (effectiveType === undefined || effectiveType === null) {
     // An id with nothing to interpret it is not a harmless no-op: it is the shape the
     // cross-tenant write takes, and there is no legitimate request that produces it.
-    if (effectiveId !== undefined && effectiveId !== null && effectiveId !== "") {
+    if (
+      effectiveId !== undefined &&
+      effectiveId !== null &&
+      effectiveId !== ""
+    ) {
       return "destinationType is required when destinationId is set";
     }
     return null;
@@ -61,8 +77,10 @@ async function badDestination(
 
   // These carry no row reference: `external` holds a literal number, the others nothing.
   if (
-    effectiveType === "external" || effectiveType === "hangup" ||
-    effectiveType === "voicemail" || effectiveType === "fax"
+    effectiveType === "external" ||
+    effectiveType === "hangup" ||
+    effectiveType === "voicemail" ||
+    effectiveType === "fax"
   ) {
     return null;
   }
@@ -76,16 +94,45 @@ async function badDestination(
   const owned = await (async () => {
     switch (type_) {
       case "extension":
-        return tenantOwns(extension, extension.organizationId, extension.id, id_, organizationId);
+        return tenantOwns(
+          extension,
+          extension.organizationId,
+          extension.id,
+          id_,
+          organizationId,
+        );
       case "ring_group":
-        return tenantOwns(ringGroup, ringGroup.organizationId, ringGroup.id, id_, organizationId);
+        return tenantOwns(
+          ringGroup,
+          ringGroup.organizationId,
+          ringGroup.id,
+          id_,
+          organizationId,
+        );
       case "ivr":
-        return tenantOwns(ivrMenu, ivrMenu.organizationId, ivrMenu.id, id_, organizationId);
+        return tenantOwns(
+          ivrMenu,
+          ivrMenu.organizationId,
+          ivrMenu.id,
+          id_,
+          organizationId,
+        );
       case "time_condition":
         return tenantOwns(
-          timeCondition, timeCondition.organizationId, timeCondition.id, id_, organizationId);
+          timeCondition,
+          timeCondition.organizationId,
+          timeCondition.id,
+          id_,
+          organizationId,
+        );
       case "queue":
-        return tenantOwns(queue, queue.organizationId, queue.id, id_, organizationId);
+        return tenantOwns(
+          queue,
+          queue.organizationId,
+          queue.id,
+          id_,
+          organizationId,
+        );
       default:
         return false;
     }
@@ -108,8 +155,17 @@ export const trunks = crudRoutes({
   permission: "trunk",
   required: ["name", "host"],
   writable: [
-    "name", "authMode", "host", "port", "transport", "username", "fromDomain",
-    "codecPrefs", "priority", "carrierSigns", "enabled",
+    "name",
+    "authMode",
+    "host",
+    "port",
+    "transport",
+    "username",
+    "fromDomain",
+    "codecPrefs",
+    "priority",
+    "carrierSigns",
+    "enabled",
   ],
   // Carrier credentials never go back to a client, same rule as SIP passwords.
   present: ({ passwordEnc: _p, ...rest }) => rest,
@@ -151,7 +207,12 @@ trunkSecrets.put("/:id/password", async (c) => {
   const [row] = await db
     .update(trunk)
     .set({ passwordEnc: encrypt(password) })
-    .where(and(eq(trunk.id, c.req.param("id")), eq(trunk.organizationId, c.get("organizationId"))))
+    .where(
+      and(
+        eq(trunk.id, c.req.param("id")),
+        eq(trunk.organizationId, c.get("organizationId")),
+      ),
+    )
     .returning();
   if (!row) return c.json({ error: "Not found" }, 404);
 
@@ -181,11 +242,22 @@ export const inboundRoutes = crudRoutes({
   entityType: "inbound_route",
   permission: "route",
   required: ["didPattern", "destinationType"],
-  writable: ["didPattern", "description", "destinationType", "destinationId", "priority", "enabled"],
+  writable: [
+    "didPattern",
+    "description",
+    "destinationType",
+    "destinationId",
+    "priority",
+    "enabled",
+  ],
   validate: async (body, organizationId, existing) =>
     badDestination(
-      body.destinationType, body.destinationId, organizationId,
-      existing?.destinationType, existing?.destinationId),
+      body.destinationType,
+      body.destinationId,
+      organizationId,
+      existing?.destinationType,
+      existing?.destinationId,
+    ),
   afterChange: async (organizationId) => {
     await cacheInboundRoutes(organizationId);
   },
@@ -199,15 +271,27 @@ export const outboundRoutes = crudRoutes({
   permission: "route",
   required: ["name", "pattern"],
   writable: [
-    "name", "pattern", "trunkId", "stripDigits", "prependDigits",
-    "callerIdOverride", "priority", "isEmergency", "enabled",
+    "name",
+    "pattern",
+    "trunkId",
+    "stripDigits",
+    "prependDigits",
+    "callerIdOverride",
+    "priority",
+    "isEmergency",
+    "enabled",
   ],
   validate: async (body, organizationId, existing) => {
     // A trunk belonging to another tenant would route this tenant's calls out through
     // someone else's carrier, billed to them.
     if (body.trunkId !== undefined && body.trunkId !== null) {
       const owned = await tenantOwns(
-        trunk, trunk.organizationId, trunk.id, body.trunkId, organizationId);
+        trunk,
+        trunk.organizationId,
+        trunk.id,
+        body.trunkId,
+        organizationId,
+      );
       if (!owned) return "trunkId does not belong to this tenant";
     }
     // An invalid pattern is not caught until a call matches it, at which point the Lua
@@ -224,7 +308,8 @@ export const outboundRoutes = crudRoutes({
     // Merged with the stored row for the same reason as the destination pairs: marking an
     // existing route as emergency sends only isEmergency, and reading the body alone would
     // reject it for having no trunk when it has had one all along.
-    const effectiveTrunk = body.trunkId !== undefined ? body.trunkId : existing?.trunkId;
+    const effectiveTrunk =
+      body.trunkId !== undefined ? body.trunkId : existing?.trunkId;
     const effectiveEmergency =
       body.isEmergency !== undefined ? body.isEmergency : existing?.isEmergency;
     if (effectiveEmergency === true && !effectiveTrunk) {
@@ -251,12 +336,22 @@ export const ringGroups = crudRoutes({
   permission: "callflow",
   required: ["number", "name"],
   writable: [
-    "number", "name", "strategy", "ringTimeoutSec", "failoverType", "failoverId", "enabled",
+    "number",
+    "name",
+    "strategy",
+    "ringTimeoutSec",
+    "failoverType",
+    "failoverId",
+    "enabled",
   ],
   validate: async (body, organizationId, existing) =>
     badDestination(
-      body.failoverType, body.failoverId, organizationId,
-      existing?.failoverType, existing?.failoverId),
+      body.failoverType,
+      body.failoverId,
+      organizationId,
+      existing?.failoverType,
+      existing?.failoverId,
+    ),
   afterChange: async (organizationId) => {
     await rebuildTenant(organizationId);
   },
@@ -269,7 +364,11 @@ ringGroupMembers.use("*", requireTenant);
 /* Sub-path routes do not inherit the parent's crudRoutes gate. Membership changes who a call
    rings, so it is a callflow update, not a read. */
 ringGroupMembers.use("*", async (c, next) =>
-  requirePermission("callflow", c.req.method === "GET" ? "read" : "update")(c, next));
+  requirePermission("callflow", c.req.method === "GET" ? "read" : "update")(
+    c,
+    next,
+  ),
+);
 
 ringGroupMembers.get("/:id/members", async (c) => {
   const rows = await db
@@ -296,17 +395,36 @@ ringGroupMembers.get("/:id/members", async (c) => {
 ringGroupMembers.post("/:id/members", async (c) => {
   const organizationId = c.get("organizationId");
   const groupId = c.req.param("id");
-  const body = await c.req.json<{ extensionId?: string; position?: number; delaySec?: number }>();
-  if (!body.extensionId) return c.json({ error: "extensionId is required" }, 400);
+  const body = await c.req.json<{
+    extensionId?: string;
+    position?: number;
+    delaySec?: number;
+  }>();
+  if (!body.extensionId)
+    return c.json({ error: "extensionId is required" }, 400);
 
   // Both the group AND the extension must belong to this tenant - checking only one would let
   // a tenant add another tenant's extension to their own ring group.
-  const [group] = await db.select().from(ringGroup)
-    .where(and(eq(ringGroup.id, groupId), eq(ringGroup.organizationId, organizationId)));
+  const [group] = await db
+    .select()
+    .from(ringGroup)
+    .where(
+      and(
+        eq(ringGroup.id, groupId),
+        eq(ringGroup.organizationId, organizationId),
+      ),
+    );
   if (!group) return c.json({ error: "Ring group not found" }, 404);
 
-  const [ext] = await db.select().from(extension)
-    .where(and(eq(extension.id, body.extensionId), eq(extension.organizationId, organizationId)));
+  const [ext] = await db
+    .select()
+    .from(extension)
+    .where(
+      and(
+        eq(extension.id, body.extensionId),
+        eq(extension.organizationId, organizationId),
+      ),
+    );
   if (!ext) return c.json({ error: "Extension not found" }, 404);
 
   const [row] = await db
@@ -326,8 +444,15 @@ ringGroupMembers.post("/:id/members", async (c) => {
 });
 
 ringGroupMembers.delete("/:id/members/:memberId", async (c) => {
-  const [group] = await db.select().from(ringGroup)
-    .where(and(eq(ringGroup.id, c.req.param("id")), eq(ringGroup.organizationId, c.get("organizationId"))));
+  const [group] = await db
+    .select()
+    .from(ringGroup)
+    .where(
+      and(
+        eq(ringGroup.id, c.req.param("id")),
+        eq(ringGroup.organizationId, c.get("organizationId")),
+      ),
+    );
   if (!group) return c.json({ error: "Ring group not found" }, 404);
 
   // Scoped to the verified group, not just the member id. Verifying only the group let a
@@ -341,7 +466,8 @@ ringGroupMembers.delete("/:id/members/:memberId", async (c) => {
       ),
     )
     .returning();
-  if (removed.length === 0) return c.json({ error: "Member not found in this group" }, 404);
+  if (removed.length === 0)
+    return c.json({ error: "Member not found in this group" }, 404);
 
   await rebuildTenant(c.get("organizationId"));
   return c.body(null, 204);
@@ -356,13 +482,24 @@ export const ivrMenus = crudRoutes({
   permission: "callflow",
   required: ["number", "name"],
   writable: [
-    "number", "name", "greetingSound", "invalidSound", "timeoutSec",
-    "maxRetries", "timeoutType", "timeoutId", "enabled",
+    "number",
+    "name",
+    "greetingSound",
+    "invalidSound",
+    "timeoutSec",
+    "maxRetries",
+    "timeoutType",
+    "timeoutId",
+    "enabled",
   ],
   validate: async (body, organizationId, existing) =>
     badDestination(
-      body.timeoutType, body.timeoutId, organizationId,
-      existing?.timeoutType, existing?.timeoutId),
+      body.timeoutType,
+      body.timeoutId,
+      organizationId,
+      existing?.timeoutType,
+      existing?.timeoutId,
+    ),
   afterChange: async (organizationId) => {
     await rebuildTenant(organizationId);
   },
@@ -373,26 +510,55 @@ export const ivrMenus = crudRoutes({
 const ivrOptions = new Hono<AppEnv>();
 ivrOptions.use("*", requireTenant);
 ivrOptions.use("*", async (c, next) =>
-  requirePermission("callflow", c.req.method === "GET" ? "read" : "update")(c, next));
+  requirePermission("callflow", c.req.method === "GET" ? "read" : "update")(
+    c,
+    next,
+  ),
+);
 
 ivrOptions.get("/:id/options", async (c) => {
-  const [menu] = await db.select().from(ivrMenu)
-    .where(and(eq(ivrMenu.id, c.req.param("id")), eq(ivrMenu.organizationId, c.get("organizationId"))));
+  const [menu] = await db
+    .select()
+    .from(ivrMenu)
+    .where(
+      and(
+        eq(ivrMenu.id, c.req.param("id")),
+        eq(ivrMenu.organizationId, c.get("organizationId")),
+      ),
+    );
   if (!menu) return c.json({ error: "Not found" }, 404);
-  const rows = await db.select().from(ivrOption).where(eq(ivrOption.ivrMenuId, menu.id));
+  const rows = await db
+    .select()
+    .from(ivrOption)
+    .where(eq(ivrOption.ivrMenuId, menu.id));
   return c.json(rows);
 });
 
 ivrOptions.put("/:id/options/:digit", async (c) => {
-  const [menu] = await db.select().from(ivrMenu)
-    .where(and(eq(ivrMenu.id, c.req.param("id")), eq(ivrMenu.organizationId, c.get("organizationId"))));
+  const [menu] = await db
+    .select()
+    .from(ivrMenu)
+    .where(
+      and(
+        eq(ivrMenu.id, c.req.param("id")),
+        eq(ivrMenu.organizationId, c.get("organizationId")),
+      ),
+    );
   if (!menu) return c.json({ error: "Not found" }, 404);
 
-  const body = await c.req.json<{ destinationType?: string; destinationId?: string; description?: string }>();
-  if (!body.destinationType) return c.json({ error: "destinationType is required" }, 400);
+  const body = await c.req.json<{
+    destinationType?: string;
+    destinationId?: string;
+    description?: string;
+  }>();
+  if (!body.destinationType)
+    return c.json({ error: "destinationType is required" }, 400);
 
   const problem = await badDestination(
-    body.destinationType, body.destinationId, c.get("organizationId"));
+    body.destinationType,
+    body.destinationId,
+    c.get("organizationId"),
+  );
   if (problem) return c.json({ error: problem }, 400);
 
   const [row] = await db
@@ -420,12 +586,25 @@ ivrOptions.put("/:id/options/:digit", async (c) => {
 });
 
 ivrOptions.delete("/:id/options/:digit", async (c) => {
-  const [menu] = await db.select().from(ivrMenu)
-    .where(and(eq(ivrMenu.id, c.req.param("id")), eq(ivrMenu.organizationId, c.get("organizationId"))));
+  const [menu] = await db
+    .select()
+    .from(ivrMenu)
+    .where(
+      and(
+        eq(ivrMenu.id, c.req.param("id")),
+        eq(ivrMenu.organizationId, c.get("organizationId")),
+      ),
+    );
   if (!menu) return c.json({ error: "Not found" }, 404);
 
-  await db.delete(ivrOption)
-    .where(and(eq(ivrOption.ivrMenuId, menu.id), eq(ivrOption.digit, c.req.param("digit"))));
+  await db
+    .delete(ivrOption)
+    .where(
+      and(
+        eq(ivrOption.ivrMenuId, menu.id),
+        eq(ivrOption.digit, c.req.param("digit")),
+      ),
+    );
   await rebuildTenant(c.get("organizationId"));
   return c.body(null, 204);
 });
@@ -439,16 +618,31 @@ export const timeConditions = crudRoutes({
   permission: "callflow",
   required: ["name", "rules"],
   writable: [
-    "name", "timezone", "rules", "matchType", "matchId", "noMatchType", "noMatchId", "enabled",
+    "name",
+    "timezone",
+    "rules",
+    "matchType",
+    "matchId",
+    "noMatchType",
+    "noMatchId",
+    "enabled",
   ],
   validate: async (body, organizationId, existing) => {
     const matchProblem = await badDestination(
-      body.matchType, body.matchId, organizationId,
-      existing?.matchType, existing?.matchId);
+      body.matchType,
+      body.matchId,
+      organizationId,
+      existing?.matchType,
+      existing?.matchId,
+    );
     if (matchProblem) return matchProblem;
     const noMatchProblem = await badDestination(
-      body.noMatchType, body.noMatchId, organizationId,
-      existing?.noMatchType, existing?.noMatchId);
+      body.noMatchType,
+      body.noMatchId,
+      organizationId,
+      existing?.noMatchType,
+      existing?.noMatchId,
+    );
     if (noMatchProblem) return noMatchProblem;
 
     // The rules are evaluated by Lua at call time, where a malformed shape means the condition

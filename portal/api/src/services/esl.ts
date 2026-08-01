@@ -18,7 +18,10 @@ type EslResult = { ok: boolean; body: string };
  * but everything we do is request/response, and a per-command socket cannot get wedged in a
  * half-authenticated state the way a pooled one can.
  */
-async function eslCommand(command: string, timeoutMs = 5000): Promise<EslResult> {
+async function eslCommand(
+  command: string,
+  timeoutMs = 5000,
+): Promise<EslResult> {
   if (!env.fsEslPassword) {
     return { ok: false, body: "FS_ESL_PASSWORD is not set" };
   }
@@ -41,7 +44,11 @@ async function eslCommand(command: string, timeoutMs = 5000): Promise<EslResult>
     };
 
     const timer = setTimeout(
-      () => finish({ ok: false, body: `ESL command timed out after ${timeoutMs}ms` }),
+      () =>
+        finish({
+          ok: false,
+          body: `ESL command timed out after ${timeoutMs}ms`,
+        }),
       timeoutMs,
     );
 
@@ -66,7 +73,11 @@ async function eslCommand(command: string, timeoutMs = 5000): Promise<EslResult>
           }
 
           // Once authenticated, the +OK for auth is followed by our command's reply.
-          if (authenticated && buffer.includes("+OK accepted") && !buffer.includes("api/response")) {
+          if (
+            authenticated &&
+            buffer.includes("+OK accepted") &&
+            !buffer.includes("api/response")
+          ) {
             buffer = "";
             sock.write(`api ${command}\n\n`);
             return;
@@ -78,7 +89,9 @@ async function eslCommand(command: string, timeoutMs = 5000): Promise<EslResult>
           }
 
           // A complete api response carries Content-Length; wait for the whole body.
-          const match = buffer.match(/Content-Length:\s*(\d+)\r?\n\r?\n([\s\S]*)$/);
+          const match = buffer.match(
+            /Content-Length:\s*(\d+)\r?\n\r?\n([\s\S]*)$/,
+          );
           if (match) {
             const expected = Number(match[1]);
             const body = match[2] ?? "";
@@ -94,7 +107,9 @@ async function eslCommand(command: string, timeoutMs = 5000): Promise<EslResult>
           finish({ ok: false, body: "ESL connection closed before a reply" });
         },
       },
-    }).catch((err: Error) => finish({ ok: false, body: `ESL connect failed: ${err.message}` }));
+    }).catch((err: Error) =>
+      finish({ ok: false, body: `ESL connect failed: ${err.message}` }),
+    );
   });
 }
 
@@ -111,7 +126,9 @@ export const esl = {
    */
   async flushXmlCache(user?: string, domain?: string): Promise<boolean> {
     const cmd =
-      user && domain ? `xml_flush_cache id ${user} ${domain}` : "xml_flush_cache";
+      user && domain
+        ? `xml_flush_cache id ${user} ${domain}`
+        : "xml_flush_cache";
     const { ok, body } = await eslCommand(cmd);
     if (!ok) {
       // Not fatal: Redis is already updated and the TTL will expire. Log so a persistently

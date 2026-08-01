@@ -31,8 +31,11 @@ fsCdr.use("*", async (c, next) => {
   const [scheme, encoded] = header.split(" ");
   if (scheme !== "Basic" || !encoded) return c.text("Unauthorized", 401);
 
-  const [, password] = Buffer.from(encoded, "base64").toString("utf8").split(":");
-  if (!password || !safeEqual(password, expected)) return c.text("Unauthorized", 401);
+  const [, password] = Buffer.from(encoded, "base64")
+    .toString("utf8")
+    .split(":");
+  if (!password || !safeEqual(password, expected))
+    return c.text("Unauthorized", 401);
 
   await next();
 });

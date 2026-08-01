@@ -7,7 +7,12 @@ import { db } from "../db";
 import { fax } from "../db/schema";
 import { recordInboundFax, type FaxReport } from "../services/fax";
 import { safeEqual } from "../lib/crypto";
-import { actionForMethod, requirePermission, requireTenant, type AppEnv } from "../middleware/tenant";
+import {
+  actionForMethod,
+  requirePermission,
+  requireTenant,
+  type AppEnv,
+} from "../middleware/tenant";
 
 /* ---------------------------------------------------------------------------------------
  * Machine endpoint: fax_receive.lua reports here after rxfax completes.
@@ -33,8 +38,11 @@ faxHook.use("*", async (c, next) => {
   const header = c.req.header("Authorization") ?? "";
   const [scheme, encoded] = header.split(" ");
   if (scheme !== "Basic" || !encoded) return c.text("Unauthorized", 401);
-  const [, password] = Buffer.from(encoded, "base64").toString("utf8").split(":");
-  if (!password || !safeEqual(password, expected)) return c.text("Unauthorized", 401);
+  const [, password] = Buffer.from(encoded, "base64")
+    .toString("utf8")
+    .split(":");
+  if (!password || !safeEqual(password, expected))
+    return c.text("Unauthorized", 401);
   await next();
 });
 
@@ -42,7 +50,10 @@ faxHook.post("/", async (c) => {
   try {
     const report = await c.req.json<FaxReport>();
     if (!report.callUuid || !report.domain || !report.did || !report.filePath) {
-      return c.json({ error: "callUuid, domain, did and filePath are required" }, 400);
+      return c.json(
+        { error: "callUuid, domain, did and filePath are required" },
+        400,
+      );
     }
     const id = await recordInboundFax(report);
     return c.json({ id, status: "recorded" }, id ? 201 : 202);
@@ -64,7 +75,8 @@ faxes.use("*", requireTenant);
    in the statement rather than getting a category of its own - viewer has no access, member can
    read, admin can delete. */
 faxes.use("*", async (c, next) =>
-  requirePermission("recording", actionForMethod(c.req.method))(c, next));
+  requirePermission("recording", actionForMethod(c.req.method))(c, next),
+);
 
 faxes.get("/", async (c) => {
   const rows = await db.query.fax.findMany({
@@ -73,12 +85,23 @@ faxes.get("/", async (c) => {
     limit: 200,
   });
   // filePath is a server path - useful to us, meaningless and mildly leaky to a client.
-  return c.json(rows.map(({ filePath: _p, ...rest }) => rest));
+  // onDisk tells the UI whether Download will work, so a pruned file shows "no longer on disk"
+  // instead of an anchor that navigates to a JSON 410.
+  const out = await Promise.all(
+    rows.map(async ({ filePath, ...rest }) => ({
+      ...rest,
+      onDisk: Boolean(filePath && (await Bun.file(filePath).exists())),
+    })),
+  );
+  return c.json(out);
 });
 
 faxes.get("/:id/download", async (c) => {
   const row = await db.query.fax.findFirst({
-    where: and(eq(fax.id, c.req.param("id")), eq(fax.organizationId, c.get("organizationId"))),
+    where: and(
+      eq(fax.id, c.req.param("id")),
+      eq(fax.organizationId, c.get("organizationId")),
+    ),
   });
   if (!row?.filePath) return c.json({ error: "Not found" }, 404);
 
@@ -86,7 +109,13 @@ faxes.get("/:id/download", async (c) => {
   if (!(await file.exists())) {
     // The row outliving the file is a real state - retention may have pruned it - and saying
     // so precisely beats a bare 404 that looks like a permissions problem.
-    return c.json({ error: "The document is no longer on disk", receivedAt: row.receivedAt }, 410);
+    return c.json(
+      {
+        error: "The document is no longer on disk",
+        receivedAt: row.receivedAt,
+      },
+      410,
+    );
   }
 
   const isPdf = row.filePath.endsWith(".pdf");

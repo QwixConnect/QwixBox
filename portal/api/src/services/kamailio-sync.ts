@@ -12,7 +12,10 @@
 import pg from "pg";
 import { env } from "../env";
 import { computeHa1, computeHa1b } from "../lib/crypto";
-import type { extension as extensionTable, trunk as trunkTable } from "../db/schema";
+import type {
+  extension as extensionTable,
+  trunk as trunkTable,
+} from "../db/schema";
 
 type ExtensionRow = typeof extensionTable.$inferSelect;
 type TrunkRow = typeof trunkTable.$inferSelect;
@@ -27,7 +30,9 @@ function getPool(): pg.Pool | null {
       max: 5,
       connectionTimeoutMillis: 5_000,
     });
-    pool.on("error", (err) => console.error("[kamailio-sync] pool error:", err.message));
+    pool.on("error", (err) =>
+      console.error("[kamailio-sync] pool error:", err.message),
+    );
   }
   return pool;
 }
@@ -46,7 +51,9 @@ export async function syncSubscriber(
 ): Promise<boolean> {
   const p = getPool();
   if (!p) {
-    console.warn("[kamailio-sync] KAMAILIO_DATABASE_URL not set — subscriber not projected");
+    console.warn(
+      "[kamailio-sync] KAMAILIO_DATABASE_URL not set — subscriber not projected",
+    );
     return false;
   }
 
@@ -63,19 +70,25 @@ export async function syncSubscriber(
     );
     return true;
   } catch (err) {
-    console.error(`[kamailio-sync] subscriber ${ext.number}@${sipDomain}:`, (err as Error).message);
+    console.error(
+      `[kamailio-sync] subscriber ${ext.number}@${sipDomain}:`,
+      (err as Error).message,
+    );
     return false;
   }
 }
 
-export async function removeSubscriber(username: string, sipDomain: string): Promise<boolean> {
+export async function removeSubscriber(
+  username: string,
+  sipDomain: string,
+): Promise<boolean> {
   const p = getPool();
   if (!p) return false;
   try {
-    await p.query(`DELETE FROM subscriber WHERE username = $1 AND domain = $2`, [
-      username,
-      sipDomain,
-    ]);
+    await p.query(
+      `DELETE FROM subscriber WHERE username = $1 AND domain = $2`,
+      [username, sipDomain],
+    );
     // Drop live registrations too, or a deleted extension stays reachable until its
     // registration expires.
     await p.query(`DELETE FROM location WHERE username = $1 AND domain = $2`, [
@@ -84,7 +97,10 @@ export async function removeSubscriber(username: string, sipDomain: string): Pro
     ]);
     return true;
   } catch (err) {
-    console.error(`[kamailio-sync] remove ${username}@${sipDomain}:`, (err as Error).message);
+    console.error(
+      `[kamailio-sync] remove ${username}@${sipDomain}:`,
+      (err as Error).message,
+    );
     return false;
   }
 }
@@ -103,7 +119,10 @@ export async function syncDomain(sipDomain: string): Promise<boolean> {
     );
     return true;
   } catch (err) {
-    console.error(`[kamailio-sync] domain ${sipDomain}:`, (err as Error).message);
+    console.error(
+      `[kamailio-sync] domain ${sipDomain}:`,
+      (err as Error).message,
+    );
     return false;
   }
 }
@@ -125,7 +144,10 @@ export async function syncTrunkAddress(trunk: TrunkRow): Promise<boolean> {
     );
     return true;
   } catch (err) {
-    console.error(`[kamailio-sync] trunk address ${trunk.host}:`, (err as Error).message);
+    console.error(
+      `[kamailio-sync] trunk address ${trunk.host}:`,
+      (err as Error).message,
+    );
     return false;
   }
 }
@@ -137,7 +159,10 @@ export async function removeTrunkAddress(trunkId: string): Promise<boolean> {
     await p.query(`DELETE FROM address WHERE tag = $1`, [trunkId]);
     return true;
   } catch (err) {
-    console.error(`[kamailio-sync] remove trunk address:`, (err as Error).message);
+    console.error(
+      `[kamailio-sync] remove trunk address:`,
+      (err as Error).message,
+    );
     return false;
   }
 }
@@ -156,12 +181,19 @@ export async function reloadKamailio(): Promise<boolean> {
      egress pass uses is_domain_local() to tell an internal call from a carrier-bound one, so a
      tenant whose domain is not in the cache has every call to its extensions treated as outbound
      and killed looking for a trunk. */
-  const commands = ["permissions.addressReload", "dispatcher.reload", "domain.reload"];
+  const commands = [
+    "permissions.addressReload",
+    "dispatcher.reload",
+    "domain.reload",
+  ];
   let ok = true;
 
   for (const command of commands) {
     try {
-      const proc = Bun.spawn(["kamcmd", command], { stdout: "pipe", stderr: "pipe" });
+      const proc = Bun.spawn(["kamcmd", command], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
       const stderr = await new Response(proc.stderr).text();
       await proc.exited;
 
@@ -171,11 +203,16 @@ export async function reloadKamailio(): Promise<boolean> {
          with "Permission denied", and nothing said so - a trunk or tenant change simply did not
          take effect until Kamailio was restarted. Inspect the output, not the status. */
       if (proc.exitCode !== 0 || /ERROR|Permission denied/i.test(stderr)) {
-        console.warn(`[kamailio-sync] ${command} failed: ${stderr.trim() || `exit ${proc.exitCode}`}`);
+        console.warn(
+          `[kamailio-sync] ${command} failed: ${stderr.trim() || `exit ${proc.exitCode}`}`,
+        );
         ok = false;
       }
     } catch (err) {
-      console.warn(`[kamailio-sync] ${command} failed:`, (err as Error).message);
+      console.warn(
+        `[kamailio-sync] ${command} failed:`,
+        (err as Error).message,
+      );
       ok = false;
     }
   }

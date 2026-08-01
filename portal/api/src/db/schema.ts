@@ -128,7 +128,9 @@ export const tenantSettings = pgTable(
     egressMode: egressModeEnum("egress_mode").default("proxied").notNull(),
 
     stirShakenEnabled: boolean("stir_shaken_enabled").default(false).notNull(),
-    stirShakenAttest: attestationEnum("stir_shaken_attest").default("B").notNull(),
+    stirShakenAttest: attestationEnum("stir_shaken_attest")
+      .default("B")
+      .notNull(),
 
     /**
      * Toll-fraud ceiling. A stolen SIP credential is monetised by placing many simultaneous
@@ -137,14 +139,18 @@ export const tenantSettings = pgTable(
      */
     maxConcurrentCalls: integer("max_concurrent_calls").default(10).notNull(),
 
-    recordingPolicy: recordingPolicyEnum("recording_policy").default("none").notNull(),
+    recordingPolicy: recordingPolicyEnum("recording_policy")
+      .default("none")
+      .notNull(),
     timezone: text("timezone").default("Etc/UTC").notNull(),
 
     defaultCallerIdName: text("default_caller_id_name"),
     defaultCallerIdNumber: text("default_caller_id_number"),
 
     /** How long an extension rings before no-answer treatment, unless it overrides this. */
-    defaultRingTimeoutSec: integer("default_ring_timeout_sec").default(25).notNull(),
+    defaultRingTimeoutSec: integer("default_ring_timeout_sec")
+      .default(25)
+      .notNull(),
 
     /**
      * E911 (Kari's Law): someone on site must be notified when 911 is dialled. Not optional
@@ -168,7 +174,9 @@ export const tenantSettings = pgTable(
       .$onUpdate(() => new Date())
       .notNull(),
   },
-  (table) => [uniqueIndex("tenant_settings_sip_domain_idx").on(table.sipDomain)],
+  (table) => [
+    uniqueIndex("tenant_settings_sip_domain_idx").on(table.sipDomain),
+  ],
 );
 
 /* ---------------------------------------------------------------------------------------
@@ -303,7 +311,10 @@ export const extension = pgTable(
      * An extension number is unique within a tenant, not globally - two tenants may both
      * have extension 100, and that is the whole point of domain-based multi-tenancy.
      */
-    uniqueIndex("extension_org_number_idx").on(table.organizationId, table.number),
+    uniqueIndex("extension_org_number_idx").on(
+      table.organizationId,
+      table.number,
+    ),
     index("extension_org_idx").on(table.organizationId),
     index("extension_device_mac_idx").on(table.deviceMac),
   ],
@@ -399,7 +410,9 @@ export const outboundRoute = pgTable(
     /** Regex matched against the dialled number. */
     pattern: text("pattern").notNull(),
 
-    trunkId: text("trunk_id").references(() => trunk.id, { onDelete: "cascade" }),
+    trunkId: text("trunk_id").references(() => trunk.id, {
+      onDelete: "cascade",
+    }),
 
     /** Digit manipulation applied before handing the call to the carrier. */
     stripDigits: integer("strip_digits").default(0).notNull(),
@@ -459,7 +472,10 @@ export const ringGroup = pgTable(
       .notNull(),
   },
   (table) => [
-    uniqueIndex("ring_group_org_number_idx").on(table.organizationId, table.number),
+    uniqueIndex("ring_group_org_number_idx").on(
+      table.organizationId,
+      table.number,
+    ),
   ],
 );
 
@@ -479,7 +495,10 @@ export const ringGroupMember = pgTable(
     delaySec: integer("delay_sec").default(0).notNull(),
   },
   (table) => [
-    uniqueIndex("ring_group_member_idx").on(table.ringGroupId, table.extensionId),
+    uniqueIndex("ring_group_member_idx").on(
+      table.ringGroupId,
+      table.extensionId,
+    ),
   ],
 );
 
@@ -511,7 +530,10 @@ export const ivrMenu = pgTable(
       .notNull(),
   },
   (table) => [
-    uniqueIndex("ivr_menu_org_number_idx").on(table.organizationId, table.number),
+    uniqueIndex("ivr_menu_org_number_idx").on(
+      table.organizationId,
+      table.number,
+    ),
   ],
 );
 
@@ -528,7 +550,9 @@ export const ivrOption = pgTable(
     destinationId: text("destination_id"),
     description: text("description"),
   },
-  (table) => [uniqueIndex("ivr_option_menu_digit_idx").on(table.ivrMenuId, table.digit)],
+  (table) => [
+    uniqueIndex("ivr_option_menu_digit_idx").on(table.ivrMenuId, table.digit),
+  ],
 );
 
 export const timeCondition = pgTable(
@@ -598,7 +622,9 @@ export const queue = pgTable(
       .$onUpdate(() => new Date())
       .notNull(),
   },
-  (table) => [uniqueIndex("queue_org_number_idx").on(table.organizationId, table.number)],
+  (table) => [
+    uniqueIndex("queue_org_number_idx").on(table.organizationId, table.number),
+  ],
 );
 
 /* ---------------------------------------------------------------------------------------
@@ -636,7 +662,9 @@ export const cdr = pgTable(
     extensionId: text("extension_id").references(() => extension.id, {
       onDelete: "set null",
     }),
-    trunkId: text("trunk_id").references(() => trunk.id, { onDelete: "set null" }),
+    trunkId: text("trunk_id").references(() => trunk.id, {
+      onDelete: "set null",
+    }),
 
     startedAt: timestamp("started_at").notNull(),
     answeredAt: timestamp("answered_at"),
@@ -737,7 +765,10 @@ export const auditLog = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
-    index("audit_log_org_created_idx").on(table.organizationId, table.createdAt),
+    index("audit_log_org_created_idx").on(
+      table.organizationId,
+      table.createdAt,
+    ),
     index("audit_log_entity_idx").on(table.entityType, table.entityId),
   ],
 );
@@ -765,42 +796,57 @@ export const extensionRelations = relations(extension, ({ one, many }) => ({
   ringGroupMemberships: many(ringGroupMember),
 }));
 
-export const emergencyLocationRelations = relations(emergencyLocation, ({ many }) => ({
-  extensions: many(extension),
-}));
+export const emergencyLocationRelations = relations(
+  emergencyLocation,
+  ({ many }) => ({
+    extensions: many(extension),
+  }),
+);
 
 export const trunkRelations = relations(trunk, ({ many }) => ({
   outboundRoutes: many(outboundRoute),
 }));
 
 export const outboundRouteRelations = relations(outboundRoute, ({ one }) => ({
-  trunk: one(trunk, { fields: [outboundRoute.trunkId], references: [trunk.id] }),
+  trunk: one(trunk, {
+    fields: [outboundRoute.trunkId],
+    references: [trunk.id],
+  }),
 }));
 
 export const ringGroupRelations = relations(ringGroup, ({ many }) => ({
   members: many(ringGroupMember),
 }));
 
-export const ringGroupMemberRelations = relations(ringGroupMember, ({ one }) => ({
-  ringGroup: one(ringGroup, {
-    fields: [ringGroupMember.ringGroupId],
-    references: [ringGroup.id],
+export const ringGroupMemberRelations = relations(
+  ringGroupMember,
+  ({ one }) => ({
+    ringGroup: one(ringGroup, {
+      fields: [ringGroupMember.ringGroupId],
+      references: [ringGroup.id],
+    }),
+    extension: one(extension, {
+      fields: [ringGroupMember.extensionId],
+      references: [extension.id],
+    }),
   }),
-  extension: one(extension, {
-    fields: [ringGroupMember.extensionId],
-    references: [extension.id],
-  }),
-}));
+);
 
 export const ivrMenuRelations = relations(ivrMenu, ({ many }) => ({
   options: many(ivrOption),
 }));
 
 export const ivrOptionRelations = relations(ivrOption, ({ one }) => ({
-  menu: one(ivrMenu, { fields: [ivrOption.ivrMenuId], references: [ivrMenu.id] }),
+  menu: one(ivrMenu, {
+    fields: [ivrOption.ivrMenuId],
+    references: [ivrMenu.id],
+  }),
 }));
 
 export const cdrRelations = relations(cdr, ({ one }) => ({
-  extension: one(extension, { fields: [cdr.extensionId], references: [extension.id] }),
+  extension: one(extension, {
+    fields: [cdr.extensionId],
+    references: [extension.id],
+  }),
   trunk: one(trunk, { fields: [cdr.trunkId], references: [trunk.id] }),
 }));

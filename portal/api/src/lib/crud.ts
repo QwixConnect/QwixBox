@@ -50,7 +50,11 @@ export type CrudOptions<T extends PgTable> = {
   /** Runs after a successful create/update/delete. This is where cache write-through and the
    *  Kamailio projection happen; failures are logged, never fatal to the request that already
    *  committed. */
-  afterChange?: (organizationId: string, row: Row, action: string) => Promise<void>;
+  afterChange?: (
+    organizationId: string,
+    row: Row,
+    action: string,
+  ) => Promise<void>;
 
   /**
    * Extra validation. Return a string to reject with 400.
@@ -125,7 +129,10 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
     } catch (err) {
       // The database write already committed. Surfacing this loudly beats rolling back a
       // change the user was told succeeded.
-      console.error(`[${opts.entityType}] afterChange failed:`, (err as Error).message);
+      console.error(
+        `[${opts.entityType}] afterChange failed:`,
+        (err as Error).message,
+      );
     }
   };
 
@@ -133,14 +140,20 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
     extra ? and(eq(opts.orgColumn, orgId), extra) : eq(opts.orgColumn, orgId);
 
   app.get("/", async (c) => {
-    const rows = await db.select().from(opts.table as PgTable)
+    const rows = await db
+      .select()
+      .from(opts.table as PgTable)
       .where(scoped(c.get("organizationId")));
     return c.json(rows.map((r) => present(r as Row)));
   });
 
   app.get("/:id", async (c) => {
-    const [row] = await db.select().from(opts.table as PgTable)
-      .where(scoped(c.get("organizationId"), eq(opts.idColumn, c.req.param("id"))));
+    const [row] = await db
+      .select()
+      .from(opts.table as PgTable)
+      .where(
+        scoped(c.get("organizationId"), eq(opts.idColumn, c.req.param("id"))),
+      );
     if (!row) return c.json({ error: "Not found" }, 404);
     return c.json(present(row as Row));
   });
@@ -150,7 +163,11 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
     const body = await c.req.json<Row>().catch(() => ({}) as Row);
 
     for (const field of opts.required ?? []) {
-      if (body[field] === undefined || body[field] === null || body[field] === "") {
+      if (
+        body[field] === undefined ||
+        body[field] === null ||
+        body[field] === ""
+      ) {
         return c.json({ error: `${field} is required` }, 400);
       }
     }
@@ -159,8 +176,15 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
       if (problem) return c.json({ error: problem }, 400);
     }
 
-    const values = { ...pick(body, opts.writable), id: randomUUID(), organizationId };
-    const inserted = (await db.insert(opts.table).values(values as never).returning()) as Row[];
+    const values = {
+      ...pick(body, opts.writable),
+      id: randomUUID(),
+      organizationId,
+    };
+    const inserted = (await db
+      .insert(opts.table)
+      .values(values as never)
+      .returning()) as Row[];
     const row = inserted[0];
     if (!row) return c.json({ error: "Insert failed" }, 500);
 
@@ -178,7 +202,9 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
     const organizationId = c.get("organizationId");
     const id = c.req.param("id");
 
-    const [before] = await db.select().from(opts.table as PgTable)
+    const [before] = await db
+      .select()
+      .from(opts.table as PgTable)
       .where(scoped(organizationId, eq(opts.idColumn, id)));
     if (!before) return c.json({ error: "Not found" }, 404);
 
@@ -191,8 +217,11 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
     const patch = pick(body, opts.writable);
     if (Object.keys(patch).length === 0) return c.json(present(before as Row));
 
-    const updated = (await db.update(opts.table).set(patch as never)
-      .where(scoped(organizationId, eq(opts.idColumn, id))).returning()) as Row[];
+    const updated = (await db
+      .update(opts.table)
+      .set(patch as never)
+      .where(scoped(organizationId, eq(opts.idColumn, id)))
+      .returning()) as Row[];
     const row = updated[0];
     if (!row) return c.json({ error: "Update failed" }, 500);
 
@@ -211,11 +240,15 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
     const organizationId = c.get("organizationId");
     const id = c.req.param("id");
 
-    const [before] = await db.select().from(opts.table as PgTable)
+    const [before] = await db
+      .select()
+      .from(opts.table as PgTable)
       .where(scoped(organizationId, eq(opts.idColumn, id)));
     if (!before) return c.json({ error: "Not found" }, 404);
 
-    await db.delete(opts.table).where(scoped(organizationId, eq(opts.idColumn, id)));
+    await db
+      .delete(opts.table)
+      .where(scoped(organizationId, eq(opts.idColumn, id)));
 
     await after(organizationId, before as Row, "delete");
     await recordAudit(c, {

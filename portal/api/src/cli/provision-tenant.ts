@@ -40,7 +40,9 @@ if (!name || !slug || !domain || !ownerEmail) {
   process.exit(2);
 }
 
-const owner = await db.query.user.findFirst({ where: eq(user.email, ownerEmail) });
+const owner = await db.query.user.findFirst({
+  where: eq(user.email, ownerEmail),
+});
 if (!owner) {
   console.error(`No user with email ${ownerEmail}. They must sign up first.`);
   process.exit(1);
@@ -52,15 +54,21 @@ const clash = await db.query.tenantSettings.findFirst({
   where: eq(tenantSettings.sipDomain, domain),
 });
 if (clash) {
-  console.error(`SIP domain ${domain} is already used by organization ${clash.organizationId}.`);
+  console.error(
+    `SIP domain ${domain} is already used by organization ${clash.organizationId}.`,
+  );
   process.exit(1);
 }
 
-const existing = await db.query.organization.findFirst({ where: eq(organization.slug, slug) });
+const existing = await db.query.organization.findFirst({
+  where: eq(organization.slug, slug),
+});
 const orgId = existing?.id ?? randomUUID();
 
 if (!existing) {
-  await db.insert(organization).values({ id: orgId, name, slug, createdAt: new Date() });
+  await db
+    .insert(organization)
+    .values({ id: orgId, name, slug, createdAt: new Date() });
   console.log(`  created organization ${slug} (${orgId})`);
 } else {
   console.log(`  organization ${slug} already exists (${orgId})`);
@@ -99,7 +107,9 @@ await db
     target: tenantSettings.organizationId,
     set: { sipDomain: domain, tier, maxConcurrentCalls: maxCalls },
   });
-console.log(`  telephony configured: ${domain} (${tier}, max ${maxCalls} concurrent)`);
+console.log(
+  `  telephony configured: ${domain} (${tier}, max ${maxCalls} concurrent)`,
+);
 
 // Kamailio must know the domain before anyone in it can register.
 await syncDomain(domain);

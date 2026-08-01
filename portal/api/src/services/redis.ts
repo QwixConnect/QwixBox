@@ -46,7 +46,8 @@ export const keys = {
    * a colleague's extension. Without this map an internally dialled 600 is not an extension
    * and not a DID, so it falls through to the outbound routes and dies as UNALLOCATED_NUMBER.
    */
-  featureNumber: (domain: string, number: string) => `qwixbox:num:${domain}:${number}`,
+  featureNumber: (domain: string, number: string) =>
+    `qwixbox:num:${domain}:${number}`,
   /**
    * How to treat a call TO this extension - DND, forwarding, ring time, call waiting.
    *
@@ -56,7 +57,8 @@ export const keys = {
    * when someone dials them. Making the dialplan parse XML out of the directory entry to find
    * a DND flag would be a poor trade for one saved key.
    */
-  extensionCall: (domain: string, number: string) => `qwixbox:call:${domain}:${number}`,
+  extensionCall: (domain: string, number: string) =>
+    `qwixbox:call:${domain}:${number}`,
   /** Call-flow objects, read by the Lua scripts mid-call. */
   ringGroup: (domain: string, id: string) => `qwixbox:rg:${domain}:${id}`,
   ivr: (domain: string, id: string) => `qwixbox:ivr:${domain}:${id}`,
@@ -93,10 +95,13 @@ export async function safeDelPattern(pattern: string): Promise<number> {
   let deleted = 0;
   try {
     do {
-      const reply = (await redis.send("SCAN", [cursor, "MATCH", pattern, "COUNT", "200"])) as [
-        string,
-        string[],
-      ];
+      const reply = (await redis.send("SCAN", [
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        "200",
+      ])) as [string, string[]];
       cursor = reply[0];
       const batch = reply[1];
       if (batch.length > 0) {
@@ -105,7 +110,10 @@ export async function safeDelPattern(pattern: string): Promise<number> {
       }
     } while (cursor !== "0");
   } catch (err) {
-    console.error(`[redis] scan-delete ${pattern} failed:`, (err as Error).message);
+    console.error(
+      `[redis] scan-delete ${pattern} failed:`,
+      (err as Error).message,
+    );
   }
   return deleted;
 }
@@ -115,7 +123,11 @@ export async function safeDelPattern(pattern: string): Promise<number> {
  * must not fail the config change that triggered it - the data is already committed to
  * Postgres, and Lua's Postgres fallback will serve correct results until the cache catches up.
  */
-export async function safeSet(key: string, value: string, ttlSeconds?: number): Promise<boolean> {
+export async function safeSet(
+  key: string,
+  value: string,
+  ttlSeconds?: number,
+): Promise<boolean> {
   try {
     if (ttlSeconds) {
       await redis.set(key, value, "EX", ttlSeconds);
@@ -160,7 +172,10 @@ export async function claimWarm(): Promise<boolean> {
   } catch (err) {
     // Redis unreachable. Not a warm opportunity, and not worth failing over - the fall-through
     // path still answers.
-    console.warn("[cache] could not claim the warm sentinel:", (err as Error).message);
+    console.warn(
+      "[cache] could not claim the warm sentinel:",
+      (err as Error).message,
+    );
     return false;
   }
 }

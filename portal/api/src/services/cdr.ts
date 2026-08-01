@@ -110,13 +110,15 @@ export function parseCdrXml(xml: string): ParsedCdr | null {
   // A call that was transferred or bridged has several <callflow> blocks. The FIRST is the
   // original leg - the number the caller actually dialled - and the last is wherever it ended
   // up. Billing and "who called us" both want the original.
-  const flow = (Array.isArray(callflow) ? callflow[0] : callflow) as Bag | undefined;
+  const flow = (Array.isArray(callflow) ? callflow[0] : callflow) as
+    Bag | undefined;
   const profile = (flow?.caller_profile ?? {}) as Bag;
 
   const callUuid = decodeVar(vars.uuid) ?? decodeVar(vars.call_uuid);
   if (!callUuid) return null;
 
-  const destination = str(profile.destination_number) ?? decodeVar(vars.destination_number);
+  const destination =
+    str(profile.destination_number) ?? decodeVar(vars.destination_number);
   if (!destination) return null;
 
   const started =
@@ -126,7 +128,8 @@ export function parseCdrXml(xml: string): ParsedCdr | null {
      question as which way the CALL went - an internal extension-to-extension call is an inbound
      leg too. The context tells us more: our dialplan puts every tenant call in tenant_<orgId>,
      and a call that never touched a gateway never left the building. */
-  const gatewayName = decodeVar(vars.sip_gateway_name) ?? decodeVar(vars.gateway_name);
+  const gatewayName =
+    decodeVar(vars.sip_gateway_name) ?? decodeVar(vars.gateway_name);
   const legDirection = decodeVar(vars.direction);
   let direction: ParsedCdr["direction"];
   if (gatewayName) {
@@ -142,10 +145,13 @@ export function parseCdrXml(xml: string): ParsedCdr | null {
     sipCallId: decodeVar(vars.sip_call_id),
     // Set by the Kamailio ingress route and carried across the B2BUA. Without it one call is
     // four unlinked legs in a capture.
-    correlationId: decodeVar(vars["sip_h_X-Correlation-ID"]) ?? decodeVar(vars.correlation_id),
+    correlationId:
+      decodeVar(vars["sip_h_X-Correlation-ID"]) ??
+      decodeVar(vars.correlation_id),
     organizationId: decodeVar(vars["sip_h_X-Tenant-ID"]),
     direction,
-    callerNumber: str(profile.caller_id_number) ?? decodeVar(vars.caller_id_number),
+    callerNumber:
+      str(profile.caller_id_number) ?? decodeVar(vars.caller_id_number),
     callerName: str(profile.caller_id_name) ?? decodeVar(vars.caller_id_name),
     destinationNumber: destination,
     authUser: decodeVar(vars["sip_h_X-Auth-User"]) ?? str(profile.username),
@@ -156,8 +162,10 @@ export function parseCdrXml(xml: string): ParsedCdr | null {
     durationSec: int(vars.duration),
     billsecSec: int(vars.billsec),
     hangupCause: decodeVar(vars.hangup_cause),
-    recordingPath: decodeVar(vars.recording_file) ?? decodeVar(vars.last_recording),
-    attestation: decodeVar(vars.sip_h_Attestation) ?? decodeVar(vars.stir_attestation),
+    recordingPath:
+      decodeVar(vars.recording_file) ?? decodeVar(vars.last_recording),
+    attestation:
+      decodeVar(vars.sip_h_Attestation) ?? decodeVar(vars.stir_attestation),
     context: str(profile.context) ?? decodeVar(vars.context),
   };
 }
@@ -174,11 +182,14 @@ function tenantFromContext(context: string | null): string | null {
   return context.slice("tenant_".length) || null;
 }
 
-export async function ingestCdr(xml: string): Promise<{ stored: boolean; reason?: string }> {
+export async function ingestCdr(
+  xml: string,
+): Promise<{ stored: boolean; reason?: string }> {
   const parsed = parseCdrXml(xml);
   if (!parsed) return { stored: false, reason: "unparseable" };
 
-  const organizationId = parsed.organizationId ?? tenantFromContext(parsed.context);
+  const organizationId =
+    parsed.organizationId ?? tenantFromContext(parsed.context);
   if (!organizationId) {
     return { stored: false, reason: "no tenant attribution" };
   }
@@ -189,7 +200,8 @@ export async function ingestCdr(xml: string): Promise<{ stored: boolean; reason?
   const tenant = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.organizationId, organizationId),
   });
-  if (!tenant) return { stored: false, reason: `unknown tenant ${organizationId}` };
+  if (!tenant)
+    return { stored: false, reason: `unknown tenant ${organizationId}` };
 
   let extensionId: string | null = null;
   if (parsed.authUser) {
@@ -205,7 +217,10 @@ export async function ingestCdr(xml: string): Promise<{ stored: boolean; reason?
   let trunkId: string | null = null;
   if (parsed.gatewayName) {
     const t = await db.query.trunk.findFirst({
-      where: and(eq(trunk.organizationId, organizationId), eq(trunk.name, parsed.gatewayName)),
+      where: and(
+        eq(trunk.organizationId, organizationId),
+        eq(trunk.name, parsed.gatewayName),
+      ),
     });
     trunkId = t?.id ?? null;
   }

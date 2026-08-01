@@ -69,8 +69,11 @@ fsXml.use("*", async (c, next) => {
   const [scheme, encoded] = header.split(" ");
   if (scheme !== "Basic" || !encoded) return c.text("Unauthorized", 401);
 
-  const [, password] = Buffer.from(encoded, "base64").toString("utf8").split(":");
-  if (!password || !safeEqual(password, expected)) return c.text("Unauthorized", 401);
+  const [, password] = Buffer.from(encoded, "base64")
+    .toString("utf8")
+    .split(":");
+  if (!password || !safeEqual(password, expected))
+    return c.text("Unauthorized", 401);
 
   await next();
 });
@@ -82,9 +85,13 @@ fsXml.post("/", async (c) => {
   try {
     switch (section) {
       case "directory":
-        return c.text(await handleDirectory(form), 200, { "Content-Type": "text/xml" });
+        return c.text(await handleDirectory(form), 200, {
+          "Content-Type": "text/xml",
+        });
       case "dialplan":
-        return c.text(await handleDialplan(form), 200, { "Content-Type": "text/xml" });
+        return c.text(await handleDialplan(form), 200, {
+          "Content-Type": "text/xml",
+        });
       case "configuration":
         return c.text(NOT_FOUND, 200, { "Content-Type": "text/xml" });
       default:
@@ -104,7 +111,10 @@ async function handleDirectory(form: Record<string, unknown>): Promise<string> {
   if (!domain || !user) return NOT_FOUND;
 
   const tenant = await db.query.tenantSettings.findFirst({
-    where: and(eq(tenantSettings.sipDomain, domain), eq(tenantSettings.enabled, true)),
+    where: and(
+      eq(tenantSettings.sipDomain, domain),
+      eq(tenantSettings.enabled, true),
+    ),
   });
   if (!tenant) return NOT_FOUND;
 
@@ -120,8 +130,10 @@ async function handleDirectory(form: Record<string, unknown>): Promise<string> {
   const password = decrypt(ext.sipPasswordEnc);
   const cacheMs = ext.directoryCacheMs ?? tenant.directoryCacheMs;
   const codecs = ext.codecPrefs ?? "OPUS,G722,PCMU,PCMA";
-  const cidName = ext.callerIdName ?? tenant.defaultCallerIdName ?? ext.displayName;
-  const cidNumber = ext.callerIdNumber ?? tenant.defaultCallerIdNumber ?? ext.number;
+  const cidName =
+    ext.callerIdName ?? tenant.defaultCallerIdName ?? ext.displayName;
+  const cidNumber =
+    ext.callerIdNumber ?? tenant.defaultCallerIdNumber ?? ext.number;
 
   return wrap(
     "directory",
@@ -149,12 +161,19 @@ async function handleDirectory(form: Record<string, unknown>): Promise<string> {
 }
 
 async function handleDialplan(form: Record<string, unknown>): Promise<string> {
-  const domain = String(form["variable_sip_auth_realm"] ?? form["variable_domain_name"] ?? "");
-  const destination = String(form["Caller-Destination-Number"] ?? form["destination_number"] ?? "");
+  const domain = String(
+    form["variable_sip_auth_realm"] ?? form["variable_domain_name"] ?? "",
+  );
+  const destination = String(
+    form["Caller-Destination-Number"] ?? form["destination_number"] ?? "",
+  );
   if (!domain || !destination) return NOT_FOUND;
 
   const tenant = await db.query.tenantSettings.findFirst({
-    where: and(eq(tenantSettings.sipDomain, domain), eq(tenantSettings.enabled, true)),
+    where: and(
+      eq(tenantSettings.sipDomain, domain),
+      eq(tenantSettings.enabled, true),
+    ),
   });
   if (!tenant) return NOT_FOUND;
 

@@ -48,7 +48,10 @@ const key = createHash("sha256").update(env.encryptionKey).digest();
 export function encrypt(plaintext: string): string {
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, key, iv);
-  const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const ciphertext = Buffer.concat([
+    cipher.update(plaintext, "utf8"),
+    cipher.final(),
+  ]);
   const tag = cipher.getAuthTag();
   return `${iv.toString("base64")}:${tag.toString("base64")}:${ciphertext.toString("base64")}`;
 }
@@ -60,7 +63,11 @@ export function decrypt(encoded: string): string {
   }
   const [ivB64, tagB64, dataB64] = parts as [string, string, string];
 
-  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivB64, "base64"));
+  const decipher = createDecipheriv(
+    ALGORITHM,
+    key,
+    Buffer.from(ivB64, "base64"),
+  );
   decipher.setAuthTag(Buffer.from(tagB64, "base64"));
   return Buffer.concat([
     decipher.update(Buffer.from(dataB64, "base64")),
@@ -74,12 +81,22 @@ export function decrypt(encoded: string): string {
  * MD5 is not a choice - RFC 2617 digest authentication specifies it, and Kamailio's
  * `subscriber.ha1` column expects exactly this. It is not being used as a password hash.
  */
-export function computeHa1(username: string, realm: string, password: string): string {
-  return createHash("md5").update(`${username}:${realm}:${password}`).digest("hex");
+export function computeHa1(
+  username: string,
+  realm: string,
+  password: string,
+): string {
+  return createHash("md5")
+    .update(`${username}:${realm}:${password}`)
+    .digest("hex");
 }
 
 /** HA1b variant, keyed on user@domain. Kamailio stores both for flexible auth. */
-export function computeHa1b(username: string, realm: string, password: string): string {
+export function computeHa1b(
+  username: string,
+  realm: string,
+  password: string,
+): string {
   return createHash("md5")
     .update(`${username}@${realm}:${realm}:${password}`)
     .digest("hex");

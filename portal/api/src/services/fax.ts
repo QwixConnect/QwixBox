@@ -100,19 +100,27 @@ async function deliverByEmail(
   if (attachment) {
     try {
       const bytes = await Bun.file(attachment.path).arrayBuffer();
-      const b64 = Buffer.from(bytes).toString("base64").replace(/(.{76})/g, "$1\r\n");
+      const b64 = Buffer.from(bytes)
+        .toString("base64")
+        .replace(/(.{76})/g, "$1\r\n");
       message +=
         `\r\n--${boundary}\r\nContent-Type: application/pdf\r\n` +
         `Content-Transfer-Encoding: base64\r\n` +
         `Content-Disposition: attachment; filename="${attachment.filename}"\r\n\r\n${b64}\r\n`;
     } catch (err) {
-      console.error(`[fax] could not attach ${attachment.path}: ${(err as Error).message}`);
+      console.error(
+        `[fax] could not attach ${attachment.path}: ${(err as Error).message}`,
+      );
     }
   }
   message += `\r\n--${boundary}--\r\n`;
 
   try {
-    const proc = Bun.spawn([sendmail, "-t"], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+    const proc = Bun.spawn([sendmail, "-t"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     proc.stdin.write(message);
     await proc.stdin.end();
     await proc.exited;
@@ -130,12 +138,16 @@ async function deliverByEmail(
  * conversion failed is a support ticket; a fax that arrived and left no trace is a lost
  * document, and the sender has no way to know.
  */
-export async function recordInboundFax(report: FaxReport): Promise<string | null> {
+export async function recordInboundFax(
+  report: FaxReport,
+): Promise<string | null> {
   const tenant = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.sipDomain, report.domain),
   });
   if (!tenant) {
-    console.error(`[fax] no tenant for domain ${report.domain} - fax at ${report.filePath}`);
+    console.error(
+      `[fax] no tenant for domain ${report.domain} - fax at ${report.filePath}`,
+    );
     return null;
   }
 
@@ -177,7 +189,10 @@ export async function recordInboundFax(report: FaxReport): Promise<string | null
       { path: pdf, filename: `fax-${report.did}-${Date.now()}.pdf` },
     );
     if (delivered) {
-      await db.update(fax).set({ status: "delivered", deliveredAt: new Date() }).where(eq(fax.id, id));
+      await db
+        .update(fax)
+        .set({ status: "delivered", deliveredAt: new Date() })
+        .where(eq(fax.id, id));
     }
   }
 

@@ -17,7 +17,6 @@ import { safeEqual } from "../lib/crypto";
 
 export const fsFeature = new Hono();
 
-
 fsFeature.use("*", async (c, next) => {
   const expected = process.env.FS_XML_GATEWAY_SECRET;
   if (!expected) return c.json({ ok: false, error: "not configured" }, 500);
@@ -32,9 +31,12 @@ fsFeature.use("*", async (c, next) => {
 
   const header = c.req.header("Authorization") ?? "";
   const [scheme, encoded] = header.split(" ");
-  if (scheme !== "Basic" || !encoded) return c.json({ ok: false, error: "unauthorized" }, 401);
+  if (scheme !== "Basic" || !encoded)
+    return c.json({ ok: false, error: "unauthorized" }, 401);
 
-  const [, password] = Buffer.from(encoded, "base64").toString("utf8").split(":");
+  const [, password] = Buffer.from(encoded, "base64")
+    .toString("utf8")
+    .split(":");
   if (!password || !safeEqual(password, expected)) {
     return c.json({ ok: false, error: "unauthorized" }, 401);
   }
@@ -42,7 +44,12 @@ fsFeature.use("*", async (c, next) => {
 });
 
 /** Only these. Anything else in the body is ignored rather than written. */
-const WRITABLE = ["dnd", "forwardAllTo", "forwardBusyTo", "forwardNoAnswerTo"] as const;
+const WRITABLE = [
+  "dnd",
+  "forwardAllTo",
+  "forwardBusyTo",
+  "forwardNoAnswerTo",
+] as const;
 type Writable = (typeof WRITABLE)[number];
 
 /** A forward target is dialled digits. Same rule as the Lua, enforced again on this side. */
@@ -54,7 +61,8 @@ fsFeature.post("/", async (c) => {
     .catch(() => ({}) as Record<string, unknown>);
   const domain = typeof body.domain === "string" ? body.domain : "";
   const number = typeof body.number === "string" ? body.number : "";
-  if (!domain || !number) return c.json({ ok: false, error: "domain and number required" }, 400);
+  if (!domain || !number)
+    return c.json({ ok: false, error: "domain and number required" }, 400);
 
   const tenant = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.sipDomain, domain),
@@ -75,7 +83,8 @@ fsFeature.post("/", async (c) => {
     const value = body[field as Writable];
 
     if (field === "dnd") {
-      if (typeof value !== "boolean") return c.json({ ok: false, error: "dnd must be boolean" }, 400);
+      if (typeof value !== "boolean")
+        return c.json({ ok: false, error: "dnd must be boolean" }, 400);
       patch.dnd = value;
       continue;
     }
@@ -86,7 +95,10 @@ fsFeature.post("/", async (c) => {
     } else if (typeof value === "string" && DIALLABLE.test(value)) {
       patch[field] = value;
     } else {
-      return c.json({ ok: false, error: `${field} must be diallable digits or null` }, 400);
+      return c.json(
+        { ok: false, error: `${field} must be diallable digits or null` },
+        400,
+      );
     }
   }
 

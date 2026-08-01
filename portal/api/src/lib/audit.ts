@@ -33,7 +33,9 @@ type AuditInput = {
  */
 function redact(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
-  const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  const out: Record<string, unknown> = {
+    ...(value as Record<string, unknown>),
+  };
   for (const key of Object.keys(out)) {
     if (/passwordEnc|PinEnc|password|secret|ha1/i.test(key)) {
       out[key] = "[redacted]";

@@ -118,7 +118,8 @@ export const auth = betterAuth({
           if (!consumeSignupPermission()) {
             console.warn(`[auth] rejected signup attempt for ${newUser.email}`);
             throw new APIError("BAD_REQUEST", {
-              message: "Registration is not open. Accounts are created by the operator.",
+              message:
+                "Registration is not open. Accounts are created by the operator.",
             });
           }
           return { data: newUser };

@@ -43,19 +43,27 @@ if (!email || !tenant) {
    than defaulted - a typo that silently produced a `viewer` would look like a permissions bug
    later, and one that silently produced an `owner` would be worse. */
 if (!(role in ROLES)) {
-  console.error(`Unknown role "${role}". Known roles: ${Object.keys(ROLES).join(", ")}`);
+  console.error(
+    `Unknown role "${role}". Known roles: ${Object.keys(ROLES).join(", ")}`,
+  );
   process.exit(2);
 }
 
 const account = await db.query.user.findFirst({ where: eq(user.email, email) });
 if (!account) {
-  console.error(`No account for ${email}. Create it first with create-user.ts.`);
+  console.error(
+    `No account for ${email}. Create it first with create-user.ts.`,
+  );
   process.exit(1);
 }
 
-const org = await db.query.organization.findFirst({ where: eq(organization.slug, tenant) });
+const org = await db.query.organization.findFirst({
+  where: eq(organization.slug, tenant),
+});
 if (!org) {
-  console.error(`No tenant with slug "${tenant}". Create it first with provision-tenant.ts.`);
+  console.error(
+    `No tenant with slug "${tenant}". Create it first with provision-tenant.ts.`,
+  );
   process.exit(1);
 }
 
@@ -71,7 +79,9 @@ if (existing) {
     process.exit(0);
   }
   await db.update(member).set({ role }).where(eq(member.id, existing.id));
-  console.log(`Changed ${email} from ${existing.role} to ${role} in ${tenant}.`);
+  console.log(
+    `Changed ${email} from ${existing.role} to ${role} in ${tenant}.`,
+  );
 } else {
   await db.insert(member).values({
     id: randomUUID(),

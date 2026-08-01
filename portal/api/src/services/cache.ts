@@ -54,8 +54,10 @@ function renderDirectoryUser(
 ): string {
   const cacheMs = ext.directoryCacheMs ?? tenant.directoryCacheMs;
   const codecs = ext.codecPrefs ?? "OPUS,G722,PCMU,PCMA";
-  const callerName = ext.callerIdName ?? tenant.defaultCallerIdName ?? ext.displayName;
-  const callerNumber = ext.callerIdNumber ?? tenant.defaultCallerIdNumber ?? ext.number;
+  const callerName =
+    ext.callerIdName ?? tenant.defaultCallerIdName ?? ext.displayName;
+  const callerNumber =
+    ext.callerIdNumber ?? tenant.defaultCallerIdNumber ?? ext.number;
 
   /* mod_voicemail falls back to the `password` param when `vm-password` is absent, which means
      an unset PIN silently makes the mailbox require the 24-character random SIP password on a
@@ -105,7 +107,9 @@ function escapeXml(s: string): string {
 }
 
 export async function cacheExtension(extensionId: string): Promise<void> {
-  const ext = await db.query.extension.findFirst({ where: eq(extension.id, extensionId) });
+  const ext = await db.query.extension.findFirst({
+    where: eq(extension.id, extensionId),
+  });
   if (!ext) return;
 
   const tenant = await db.query.tenantSettings.findFirst({
@@ -147,7 +151,10 @@ export async function invalidateExtension(
   number: string,
   sipDomain: string,
 ): Promise<void> {
-  await safeDel(keys.directory(sipDomain, number), keys.extensionCall(sipDomain, number));
+  await safeDel(
+    keys.directory(sipDomain, number),
+    keys.extensionCall(sipDomain, number),
+  );
   await esl.flushXmlCache(number, sipDomain);
 }
 
@@ -163,7 +170,13 @@ export type CachedRoute = {
   stripDigits: number;
   prependDigits: string | null;
   callerIdOverride: string | null;
-  trunk: { id: string; name: string; host: string; port: number; transport: string } | null;
+  trunk: {
+    id: string;
+    name: string;
+    host: string;
+    port: number;
+    transport: string;
+  } | null;
 };
 
 /**
@@ -189,7 +202,10 @@ export async function cacheRouteTable(organizationId: string): Promise<void> {
     .from(outboundRoute)
     .leftJoin(trunk, eq(outboundRoute.trunkId, trunk.id))
     .where(
-      and(eq(outboundRoute.organizationId, organizationId), eq(outboundRoute.enabled, true)),
+      and(
+        eq(outboundRoute.organizationId, organizationId),
+        eq(outboundRoute.enabled, true),
+      ),
     );
 
   const routes: CachedRoute[] = rows
@@ -223,7 +239,9 @@ export async function cacheRouteTable(organizationId: string): Promise<void> {
  * Inbound DIDs and tenant settings
  * ------------------------------------------------------------------------------------ */
 
-export async function cacheInboundRoutes(organizationId: string): Promise<void> {
+export async function cacheInboundRoutes(
+  organizationId: string,
+): Promise<void> {
   const tenant = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.organizationId, organizationId),
   });
@@ -243,7 +261,10 @@ export async function cacheInboundRoutes(organizationId: string): Promise<void> 
         keys.did(tenant.sipDomain, r.didPattern),
         JSON.stringify({
           destinationType: r.destinationType,
-          destinationId: await resolveDestinationId(r.destinationType, r.destinationId),
+          destinationId: await resolveDestinationId(
+            r.destinationType,
+            r.destinationId,
+          ),
         }),
       ),
     ),
@@ -251,7 +272,9 @@ export async function cacheInboundRoutes(organizationId: string): Promise<void> 
 }
 
 /** Settings Lua needs at call time. Kept small - this is read on the hot path. */
-export async function cacheTenantSettings(organizationId: string): Promise<void> {
+export async function cacheTenantSettings(
+  organizationId: string,
+): Promise<void> {
   const tenant = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.organizationId, organizationId),
   });
@@ -305,7 +328,9 @@ async function resolveDestinationId(
 ): Promise<string | null> {
   if (type !== "extension" || !id) return id;
 
-  const target = await db.query.extension.findFirst({ where: eq(extension.id, id) });
+  const target = await db.query.extension.findFirst({
+    where: eq(extension.id, id),
+  });
   if (target) return target.number;
 
   /* Already a number (the portal may send one directly), or the extension was deleted. Passing
@@ -321,7 +346,10 @@ export async function cacheRingGroups(organizationId: string): Promise<void> {
   if (!tenant) return;
 
   const groups = await db.query.ringGroup.findMany({
-    where: and(eq(ringGroup.organizationId, organizationId), eq(ringGroup.enabled, true)),
+    where: and(
+      eq(ringGroup.organizationId, organizationId),
+      eq(ringGroup.enabled, true),
+    ),
   });
 
   for (const group of groups) {
@@ -345,7 +373,10 @@ export async function cacheRingGroups(organizationId: string): Promise<void> {
         strategy: group.strategy,
         ringTimeoutSec: group.ringTimeoutSec,
         failoverType: group.failoverType,
-        failoverId: await resolveDestinationId(group.failoverType, group.failoverId),
+        failoverId: await resolveDestinationId(
+          group.failoverType,
+          group.failoverId,
+        ),
         // Disabled extensions are filtered here rather than in Lua: a disabled member should
         // not even be attempted, and doing it at cache time keeps the call path simple.
         members: members
@@ -355,7 +386,12 @@ export async function cacheRingGroups(organizationId: string): Promise<void> {
       }),
     );
 
-    await cacheFeatureNumber(tenant.sipDomain, group.number, "ring_group", group.id);
+    await cacheFeatureNumber(
+      tenant.sipDomain,
+      group.number,
+      "ring_group",
+      group.id,
+    );
   }
 }
 
@@ -373,7 +409,10 @@ async function cacheFeatureNumber(
   id: string,
 ): Promise<void> {
   if (!number) return;
-  await safeSet(keys.featureNumber(domain, number), JSON.stringify({ type, id }));
+  await safeSet(
+    keys.featureNumber(domain, number),
+    JSON.stringify({ type, id }),
+  );
 }
 
 export async function cacheIvrMenus(organizationId: string): Promise<void> {
@@ -383,7 +422,10 @@ export async function cacheIvrMenus(organizationId: string): Promise<void> {
   if (!tenant) return;
 
   const menus = await db.query.ivrMenu.findMany({
-    where: and(eq(ivrMenu.organizationId, organizationId), eq(ivrMenu.enabled, true)),
+    where: and(
+      eq(ivrMenu.organizationId, organizationId),
+      eq(ivrMenu.enabled, true),
+    ),
   });
 
   for (const menu of menus) {
@@ -407,7 +449,13 @@ export async function cacheIvrMenus(organizationId: string): Promise<void> {
           await Promise.all(
             options.map(async (o) => [
               o.digit,
-              { type: o.destinationType, id: await resolveDestinationId(o.destinationType, o.destinationId) },
+              {
+                type: o.destinationType,
+                id: await resolveDestinationId(
+                  o.destinationType,
+                  o.destinationId,
+                ),
+              },
             ]),
           ),
         ),
@@ -418,7 +466,9 @@ export async function cacheIvrMenus(organizationId: string): Promise<void> {
   }
 }
 
-export async function cacheTimeConditions(organizationId: string): Promise<void> {
+export async function cacheTimeConditions(
+  organizationId: string,
+): Promise<void> {
   const tenant = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.organizationId, organizationId),
   });

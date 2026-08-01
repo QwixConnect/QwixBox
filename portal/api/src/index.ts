@@ -14,8 +14,14 @@ import { fsFeature } from "./routes/fs-feature";
 import { fsXml } from "./routes/fs-xml";
 import { tenants } from "./routes/tenants";
 import { faxHook, faxes } from "./routes/fax";
+import { audit } from "./routes/audit";
 import {
-  inboundRoutes, ivrMenus, outboundRoutes, ringGroups, timeConditions, trunks,
+  inboundRoutes,
+  ivrMenus,
+  outboundRoutes,
+  ringGroups,
+  timeConditions,
+  trunks,
 } from "./routes/telephony";
 import { claimWarm, ping as redisPing } from "./services/redis";
 import { esl } from "./services/esl";
@@ -118,6 +124,7 @@ app.route("/api/ring-groups", ringGroups);
 app.route("/api/ivr-menus", ivrMenus);
 app.route("/api/time-conditions", timeConditions);
 app.route("/api/cdr", cdrs);
+app.route("/api/audit", audit);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 
@@ -147,7 +154,10 @@ async function warmCache(): Promise<void> {
     }
     console.log(`[cache] warmed ${tenants.length} tenant(s)`);
   } catch (err) {
-    console.warn("[cache] warm failed (serving from the fallback path):", (err as Error).message);
+    console.warn(
+      "[cache] warm failed (serving from the fallback path):",
+      (err as Error).message,
+    );
   }
 }
 
@@ -173,7 +183,9 @@ const WARM_CHECK_INTERVAL_MS = 60_000;
 async function warmIfCacheLost(): Promise<void> {
   try {
     if (!(await claimWarm())) return; // sentinel present: cache is warm, or a peer is warming it
-    console.warn("[cache] warm sentinel absent - Redis was restarted or flushed, rebuilding");
+    console.warn(
+      "[cache] warm sentinel absent - Redis was restarted or flushed, rebuilding",
+    );
     await warmCache();
   } catch (err) {
     console.warn("[cache] re-warm check failed:", (err as Error).message);
