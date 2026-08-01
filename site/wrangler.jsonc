@@ -10,9 +10,13 @@
     // worker.ts is dead code - get.qwixbox.com would return the landing page.
     "run_worker_first": true
   },
+  // The apex and www are commented out because qwixbox.com already carries manually created
+  // A records, and Cloudflare refuses to attach a custom domain over externally managed DNS
+  // (error 100117). Delete those two records in the dashboard, then uncomment and redeploy -
+  // the Worker already serves the landing page, it is only the routing that is pending.
   "routes": [
-    { "pattern": "qwixbox.com", "custom_domain": true },
-    { "pattern": "www.qwixbox.com", "custom_domain": true },
+    // { "pattern": "qwixbox.com", "custom_domain": true },
+    // { "pattern": "www.qwixbox.com", "custom_domain": true },
     { "pattern": "get.qwixbox.com", "custom_domain": true }
   ],
   "observability": { "enabled": true }
