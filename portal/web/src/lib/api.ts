@@ -307,6 +307,68 @@ export type TenantSettings = {
   enabled: boolean;
 };
 
+export type TenantUpdate = {
+  maxConcurrentCalls?: number;
+  timezone?: string;
+  defaultCallerIdName?: string | null;
+  defaultCallerIdNumber?: string | null;
+  recordingPolicy?: TenantSettings["recordingPolicy"];
+  stirShakenEnabled?: boolean;
+  enabled?: boolean;
+  dispatcherSetId?: number;
+};
+
+export type TenantProvision = {
+  sipDomain: string;
+  tier?: "shared" | "dedicated";
+  timezone?: string;
+  maxConcurrentCalls?: number;
+  defaultCallerIdName?: string;
+  defaultCallerIdNumber?: string;
+};
+
+export type Fax = {
+  id: string;
+  organizationId: string;
+  didNumber: string;
+  callerNumber: string | null;
+  callerName: string | null;
+  deliverToEmail: string | null;
+  pages: number;
+  status: "received" | "failed" | "delivered";
+  failureReason: string | null;
+  callUuid: string | null;
+  receivedAt: string;
+  deliveredAt: string | null;
+  /** False when retention pruned the file but the row remains. */
+  onDisk: boolean;
+};
+
+export type AuditEntry = {
+  id: string;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  userId: string | null;
+  userEmail: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+};
+
+export type AuditPage = { rows: AuditEntry[]; total: number; limit: number; offset: number };
+
+export type AuditFilters = {
+  entityType?: string;
+  action?: string;
+  userId?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+};
+
 export type Health = {
   status: "ok" | "degraded";
   database: boolean;
@@ -317,6 +379,19 @@ export type Health = {
 export const endpoints = {
   health: () => api.get<Health>("/../health"),
   tenant: () => api.get<TenantSettings>("/tenant"),
+  updateTenant: (body: TenantUpdate) => api.patch<TenantSettings>("/tenant", body),
+  provisionTenant: (body: TenantProvision) =>
+    api.post<TenantSettings & { error?: string; detail?: string; tenant?: TenantSettings }>(
+      "/tenant",
+      body,
+    ),
+  rebuildCache: () => api.post<{ status: string }>("/tenant/rebuild-cache"),
+  addMember: (body: { email: string; role?: string }) =>
+    api.post<{ id: string; userId: string; email: string; role: string; status: string }>(
+      "/tenant/members",
+      body,
+    ),
+
   extensions: () => api.get<Extension[]>("/extensions"),
   extension: (id: string) => api.get<Extension>(`/extensions/${id}`),
   createExtension: (body: Partial<Extension> & { number: string; displayName: string }) =>
@@ -379,6 +454,17 @@ export const endpoints = {
     api.patch<TimeCondition>(`/time-conditions/${id}`, body),
   deleteTimeCondition: (id: string) => api.delete<void>(`/time-conditions/${id}`),
 
+  faxes: () => api.get<Fax[]>("/faxes"),
+
+  audit: (filters: AuditFilters = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(filters)) {
+      if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
+    }
+    const qs = q.toString();
+    return api.get<AuditPage>(`/audit${qs ? `?${qs}` : ""}`);
+  },
+
   cdr: (filters: CdrFilters = {}) => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(filters)) {
@@ -393,5 +479,19 @@ export const endpoints = {
     if (to) q.set("to", to);
     const qs = q.toString();
     return api.get<CdrSummary>(`/cdr/summary${qs ? `?${qs}` : ""}`);
+  },
+  /**
+   * CSV download URL — same-origin so the session cookie travels. Do not fetch through `api.get`:
+   * that helper throws on non-JSON 2xx bodies.
+   */
+  cdrExportUrl: (filters: CdrFilters = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(filters)) {
+      if (v !== undefined && v !== null && v !== "" && k !== "limit" && k !== "offset") {
+        q.set(k, String(v));
+      }
+    }
+    const qs = q.toString();
+    return `${BASE}/cdr/export${qs ? `?${qs}` : ""}`;
   },
 };

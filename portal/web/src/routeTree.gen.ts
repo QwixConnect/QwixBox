@@ -12,12 +12,15 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppCallFlowsRouteImport } from './routes/_app/call-flows'
 import { Route as AppCallsRouteImport } from './routes/_app/calls'
 import { Route as AppExtensionsRouteImport } from './routes/_app/extensions'
+import { Route as AppFaxesRouteImport } from './routes/_app/faxes'
 import { Route as AppRoutingRouteImport } from './routes/_app/routing'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppTrunksRouteImport } from './routes/_app/trunks'
+import { Route as AppUsersRouteImport } from './routes/_app/users'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -31,6 +34,11 @@ const LoginRoute = LoginRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAuditRoute = AppAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
   getParentRoute: () => AppRoute,
 } as any)
 const AppCallFlowsRoute = AppCallFlowsRouteImport.update({
@@ -48,6 +56,11 @@ const AppExtensionsRoute = AppExtensionsRouteImport.update({
   path: '/extensions',
   getParentRoute: () => AppRoute,
 } as any)
+const AppFaxesRoute = AppFaxesRouteImport.update({
+  id: '/faxes',
+  path: '/faxes',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppRoutingRoute = AppRoutingRouteImport.update({
   id: '/routing',
   path: '/routing',
@@ -63,37 +76,51 @@ const AppTrunksRoute = AppTrunksRouteImport.update({
   path: '/trunks',
   getParentRoute: () => AppRoute,
 } as any)
+const AppUsersRoute = AppUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/login': typeof LoginRoute
+  '/audit': typeof AppAuditRoute
   '/call-flows': typeof AppCallFlowsRoute
   '/calls': typeof AppCallsRoute
   '/extensions': typeof AppExtensionsRoute
+  '/faxes': typeof AppFaxesRoute
   '/routing': typeof AppRoutingRoute
   '/settings': typeof AppSettingsRoute
   '/trunks': typeof AppTrunksRoute
+  '/users': typeof AppUsersRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/audit': typeof AppAuditRoute
   '/call-flows': typeof AppCallFlowsRoute
   '/calls': typeof AppCallsRoute
   '/extensions': typeof AppExtensionsRoute
+  '/faxes': typeof AppFaxesRoute
   '/routing': typeof AppRoutingRoute
   '/settings': typeof AppSettingsRoute
   '/trunks': typeof AppTrunksRoute
+  '/users': typeof AppUsersRoute
   '/': typeof AppIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
+  '/_app/audit': typeof AppAuditRoute
   '/_app/call-flows': typeof AppCallFlowsRoute
   '/_app/calls': typeof AppCallsRoute
   '/_app/extensions': typeof AppExtensionsRoute
+  '/_app/faxes': typeof AppFaxesRoute
   '/_app/routing': typeof AppRoutingRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/trunks': typeof AppTrunksRoute
+  '/_app/users': typeof AppUsersRoute
   '/_app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
@@ -101,32 +128,41 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/audit'
     | '/call-flows'
     | '/calls'
     | '/extensions'
+    | '/faxes'
     | '/routing'
     | '/settings'
     | '/trunks'
+    | '/users'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/audit'
     | '/call-flows'
     | '/calls'
     | '/extensions'
+    | '/faxes'
     | '/routing'
     | '/settings'
     | '/trunks'
+    | '/users'
     | '/'
   id:
     | '__root__'
     | '/_app'
     | '/login'
+    | '/_app/audit'
     | '/_app/call-flows'
     | '/_app/calls'
     | '/_app/extensions'
+    | '/_app/faxes'
     | '/_app/routing'
     | '/_app/settings'
     | '/_app/trunks'
+    | '/_app/users'
     | '/_app/'
   fileRoutesById: FileRoutesById
 }
@@ -158,6 +194,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/audit': {
+      id: '/_app/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AppAuditRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/call-flows': {
       id: '/_app/call-flows'
       path: '/call-flows'
@@ -177,6 +220,13 @@ declare module '@tanstack/react-router' {
       path: '/extensions'
       fullPath: '/extensions'
       preLoaderRoute: typeof AppExtensionsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/faxes': {
+      id: '/_app/faxes'
+      path: '/faxes'
+      fullPath: '/faxes'
+      preLoaderRoute: typeof AppFaxesRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/routing': {
@@ -200,26 +250,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTrunksRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/users': {
+      id: '/_app/users'
+      path: '/users'
+      fullPath: '/users'
+      preLoaderRoute: typeof AppUsersRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
+  AppAuditRoute: typeof AppAuditRoute
   AppCallFlowsRoute: typeof AppCallFlowsRoute
   AppCallsRoute: typeof AppCallsRoute
   AppExtensionsRoute: typeof AppExtensionsRoute
+  AppFaxesRoute: typeof AppFaxesRoute
   AppRoutingRoute: typeof AppRoutingRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppTrunksRoute: typeof AppTrunksRoute
+  AppUsersRoute: typeof AppUsersRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAuditRoute: AppAuditRoute,
   AppCallFlowsRoute: AppCallFlowsRoute,
   AppCallsRoute: AppCallsRoute,
   AppExtensionsRoute: AppExtensionsRoute,
+  AppFaxesRoute: AppFaxesRoute,
   AppRoutingRoute: AppRoutingRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppTrunksRoute: AppTrunksRoute,
+  AppUsersRoute: AppUsersRoute,
   AppIndexRoute: AppIndexRoute,
 }
 

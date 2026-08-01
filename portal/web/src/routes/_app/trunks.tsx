@@ -15,8 +15,20 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
+import { useForm } from "@mantine/form";
 import { endpoints, type Trunk } from "../../lib/api";
-import { DeleteButton, ErrorAlert, PageHeader, QueryState } from "../../components/Resource";
+import { notifyRemoved, notifySaved } from "../../lib/notify";
+import { DeleteButton, ErrorAlert, PageHeader, QueryState, RoleGate } from "../../components/Resource";
+
+type TrunkFormValues = {
+  name: string;
+  host: string;
+  authMode: "ip" | "register";
+  username: string;
+  password: string;
+  port: number | string;
+  priority: number | string;
+};
 
 function TrunkModal({
   trunk,
@@ -28,103 +40,127 @@ function TrunkModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [name, setName] = useState(trunk?.name ?? "");
-  const [host, setHost] = useState(trunk?.host ?? "");
-  const [authMode, setAuthMode] = useState<"ip" | "register">(trunk?.authMode ?? "ip");
-  const [username, setUsername] = useState(trunk?.username ?? "");
-  const [password, setPassword] = useState("");
-  const [port, setPort] = useState<number | string>(trunk?.port ?? 5060);
-  const [priority, setPriority] = useState<number | string>(trunk?.priority ?? 10);
+  const form = useForm<TrunkFormValues>({
+    mode: "controlled",
+    initialValues: {
+      name: trunk?.name ?? "",
+      host: trunk?.host ?? "",
+      authMode: trunk?.authMode ?? "ip",
+      username: trunk?.username ?? "",
+      password: "",
+      port: trunk?.port ?? 5060,
+      priority: trunk?.priority ?? 10,
+    },
+    validate: {
+      name: (v) => (v.trim() ? null : "Name is required"),
+      host: (v) => (v.trim() ? null : "Host is required"),
+    },
+  });
 
   const save = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (values: TrunkFormValues) => {
+      if (trunk) {
+        const body: Partial<Trunk> = {};
+        if (form.isDirty("name")) body.name = values.name;
+        if (form.isDirty("host")) body.host = values.host;
+        if (form.isDirty("authMode")) body.authMode = values.authMode;
+        if (form.isDirty("username")) body.username = values.username || null;
+        if (form.isDirty("port")) body.port = Number(values.port) || 5060;
+        if (form.isDirty("priority")) body.priority = Number(values.priority) || 10;
+
+        const saved =
+          Object.keys(body).length > 0
+            ? await endpoints.updateTrunk(trunk.id, body)
+            : trunk;
+        if (values.password) await endpoints.setTrunkPassword(saved.id, values.password);
+        return saved;
+      }
+
       const body = {
-        name,
-        host,
-        authMode,
-        username: username || null,
-        port: Number(port) || 5060,
-        priority: Number(priority) || 10,
+        name: values.name,
+        host: values.host,
+        authMode: values.authMode,
+        username: values.username || null,
+        port: Number(values.port) || 5060,
+        priority: Number(values.priority) || 10,
       };
-      const saved = trunk
-        ? await endpoints.updateTrunk(trunk.id, body)
-        : await endpoints.createTrunk(body);
-      // The credential goes through its own endpoint so it never lands in a patch body or an
-      // audit diff. Only sent when actually entered - an empty box means "leave it alone",
-      // not "clear it", which is what an operator editing the port would expect.
-      if (password) await endpoints.setTrunkPassword(saved.id, password);
+      const saved = await endpoints.createTrunk(body);
+      if (values.password) await endpoints.setTrunkPassword(saved.id, values.password);
       return saved;
     },
     onSuccess: () => {
+      notifySaved(trunk ? "Trunk saved" : "Trunk created");
       void qc.invalidateQueries({ queryKey: ["trunks"] });
       onClose();
     },
   });
 
+  const authMode = form.values.authMode;
+
   return (
     <Modal opened={opened} onClose={onClose} title={trunk ? `Edit ${trunk.name}` : "New trunk"}>
-      <Stack>
-        <ErrorAlert error={save.error} />
-        <TextInput
-          label="Name"
-          description="Also the FreeSWITCH gateway name, which is how CDRs attribute a call to this carrier"
-          value={name}
-          onChange={(e) => setName(e.currentTarget.value)}
-          required
-        />
-        <TextInput
-          label="Host"
-          placeholder="sip.carrier.example"
-          value={host}
-          onChange={(e) => setHost(e.currentTarget.value)}
-          required
-        />
-        <Group grow>
-          <NumberInput label="Port" value={port} onChange={setPort} min={1} max={65535} />
-          <NumberInput
-            label="Priority"
-            description="Lower wins"
-            value={priority}
-            onChange={setPriority}
-            min={0}
+      <form
+        onSubmit={form.onSubmit((values) => {
+          if (trunk && !form.isDirty() && !values.password) {
+            onClose();
+            return;
+          }
+          save.mutate(values);
+        })}
+      >
+        <Stack>
+          <ErrorAlert error={save.error} />
+          <TextInput
+            label="Name"
+            description="Also the FreeSWITCH gateway name, which is how CDRs attribute a call to this carrier"
+            required
+            {...form.getInputProps("name")}
           />
-        </Group>
-        <Select
-          label="Authentication"
-          data={[
-            { value: "ip", label: "IP address" },
-            { value: "register", label: "Register with credentials" },
-          ]}
-          value={authMode}
-          onChange={(v) => setAuthMode((v as "ip" | "register") ?? "ip")}
-          allowDeselect={false}
-        />
-        {authMode === "register" && (
-          <>
-            <TextInput
-              label="Username"
-              value={username}
-              onChange={(e) => setUsername(e.currentTarget.value)}
-              required
+          <TextInput
+            label="Host"
+            placeholder="sip.carrier.example"
+            required
+            {...form.getInputProps("host")}
+          />
+          <Group grow>
+            <NumberInput label="Port" min={1} max={65535} {...form.getInputProps("port")} />
+            <NumberInput
+              label="Priority"
+              description="Lower wins"
+              min={0}
+              {...form.getInputProps("priority")}
             />
-            <PasswordInput
-              label="Password"
-              description={trunk ? "Leave blank to keep the current one" : undefined}
-              value={password}
-              onChange={(e) => setPassword(e.currentTarget.value)}
-            />
-          </>
-        )}
-        {authMode === "ip" && (
-          <Text size="xs" c="dimmed">
-            The carrier's address is written into Kamailio's permissions table, which is also
-            what stops the responsive firewall rate-limiting them.
-          </Text>
-        )}
-        <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!name || !host}>
-          {trunk ? "Save" : "Create"}
-        </Button>
-      </Stack>
+          </Group>
+          <Select
+            label="Authentication"
+            data={[
+              { value: "ip", label: "IP address" },
+              { value: "register", label: "Register with credentials" },
+            ]}
+            allowDeselect={false}
+            {...form.getInputProps("authMode")}
+          />
+          {authMode === "register" && (
+            <>
+              <TextInput label="Username" required {...form.getInputProps("username")} />
+              <PasswordInput
+                label="Password"
+                description={trunk ? "Leave blank to keep the current one" : undefined}
+                {...form.getInputProps("password")}
+              />
+            </>
+          )}
+          {authMode === "ip" && (
+            <Text size="xs" c="dimmed">
+              The carrier's address is written into Kamailio's permissions table, which is also
+              what stops the responsive firewall rate-limiting them.
+            </Text>
+          )}
+          <Button type="submit" loading={save.isPending} disabled={trunk ? !form.isDirty() && !form.values.password : false}>
+            {trunk ? "Save" : "Create"}
+          </Button>
+        </Stack>
+      </form>
     </Modal>
   );
 }
@@ -141,7 +177,10 @@ function TrunksPage() {
 
   const remove = useMutation({
     mutationFn: (id: string) => endpoints.deleteTrunk(id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["trunks"] }),
+    onSuccess: () => {
+      notifyRemoved("Trunk removed");
+      void qc.invalidateQueries({ queryKey: ["trunks"] });
+    },
   });
   const toggle = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
@@ -154,7 +193,11 @@ function TrunksPage() {
       <PageHeader
         title="Trunks"
         description="Carrier connections. Kamailio reaches these, not FreeSWITCH — the media core never talks to a carrier directly."
-        action={<Button onClick={() => setCreating(true)}>New trunk</Button>}
+        action={
+          <RoleGate resource="trunk" action="create">
+            <Button onClick={() => setCreating(true)}>New trunk</Button>
+          </RoleGate>
+        }
       />
 
       <ErrorAlert error={remove.error ?? toggle.error} />
@@ -166,7 +209,11 @@ function TrunksPage() {
         isSuccess={isSuccess}
         isPaused={isPaused}
         emptyMessage="No trunks yet. Outbound calls need one."
-        emptyAction={<Button onClick={() => setCreating(true)}>Add a trunk</Button>}
+        emptyAction={
+          <RoleGate resource="trunk" action="create">
+            <Button onClick={() => setCreating(true)}>Add a trunk</Button>
+          </RoleGate>
+        }
       >
         <Table striped highlightOnHover>
           <Table.Thead>
@@ -196,21 +243,27 @@ function TrunksPage() {
                 </Table.Td>
                 <Table.Td>{t.priority}</Table.Td>
                 <Table.Td>
-                  <Switch
-                    checked={t.enabled}
-                    onChange={(e) => toggle.mutate({ id: t.id, enabled: e.currentTarget.checked })}
-                  />
+                  <RoleGate resource="trunk" action="update" mode="disable">
+                    <Switch
+                      checked={t.enabled}
+                      onChange={(e) => toggle.mutate({ id: t.id, enabled: e.currentTarget.checked })}
+                    />
+                  </RoleGate>
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} justify="flex-end">
-                    <Button size="xs" variant="subtle" onClick={() => setEditing(t)}>
-                      Edit
-                    </Button>
-                    <DeleteButton
-                      what={`trunk ${t.name}`}
-                      onConfirm={() => remove.mutate(t.id)}
-                      loading={remove.isPending}
-                    />
+                    <RoleGate resource="trunk" action="update" mode="disable">
+                      <Button size="xs" variant="subtle" onClick={() => setEditing(t)}>
+                        Edit
+                      </Button>
+                    </RoleGate>
+                    <RoleGate resource="trunk" action="delete" mode="disable">
+                      <DeleteButton
+                        what={`trunk ${t.name}`}
+                        onConfirm={() => remove.mutate(t.id)}
+                        loading={remove.isPending}
+                      />
+                    </RoleGate>
                   </Group>
                 </Table.Td>
               </Table.Tr>

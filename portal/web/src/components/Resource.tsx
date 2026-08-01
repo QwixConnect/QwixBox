@@ -5,10 +5,14 @@
  * error case is the one that matters: the API rejects cross-tenant references and invalid
  * patterns with a 400 and a specific message, and swallowing that into "something went wrong"
  * would leave someone guessing at a rule the server is willing to explain.
+ *
+ * `RoleGate` is convenience only — the server check stays the boundary. See `lib/use-role.ts`.
  */
-import type { ReactNode } from "react";
-import { Alert, Button, Center, Group, Loader, Stack, Text, Title } from "@mantine/core";
+import type { ReactElement, ReactNode } from "react";
+import { cloneElement } from "react";
+import { Alert, Button, Center, Group, Loader, Stack, Text, Title, Tooltip } from "@mantine/core";
 import { ApiError } from "../lib/api";
+import { useRole, type PermissionAction, type PermissionResource } from "../lib/use-role";
 
 export function PageHeader({
   title,
@@ -136,17 +140,22 @@ export function DeleteButton({
   what,
   onConfirm,
   loading,
+  disabled,
+  disabledReason,
 }: {
   what: string;
   onConfirm: () => void;
   loading?: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
-  return (
+  const button = (
     <Button
       size="xs"
       variant="subtle"
       color="red"
       loading={loading}
+      disabled={disabled}
       onClick={() => {
         if (window.confirm(`Delete ${what}? Anything routing to it will stop working.`)) {
           onConfirm();
@@ -156,4 +165,54 @@ export function DeleteButton({
       Delete
     </Button>
   );
+
+  if (disabled && disabledReason) {
+    return (
+      <Tooltip label={disabledReason}>
+        <span>{button}</span>
+      </Tooltip>
+    );
+  }
+  return button;
+}
+
+/**
+ * Conditionally render or disable UI based on the caller's role.
+ *
+ * - `hide` (default): omit the control entirely — use for create buttons and nav.
+ * - `disable`: keep the control visible but inert, with a tooltip — use for Edit/Delete so an
+ *   operator who cannot act does not assume the page is broken.
+ *
+ * Children must be a single element that accepts `disabled` when mode is `disable`.
+ */
+export function RoleGate({
+  resource,
+  action,
+  mode = "hide",
+  children,
+  reason,
+}: {
+  resource: PermissionResource;
+  action: PermissionAction;
+  mode?: "hide" | "disable";
+  children: ReactElement<{ disabled?: boolean }>;
+  reason?: string;
+}) {
+  const { can, role } = useRole();
+  const allowed = can(resource, action);
+  const label = reason ?? `Your role (${role ?? "unknown"}) cannot ${action} ${resource}`;
+
+  if (allowed) return children;
+
+  if (mode === "hide") return null;
+
+  return (
+    <Tooltip label={label}>
+      <span>{cloneDisabled(children)}</span>
+    </Tooltip>
+  );
+}
+
+function cloneDisabled(child: ReactElement<{ disabled?: boolean }>): ReactElement {
+  return cloneElement(child, { disabled: true });
 }

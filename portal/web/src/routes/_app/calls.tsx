@@ -14,7 +14,7 @@ import {
   TextInput,
 } from "@mantine/core";
 import { endpoints, type Cdr, type CdrFilters } from "../../lib/api";
-import { PageHeader, QueryState } from "../../components/Resource";
+import { PageHeader, QueryState, RoleGate } from "../../components/Resource";
 
 const PAGE_SIZE = 50;
 
@@ -108,6 +108,23 @@ function CallsPage() {
       <PageHeader
         title="Calls"
         description="Every call FreeSWITCH handled. Read-only by design — a phone system whose billing history can be edited through its own API is not one anyone should buy."
+        action={
+          <RoleGate resource="cdr" action="export">
+            <Button
+              component="a"
+              href={endpoints.cdrExportUrl({
+                direction: direction || undefined,
+                number: number || undefined,
+                answered: answered || undefined,
+                from: from || undefined,
+                to: to || undefined,
+              })}
+              download
+            >
+              Export CSV
+            </Button>
+          </RoleGate>
+        }
       />
 
       <SummaryCards from={from || undefined} to={to || undefined} />

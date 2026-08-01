@@ -17,13 +17,22 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
+import { useForm } from "@mantine/form";
 import { endpoints, type InboundRoute, type OutboundRoute } from "../../lib/api";
-import { DeleteButton, ErrorAlert, PageHeader, QueryState } from "../../components/Resource";
+import { notifyRemoved, notifySaved } from "../../lib/notify";
+import { DeleteButton, ErrorAlert, PageHeader, QueryState, RoleGate } from "../../components/Resource";
 import { DestinationPicker, type DestinationValue } from "../../components/DestinationPicker";
 
 /* ---------------------------------------------------------------------------------------
  * Inbound
  * ------------------------------------------------------------------------------------ */
+
+type InboundFormValues = {
+  didPattern: string;
+  description: string;
+  priority: number | string;
+  destination: DestinationValue;
+};
 
 function InboundModal({
   route,
@@ -35,28 +44,29 @@ function InboundModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [didPattern, setDidPattern] = useState(route?.didPattern ?? "");
-  const [description, setDescription] = useState(route?.description ?? "");
-  const [priority, setPriority] = useState<number | string>(route?.priority ?? 10);
-  const [dest, setDest] = useState<DestinationValue>({
-    type: route?.destinationType ?? null,
-    id: route?.destinationId ?? null,
+  const form = useForm<InboundFormValues>({
+    mode: "controlled",
+    initialValues: {
+      didPattern: route?.didPattern ?? "",
+      description: route?.description ?? "",
+      priority: route?.priority ?? 10,
+      destination: {
+        type: route?.destinationType ?? null,
+        id: route?.destinationId ?? null,
+      },
+    },
+    validate: {
+      didPattern: (v) => (v.trim() ? null : "DID pattern is required"),
+    },
   });
 
   const save = useMutation({
-    mutationFn: () => {
-      const body = {
-        didPattern,
-        description: description || null,
-        priority: Number(priority) || 10,
-        destinationType: dest.type,
-        destinationId: dest.id,
-      };
-      return route
+    mutationFn: (body: Partial<InboundRoute>) =>
+      route
         ? endpoints.updateInboundRoute(route.id, body)
-        : endpoints.createInboundRoute(body);
-    },
+        : endpoints.createInboundRoute(body as Omit<InboundRoute, "id" | "enabled">),
     onSuccess: () => {
+      notifySaved(route ? "Inbound route saved" : "Inbound route created");
       void qc.invalidateQueries({ queryKey: ["inbound-routes"] });
       onClose();
     },
@@ -69,33 +79,59 @@ function InboundModal({
       title={route ? "Edit inbound route" : "New inbound route"}
       size="lg"
     >
-      <Stack>
-        <ErrorAlert error={save.error} />
-        <TextInput
-          label="DID pattern"
-          description="A regular expression matched against the dialled number"
-          placeholder="^14165551234$"
-          value={didPattern}
-          onChange={(e) => setDidPattern(e.currentTarget.value)}
-          required
-        />
-        <TextInput
-          label="Description"
-          value={description}
-          onChange={(e) => setDescription(e.currentTarget.value)}
-        />
-        <NumberInput
-          label="Priority"
-          description="Lower is matched first"
-          value={priority}
-          onChange={setPriority}
-          min={0}
-        />
-        <DestinationPicker label="Send calls to" value={dest} onChange={setDest} />
-        <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!didPattern}>
-          {route ? "Save" : "Create"}
-        </Button>
-      </Stack>
+      <form
+        onSubmit={form.onSubmit((values) => {
+          if (route) {
+            const body: Partial<InboundRoute> = {};
+            if (form.isDirty("didPattern")) body.didPattern = values.didPattern;
+            if (form.isDirty("description")) body.description = values.description || null;
+            if (form.isDirty("priority")) body.priority = Number(values.priority) || 10;
+            if (form.isDirty("destination")) {
+              body.destinationType = values.destination.type;
+              body.destinationId = values.destination.id;
+            }
+            if (Object.keys(body).length === 0) {
+              onClose();
+              return;
+            }
+            save.mutate(body);
+            return;
+          }
+          save.mutate({
+            didPattern: values.didPattern,
+            description: values.description || null,
+            priority: Number(values.priority) || 10,
+            destinationType: values.destination.type,
+            destinationId: values.destination.id,
+          });
+        })}
+      >
+        <Stack>
+          <ErrorAlert error={save.error} />
+          <TextInput
+            label="DID pattern"
+            description="A regular expression matched against the dialled number"
+            placeholder="^14165551234$"
+            required
+            {...form.getInputProps("didPattern")}
+          />
+          <TextInput label="Description" {...form.getInputProps("description")} />
+          <NumberInput
+            label="Priority"
+            description="Lower is matched first"
+            min={0}
+            {...form.getInputProps("priority")}
+          />
+          <DestinationPicker
+            label="Send calls to"
+            value={form.values.destination}
+            onChange={(next) => form.setFieldValue("destination", next)}
+          />
+          <Button type="submit" loading={save.isPending} disabled={route ? !form.isDirty() : false}>
+            {route ? "Save" : "Create"}
+          </Button>
+        </Stack>
+      </form>
     </Modal>
   );
 }
@@ -111,15 +147,20 @@ function InboundTab() {
   });
   const remove = useMutation({
     mutationFn: (id: string) => endpoints.deleteInboundRoute(id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["inbound-routes"] }),
+    onSuccess: () => {
+      notifyRemoved("Inbound route removed");
+      void qc.invalidateQueries({ queryKey: ["inbound-routes"] });
+    },
   });
 
   return (
     <>
       <Group justify="flex-end" mb="sm">
-        <Button size="sm" onClick={() => setCreating(true)}>
-          New inbound route
-        </Button>
+        <RoleGate resource="route" action="create">
+          <Button size="sm" onClick={() => setCreating(true)}>
+            New inbound route
+          </Button>
+        </RoleGate>
       </Group>
       <ErrorAlert error={remove.error} />
       <QueryState
@@ -158,13 +199,17 @@ function InboundTab() {
                 <Table.Td>{r.enabled ? "Yes" : "No"}</Table.Td>
                 <Table.Td>
                   <Group gap={4} justify="flex-end">
-                    <Button size="xs" variant="subtle" onClick={() => setEditing(r)}>
-                      Edit
-                    </Button>
-                    <DeleteButton
-                      what={`inbound route ${r.didPattern}`}
-                      onConfirm={() => remove.mutate(r.id)}
-                    />
+                    <RoleGate resource="route" action="update" mode="disable">
+                      <Button size="xs" variant="subtle" onClick={() => setEditing(r)}>
+                        Edit
+                      </Button>
+                    </RoleGate>
+                    <RoleGate resource="route" action="delete" mode="disable">
+                      <DeleteButton
+                        what={`inbound route ${r.didPattern}`}
+                        onConfirm={() => remove.mutate(r.id)}
+                      />
+                    </RoleGate>
                   </Group>
                 </Table.Td>
               </Table.Tr>
@@ -184,6 +229,16 @@ function InboundTab() {
  * Outbound
  * ------------------------------------------------------------------------------------ */
 
+type OutboundFormValues = {
+  name: string;
+  pattern: string;
+  trunkId: string;
+  priority: number | string;
+  stripDigits: number | string;
+  prependDigits: string;
+  isEmergency: boolean;
+};
+
 function OutboundModal({
   route,
   opened,
@@ -194,36 +249,38 @@ function OutboundModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [name, setName] = useState(route?.name ?? "");
-  const [pattern, setPattern] = useState(route?.pattern ?? "");
-  const [trunkId, setTrunkId] = useState(route?.trunkId ?? "");
-  const [priority, setPriority] = useState<number | string>(route?.priority ?? 10);
-  const [stripDigits, setStripDigits] = useState<number | string>(route?.stripDigits ?? 0);
-  const [prependDigits, setPrependDigits] = useState(route?.prependDigits ?? "");
-  const [isEmergency, setIsEmergency] = useState(route?.isEmergency ?? false);
+  const form = useForm<OutboundFormValues>({
+    mode: "controlled",
+    initialValues: {
+      name: route?.name ?? "",
+      pattern: route?.pattern ?? "",
+      trunkId: route?.trunkId ?? "",
+      priority: route?.priority ?? 10,
+      stripDigits: route?.stripDigits ?? 0,
+      prependDigits: route?.prependDigits ?? "",
+      isEmergency: route?.isEmergency ?? false,
+    },
+    validate: {
+      name: (v) => (v.trim() ? null : "Name is required"),
+      pattern: (v) => (v.trim() ? null : "Pattern is required"),
+    },
+  });
 
   const trunks = useQuery({ queryKey: ["trunks"], queryFn: endpoints.trunks });
 
   const save = useMutation({
-    mutationFn: () => {
-      const body = {
-        name,
-        pattern,
-        trunkId: trunkId || null,
-        priority: Number(priority) || 10,
-        stripDigits: Number(stripDigits) || 0,
-        prependDigits: prependDigits || null,
-        isEmergency,
-      };
-      return route
+    mutationFn: (body: Partial<OutboundRoute>) =>
+      route
         ? endpoints.updateOutboundRoute(route.id, body)
-        : endpoints.createOutboundRoute(body);
-    },
+        : endpoints.createOutboundRoute(body as Omit<OutboundRoute, "id" | "enabled">),
     onSuccess: () => {
+      notifySaved(route ? "Outbound route saved" : "Outbound route created");
       void qc.invalidateQueries({ queryKey: ["outbound-routes"] });
       onClose();
     },
   });
+
+  const isEmergency = form.values.isEmergency;
 
   return (
     <Modal
@@ -232,64 +289,77 @@ function OutboundModal({
       title={route ? "Edit outbound route" : "New outbound route"}
       size="lg"
     >
-      <Stack>
-        <ErrorAlert error={save.error} />
-        <TextInput
-          label="Name"
-          value={name}
-          onChange={(e) => setName(e.currentTarget.value)}
-          required
-        />
-        <TextInput
-          label="Pattern"
-          description="A regular expression. The API rejects one that will not compile — better than discovering it when a call fails."
-          placeholder="^1[0-9]{10}$"
-          value={pattern}
-          onChange={(e) => setPattern(e.currentTarget.value)}
-          required
-        />
-        <Select
-          label="Trunk"
-          data={(trunks.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
-          value={trunkId}
-          onChange={(v) => setTrunkId(v ?? "")}
-          searchable
-        />
-        <Group grow>
-          <NumberInput
-            label="Strip digits"
-            description="From the front"
-            value={stripDigits}
-            onChange={setStripDigits}
-            min={0}
-          />
+      <form
+        onSubmit={form.onSubmit((values) => {
+          if (route) {
+            const body: Partial<OutboundRoute> = {};
+            if (form.isDirty("name")) body.name = values.name;
+            if (form.isDirty("pattern")) body.pattern = values.pattern;
+            if (form.isDirty("trunkId")) body.trunkId = values.trunkId || null;
+            if (form.isDirty("priority")) body.priority = Number(values.priority) || 10;
+            if (form.isDirty("stripDigits")) body.stripDigits = Number(values.stripDigits) || 0;
+            if (form.isDirty("prependDigits")) body.prependDigits = values.prependDigits || null;
+            if (form.isDirty("isEmergency")) body.isEmergency = values.isEmergency;
+            if (Object.keys(body).length === 0) {
+              onClose();
+              return;
+            }
+            save.mutate(body);
+            return;
+          }
+          save.mutate({
+            name: values.name,
+            pattern: values.pattern,
+            trunkId: values.trunkId || null,
+            priority: Number(values.priority) || 10,
+            stripDigits: Number(values.stripDigits) || 0,
+            prependDigits: values.prependDigits || null,
+            isEmergency: values.isEmergency,
+          });
+        })}
+      >
+        <Stack>
+          <ErrorAlert error={save.error} />
+          <TextInput label="Name" required {...form.getInputProps("name")} />
           <TextInput
-            label="Prepend"
-            value={prependDigits}
-            onChange={(e) => setPrependDigits(e.currentTarget.value)}
+            label="Pattern"
+            description="A regular expression. The API rejects one that will not compile — better than discovering it when a call fails."
+            placeholder="^1[0-9]{10}$"
+            required
+            {...form.getInputProps("pattern")}
           />
-          <NumberInput label="Priority" value={priority} onChange={setPriority} min={0} />
-        </Group>
-        <Switch
-          label="Emergency route"
-          checked={isEmergency}
-          onChange={(e) => setIsEmergency(e.currentTarget.checked)}
-        />
-        {isEmergency && (
-          <Alert color="orange" title="Emergency routes bypass everything">
-            Matched before fraud limits, time conditions and route permissions, by design. It
-            must have a trunk — a 911 call blocked by your own toll-fraud cap is the worst
-            failure this system can have.
-          </Alert>
-        )}
-        <Button
-          onClick={() => save.mutate()}
-          loading={save.isPending}
-          disabled={!name || !pattern}
-        >
-          {route ? "Save" : "Create"}
-        </Button>
-      </Stack>
+          <Select
+            label="Trunk"
+            data={(trunks.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
+            searchable
+            {...form.getInputProps("trunkId")}
+          />
+          <Group grow>
+            <NumberInput
+              label="Strip digits"
+              description="From the front"
+              min={0}
+              {...form.getInputProps("stripDigits")}
+            />
+            <TextInput label="Prepend" {...form.getInputProps("prependDigits")} />
+            <NumberInput label="Priority" min={0} {...form.getInputProps("priority")} />
+          </Group>
+          <Switch
+            label="Emergency route"
+            {...form.getInputProps("isEmergency", { type: "checkbox" })}
+          />
+          {isEmergency && (
+            <Alert color="orange" title="Emergency routes bypass everything">
+              Matched before fraud limits, time conditions and route permissions, by design. It
+              must have a trunk — a 911 call blocked by your own toll-fraud cap is the worst
+              failure this system can have.
+            </Alert>
+          )}
+          <Button type="submit" loading={save.isPending} disabled={route ? !form.isDirty() : false}>
+            {route ? "Save" : "Create"}
+          </Button>
+        </Stack>
+      </form>
     </Modal>
   );
 }
@@ -306,7 +376,10 @@ function OutboundTab() {
   const trunks = useQuery({ queryKey: ["trunks"], queryFn: endpoints.trunks });
   const remove = useMutation({
     mutationFn: (id: string) => endpoints.deleteOutboundRoute(id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["outbound-routes"] }),
+    onSuccess: () => {
+      notifyRemoved("Outbound route removed");
+      void qc.invalidateQueries({ queryKey: ["outbound-routes"] });
+    },
   });
 
   const trunkName = (id: string | null) =>
@@ -315,9 +388,11 @@ function OutboundTab() {
   return (
     <>
       <Group justify="flex-end" mb="sm">
-        <Button size="sm" onClick={() => setCreating(true)}>
-          New outbound route
-        </Button>
+        <RoleGate resource="route" action="create">
+          <Button size="sm" onClick={() => setCreating(true)}>
+            New outbound route
+          </Button>
+        </RoleGate>
       </Group>
       <ErrorAlert error={remove.error} />
       <QueryState
@@ -378,13 +453,17 @@ function OutboundTab() {
                   <Table.Td>{r.priority}</Table.Td>
                   <Table.Td>
                     <Group gap={4} justify="flex-end">
-                      <Button size="xs" variant="subtle" onClick={() => setEditing(r)}>
-                        Edit
-                      </Button>
-                      <DeleteButton
-                        what={`outbound route ${r.name}`}
-                        onConfirm={() => remove.mutate(r.id)}
-                      />
+                      <RoleGate resource="route" action="update" mode="disable">
+                        <Button size="xs" variant="subtle" onClick={() => setEditing(r)}>
+                          Edit
+                        </Button>
+                      </RoleGate>
+                      <RoleGate resource="route" action="delete" mode="disable">
+                        <DeleteButton
+                          what={`outbound route ${r.name}`}
+                          onConfirm={() => remove.mutate(r.id)}
+                        />
+                      </RoleGate>
                     </Group>
                   </Table.Td>
                 </Table.Tr>

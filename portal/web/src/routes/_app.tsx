@@ -29,6 +29,7 @@ import {
 } from "@mantine/core";
 import { authClient, ensureActiveOrganization } from "../lib/auth-client";
 import { endpoints, type Health } from "../lib/api";
+import { useActiveMemberRoleQuery, useRole, type PermissionAction, type PermissionResource } from "../lib/use-role";
 
 export const Route = createFileRoute("/_app")({
   /**
@@ -128,16 +129,25 @@ function AccountMenu() {
 }
 
 /* Ordered the way a call travels: it arrives on a trunk, a route decides where it lands, a
-   call flow answers it, and the result shows up in Calls. */
-const NAV = [
+   call flow answers it, and the result shows up in Calls. Faxes / Users / Audit are ops pages
+   that sit outside that path. */
+const NAV: {
+  to: string;
+  label: string;
+  /** When set, the entry is hidden unless the role can perform this action. */
+  require?: { resource: PermissionResource; action: PermissionAction };
+}[] = [
   { to: "/", label: "Dashboard" },
   { to: "/extensions", label: "Extensions" },
   { to: "/trunks", label: "Trunks" },
   { to: "/routing", label: "Routing" },
   { to: "/call-flows", label: "Call flows" },
-  { to: "/calls", label: "Calls" },
+  { to: "/calls", label: "Calls", require: { resource: "cdr", action: "read" } },
+  { to: "/faxes", label: "Faxes", require: { resource: "recording", action: "read" } },
+  { to: "/users", label: "Users" },
+  { to: "/audit", label: "Audit", require: { resource: "audit", action: "read" } },
   { to: "/settings", label: "Settings" },
-] as const;
+];
 
 /**
  * Shown when the account exists but belongs to no organization.
@@ -170,6 +180,7 @@ function NoTenant({ email }: { email: string }) {
 function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { data: session } = authClient.useSession();
+  const { can } = useRole();
 
   /* Every API call is scoped by the session's active organization, and a session restored from a
      cookie on a fresh page load has none set — so this runs on entry rather than only after
@@ -181,6 +192,11 @@ function AppLayout() {
     staleTime: Infinity,
     retry: false,
   });
+
+  /* Role once per session — nginx rate-limits /api/auth/* to 5 r/m. See docs/portal-ui-plan.md. */
+  useActiveMemberRoleQuery(session?.user.id);
+
+  const nav = NAV.filter((item) => !item.require || can(item.require.resource, item.require.action));
 
   return (
     <AppShell header={{ height: 56 }} navbar={{ width: 220, breakpoint: "sm" }} padding="md">
@@ -196,7 +212,7 @@ function AppLayout() {
 
       <AppShell.Navbar p="xs">
         <ScrollArea>
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <NavLink
               key={item.to}
               component={Link}

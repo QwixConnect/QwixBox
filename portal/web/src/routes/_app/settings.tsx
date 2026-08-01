@@ -1,7 +1,39 @@
+/**
+ * Tenant settings — read table by default, editable when the role has tenant:update.
+ *
+ * Also hosts two operational actions already live on the API but previously unreachable:
+ * rebuild-cache and (when unprovisioned) provision telephony.
+ */
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { Alert, Badge, Group, Loader, Stack, Table, Text, Title } from "@mantine/core";
-import { endpoints, ApiError, type TenantSettings } from "../../lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Alert,
+  Badge,
+  Button,
+  Code,
+  Group,
+  Loader,
+  Modal,
+  NumberInput,
+  Select,
+  Stack,
+  Switch,
+  Table,
+  Text,
+  TextInput,
+} from "@mantine/core";
+import { useForm } from "@mantine/form";
+import {
+  ApiError,
+  endpoints,
+  type TenantProvision,
+  type TenantSettings,
+  type TenantUpdate,
+} from "../../lib/api";
+import { notifySaved } from "../../lib/notify";
+import { useRole } from "../../lib/use-role";
+import { ErrorAlert, PageHeader, RoleGate } from "../../components/Resource";
 
 function Row({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
@@ -21,11 +53,200 @@ function Row({ label, value, hint }: { label: string; value: React.ReactNode; hi
   );
 }
 
+function ProvisionForm() {
+  const qc = useQueryClient();
+  const form = useForm<TenantProvision>({
+    initialValues: {
+      sipDomain: "",
+      tier: "shared",
+      timezone: "Etc/UTC",
+      maxConcurrentCalls: 10,
+    },
+    validate: {
+      sipDomain: (v) => (v.trim() ? null : "SIP domain is required"),
+    },
+  });
+  const [dedicatedWarning, setDedicatedWarning] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: (values: TenantProvision) => endpoints.provisionTenant(values),
+    onSuccess: (res) => {
+      if (res.error) {
+        setDedicatedWarning(res.detail ?? res.error);
+        void qc.invalidateQueries({ queryKey: ["tenant"] });
+        return;
+      }
+      notifySaved("Telephony provisioned");
+      void qc.invalidateQueries({ queryKey: ["tenant"] });
+    },
+  });
+
+  return (
+    <Stack maw={480}>
+      <Alert color="yellow" title="Telephony is not provisioned">
+        The organization exists but has no SIP domain yet. Fill this in to attach telephony —
+        Kamailio will learn the domain and the cache will be warmed.
+      </Alert>
+      {dedicatedWarning ? (
+        <Alert color="orange" title="Dedicated tier needs a dispatcher set">
+          {dedicatedWarning}
+          <Text size="sm" mt="xs">
+            The tenant row was created. Open Settings and set <Code>dispatcherSetId</Code> before
+            calls will route.
+          </Text>
+        </Alert>
+      ) : null}
+      <form onSubmit={form.onSubmit((v) => mutation.mutate(v))}>
+        <Stack>
+          <TextInput
+            label="SIP domain"
+            description="The tenancy boundary at the SIP layer — cannot be changed later"
+            required
+            {...form.getInputProps("sipDomain")}
+          />
+          <Select
+            label="Tier"
+            data={[
+              { value: "shared", label: "shared" },
+              { value: "dedicated", label: "dedicated" },
+            ]}
+            {...form.getInputProps("tier")}
+          />
+          <TextInput label="Timezone" {...form.getInputProps("timezone")} />
+          <NumberInput
+            label="Max concurrent calls"
+            min={1}
+            {...form.getInputProps("maxConcurrentCalls")}
+          />
+          <ErrorAlert error={mutation.error} />
+          <Button type="submit" loading={mutation.isPending}>
+            Provision telephony
+          </Button>
+        </Stack>
+      </form>
+    </Stack>
+  );
+}
+
+function EditSettingsModal({
+  data,
+  opened,
+  onClose,
+}: {
+  data: TenantSettings;
+  opened: boolean;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const form = useForm({
+    initialValues: {
+      maxConcurrentCalls: data.maxConcurrentCalls,
+      timezone: data.timezone,
+      defaultCallerIdName: data.defaultCallerIdName ?? "",
+      defaultCallerIdNumber: data.defaultCallerIdNumber ?? "",
+      recordingPolicy: data.recordingPolicy,
+      stirShakenEnabled: data.stirShakenEnabled,
+      enabled: data.enabled,
+      dispatcherSetId: data.dispatcherSetId,
+    },
+  });
+
+  const mutation = useMutation({
+    mutationFn: (body: TenantUpdate) => endpoints.updateTenant(body),
+    onSuccess: () => {
+      notifySaved("Settings saved");
+      void qc.invalidateQueries({ queryKey: ["tenant"] });
+      onClose();
+    },
+  });
+
+  return (
+    <Modal opened={opened} onClose={onClose} title="Edit settings" size="lg">
+      <form
+        onSubmit={form.onSubmit((values) => {
+          const body: TenantUpdate = {};
+          if (form.isDirty("maxConcurrentCalls")) body.maxConcurrentCalls = values.maxConcurrentCalls;
+          if (form.isDirty("timezone")) body.timezone = values.timezone;
+          if (form.isDirty("defaultCallerIdName")) {
+            body.defaultCallerIdName = values.defaultCallerIdName || null;
+          }
+          if (form.isDirty("defaultCallerIdNumber")) {
+            body.defaultCallerIdNumber = values.defaultCallerIdNumber || null;
+          }
+          if (form.isDirty("recordingPolicy")) body.recordingPolicy = values.recordingPolicy;
+          if (form.isDirty("stirShakenEnabled")) body.stirShakenEnabled = values.stirShakenEnabled;
+          if (form.isDirty("enabled")) body.enabled = values.enabled;
+          if (form.isDirty("dispatcherSetId")) body.dispatcherSetId = values.dispatcherSetId;
+          if (Object.keys(body).length === 0) {
+            onClose();
+            return;
+          }
+          mutation.mutate(body);
+        })}
+      >
+        <Stack>
+          <NumberInput
+            label="Max concurrent calls"
+            description="Toll-fraud ceiling"
+            min={1}
+            {...form.getInputProps("maxConcurrentCalls")}
+          />
+          <TextInput label="Timezone" {...form.getInputProps("timezone")} />
+          <TextInput label="Default caller ID name" {...form.getInputProps("defaultCallerIdName")} />
+          <TextInput
+            label="Default caller ID number"
+            {...form.getInputProps("defaultCallerIdNumber")}
+          />
+          <Select
+            label="Recording policy"
+            data={["none", "inbound", "outbound", "all"]}
+            {...form.getInputProps("recordingPolicy")}
+          />
+          <Switch
+            label="STIR/SHAKEN"
+            {...form.getInputProps("stirShakenEnabled", { type: "checkbox" })}
+          />
+          <Switch label="Enabled" {...form.getInputProps("enabled", { type: "checkbox" })} />
+          {data.tier === "dedicated" || data.dispatcherSetId === 0 ? (
+            <NumberInput
+              label="Dispatcher set ID"
+              description="Required for dedicated tier before calls route"
+              min={1}
+              {...form.getInputProps("dispatcherSetId")}
+            />
+          ) : null}
+          <ErrorAlert error={mutation.error} />
+          <Group justify="flex-end">
+            <Button variant="subtle" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={mutation.isPending} disabled={!form.isDirty()}>
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </form>
+    </Modal>
+  );
+}
+
 function Settings() {
-  const { data, isLoading, error } = useQuery<TenantSettings>({
+  const qc = useQueryClient();
+  const { can } = useRole();
+  const [editing, setEditing] = useState(false);
+
+  const { data, isLoading, error, isSuccess } = useQuery<TenantSettings>({
     queryKey: ["tenant"],
     queryFn: () => endpoints.tenant(),
     retry: false,
+  });
+
+  const rebuild = useMutation({
+    mutationFn: () => endpoints.rebuildCache(),
+    onSuccess: () => {
+      notifySaved("Cache rebuilt");
+      void qc.invalidateQueries({ queryKey: ["tenant"] });
+    },
   });
 
   if (isLoading) {
@@ -37,16 +258,57 @@ function Settings() {
   }
 
   if (error instanceof ApiError && error.status === 404) {
-    return <Alert color="yellow">Telephony is not provisioned for this organization.</Alert>;
+    return can("tenant", "update") ? (
+      <ProvisionForm />
+    ) : (
+      <Alert color="yellow">Telephony is not provisioned for this organization.</Alert>
+    );
   }
   if (error) {
-    return <Alert color="red">{(error as Error).message}</Alert>;
+    return <ErrorAlert error={error} />;
   }
-  if (!data) return null;
+  if (!isSuccess || !data) return null;
 
   return (
     <Stack>
-      <Title order={3}>Settings</Title>
+      <PageHeader
+        title="Settings"
+        description="Tenant telephony configuration. The SIP domain cannot be changed after provisioning."
+        action={
+          <Group>
+            <RoleGate resource="tenant" action="update">
+              <Button
+                variant="light"
+                color="orange"
+                loading={rebuild.isPending}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Rebuild the Redis cache for this tenant? This purges and repopulates every key — use after a Redis flush or a restore.",
+                    )
+                  ) {
+                    rebuild.mutate();
+                  }
+                }}
+              >
+                Rebuild cache
+              </Button>
+            </RoleGate>
+            <RoleGate resource="tenant" action="update">
+              <Button onClick={() => setEditing(true)}>Edit</Button>
+            </RoleGate>
+          </Group>
+        }
+      />
+
+      <ErrorAlert error={rebuild.error} />
+
+      {data.dispatcherSetId === 0 ? (
+        <Alert color="orange" title="Dispatcher set not assigned">
+          This dedicated tenant cannot route calls until <Code>dispatcherSetId</Code> is set.
+          Use Edit to assign one.
+        </Alert>
+      ) : null}
 
       <Table>
         <Table.Tbody>
@@ -83,10 +345,7 @@ function Settings() {
               </Badge>
             }
           />
-          <Row
-            label="Recording"
-            value={<Badge variant="light">{data.recordingPolicy}</Badge>}
-          />
+          <Row label="Recording" value={<Badge variant="light">{data.recordingPolicy}</Badge>} />
           <Row label="Timezone" value={<Text ff="monospace">{data.timezone}</Text>} />
           <Row
             label="Default caller ID"
@@ -96,8 +355,20 @@ function Settings() {
               </Text>
             }
           />
+          <Row
+            label="Enabled"
+            value={
+              <Badge color={data.enabled ? "green" : "gray"} variant="light">
+                {data.enabled ? "yes" : "no"}
+              </Badge>
+            }
+          />
         </Table.Tbody>
       </Table>
+
+      {editing ? (
+        <EditSettingsModal data={data} opened onClose={() => setEditing(false)} />
+      ) : null}
     </Stack>
   );
 }

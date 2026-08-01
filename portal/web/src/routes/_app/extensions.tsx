@@ -16,8 +16,11 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
+import { useForm } from "@mantine/form";
 import { endpoints, type Extension } from "../../lib/api";
+import { notifySaved } from "../../lib/notify";
 import { CallHandlingModal } from "../../components/CallHandlingModal";
+import { ErrorAlert, RoleGate } from "../../components/Resource";
 
 function CreateExtensionModal({
   opened,
@@ -27,24 +30,37 @@ function CreateExtensionModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [number, setNumber] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [voicemail, setVoicemail] = useState(true);
   const [created, setCreated] = useState<Extension | null>(null);
 
+  const form = useForm({
+    mode: "controlled",
+    initialValues: {
+      number: "",
+      displayName: "",
+      voicemailEnabled: true,
+    },
+    validate: {
+      number: (v) => (v.trim() ? null : "Number is required"),
+      displayName: (v) => (v.trim() ? null : "Display name is required"),
+    },
+  });
+
   const mutation = useMutation({
-    mutationFn: () =>
-      endpoints.createExtension({ number, displayName, voicemailEnabled: voicemail }),
+    mutationFn: (values: typeof form.values) =>
+      endpoints.createExtension({
+        number: values.number,
+        displayName: values.displayName,
+        voicemailEnabled: values.voicemailEnabled,
+      }),
     onSuccess: (ext) => {
+      notifySaved(`Extension ${ext.number} created`);
       setCreated(ext);
       void qc.invalidateQueries({ queryKey: ["extensions"] });
     },
   });
 
   function reset() {
-    setNumber("");
-    setDisplayName("");
-    setVoicemail(true);
+    form.reset();
     setCreated(null);
     mutation.reset();
     onClose();
@@ -86,42 +102,30 @@ function CreateExtensionModal({
 
   return (
     <Modal opened={opened} onClose={reset} title="New extension">
-      <Stack>
-        <TextInput
-          label="Number"
-          placeholder="1001"
-          value={number}
-          onChange={(e) => setNumber(e.currentTarget.value)}
-          required
-        />
-        <TextInput
-          label="Display name"
-          placeholder="Reception"
-          value={displayName}
-          onChange={(e) => setDisplayName(e.currentTarget.value)}
-          required
-        />
-        <Switch
-          label="Voicemail"
-          checked={voicemail}
-          onChange={(e) => setVoicemail(e.currentTarget.checked)}
-        />
-        {mutation.error ? (
-          <Alert color="red">{(mutation.error as Error).message}</Alert>
-        ) : null}
-        <Group justify="flex-end">
-          <Button variant="subtle" onClick={reset}>
-            Cancel
-          </Button>
-          <Button
-            onClick={() => mutation.mutate()}
-            loading={mutation.isPending}
-            disabled={!number || !displayName}
-          >
-            Create
-          </Button>
-        </Group>
-      </Stack>
+      <form onSubmit={form.onSubmit((values) => mutation.mutate(values))}>
+        <Stack>
+          <TextInput label="Number" placeholder="1001" required {...form.getInputProps("number")} />
+          <TextInput
+            label="Display name"
+            placeholder="Reception"
+            required
+            {...form.getInputProps("displayName")}
+          />
+          <Switch
+            label="Voicemail"
+            {...form.getInputProps("voicemailEnabled", { type: "checkbox" })}
+          />
+          <ErrorAlert error={mutation.error} />
+          <Group justify="flex-end">
+            <Button variant="subtle" onClick={reset}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={mutation.isPending}>
+              Create
+            </Button>
+          </Group>
+        </Stack>
+      </form>
     </Modal>
   );
 }
@@ -164,7 +168,9 @@ function Extensions() {
     <Stack>
       <Group justify="space-between">
         <Title order={3}>Extensions</Title>
-        <Button onClick={() => setModalOpen(true)}>New extension</Button>
+        <RoleGate resource="extension" action="create">
+          <Button onClick={() => setModalOpen(true)}>New extension</Button>
+        </RoleGate>
       </Group>
 
       {rows.length === 0 ? (
@@ -219,9 +225,11 @@ function Extensions() {
                         no waiting
                       </Badge>
                     )}
-                    <Button size="compact-xs" variant="subtle" onClick={() => setCallHandling(ext)}>
-                      Edit
-                    </Button>
+                    <RoleGate resource="extension" action="update" mode="disable">
+                      <Button size="compact-xs" variant="subtle" onClick={() => setCallHandling(ext)}>
+                        Edit
+                      </Button>
+                    </RoleGate>
                   </Group>
                 </Table.Td>
                 <Table.Td>
@@ -230,13 +238,15 @@ function Extensions() {
                   </Badge>
                 </Table.Td>
                 <Table.Td>
-                  <Switch
-                    checked={ext.enabled}
-                    onChange={(e) =>
-                      toggle.mutate({ id: ext.id, enabled: e.currentTarget.checked })
-                    }
-                    aria-label={`Toggle extension ${ext.number}`}
-                  />
+                  <RoleGate resource="extension" action="update" mode="disable">
+                    <Switch
+                      checked={ext.enabled}
+                      onChange={(e) =>
+                        toggle.mutate({ id: ext.id, enabled: e.currentTarget.checked })
+                      }
+                      aria-label={`Toggle extension ${ext.number}`}
+                    />
+                  </RoleGate>
                 </Table.Td>
               </Table.Tr>
             ))}

@@ -16,6 +16,7 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
+import { useForm } from "@mantine/form";
 import {
   endpoints,
   type IvrMenu,
@@ -23,12 +24,21 @@ import {
   type TimeCondition,
   type TimeConditionRule,
 } from "../../lib/api";
-import { DeleteButton, ErrorAlert, PageHeader, QueryState } from "../../components/Resource";
+import { notifyRemoved, notifySaved } from "../../lib/notify";
+import { DeleteButton, ErrorAlert, PageHeader, QueryState, RoleGate } from "../../components/Resource";
 import { DestinationPicker, type DestinationValue } from "../../components/DestinationPicker";
 
 /* ---------------------------------------------------------------------------------------
  * Ring groups
  * ------------------------------------------------------------------------------------ */
+
+type RingGroupFormValues = {
+  number: string;
+  name: string;
+  strategy: string;
+  ringTimeoutSec: number | string;
+  failover: DestinationValue;
+};
 
 function RingGroupModal({
   group,
@@ -40,28 +50,29 @@ function RingGroupModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [number, setNumber] = useState(group?.number ?? "");
-  const [name, setName] = useState(group?.name ?? "");
-  const [strategy, setStrategy] = useState(group?.strategy ?? "simultaneous");
-  const [timeout, setTimeout] = useState<number | string>(group?.ringTimeoutSec ?? 30);
-  const [failover, setFailover] = useState<DestinationValue>({
-    type: group?.failoverType ?? null,
-    id: group?.failoverId ?? null,
+  const form = useForm<RingGroupFormValues>({
+    mode: "controlled",
+    initialValues: {
+      number: group?.number ?? "",
+      name: group?.name ?? "",
+      strategy: group?.strategy ?? "simultaneous",
+      ringTimeoutSec: group?.ringTimeoutSec ?? 30,
+      failover: {
+        type: group?.failoverType ?? null,
+        id: group?.failoverId ?? null,
+      },
+    },
+    validate: {
+      number: (v) => (v.trim() ? null : "Number is required"),
+      name: (v) => (v.trim() ? null : "Name is required"),
+    },
   });
 
   const save = useMutation({
-    mutationFn: () => {
-      const body = {
-        number,
-        name,
-        strategy: strategy as "simultaneous" | "sequential",
-        ringTimeoutSec: Number(timeout) || 30,
-        failoverType: failover.type,
-        failoverId: failover.id,
-      };
-      return group ? endpoints.updateRingGroup(group.id, body) : endpoints.createRingGroup(body);
-    },
+    mutationFn: (body: Partial<RingGroup>) =>
+      group ? endpoints.updateRingGroup(group.id, body) : endpoints.createRingGroup(body),
     onSuccess: () => {
+      notifySaved(group ? "Ring group saved" : "Ring group created");
       void qc.invalidateQueries({ queryKey: ["ring-groups"] });
       onClose();
     },
@@ -69,60 +80,83 @@ function RingGroupModal({
 
   return (
     <Modal opened={opened} onClose={onClose} title={group ? `Edit ${group.name}` : "New ring group"} size="lg">
-      <Stack>
-        <ErrorAlert error={save.error} />
-        <Group grow>
-          <TextInput
-            label="Number"
-            description="Dial this from any phone in the tenant"
-            placeholder="600"
-            value={number}
-            onChange={(e) => setNumber(e.currentTarget.value)}
-            required
+      <form
+        onSubmit={form.onSubmit((values) => {
+          if (group) {
+            const body: Partial<RingGroup> = {};
+            if (form.isDirty("number")) body.number = values.number;
+            if (form.isDirty("name")) body.name = values.name;
+            if (form.isDirty("strategy")) body.strategy = values.strategy as "simultaneous" | "sequential";
+            if (form.isDirty("ringTimeoutSec")) body.ringTimeoutSec = Number(values.ringTimeoutSec) || 30;
+            if (form.isDirty("failover")) {
+              body.failoverType = values.failover.type;
+              body.failoverId = values.failover.id;
+            }
+            if (Object.keys(body).length === 0) {
+              onClose();
+              return;
+            }
+            save.mutate(body);
+            return;
+          }
+          save.mutate({
+            number: values.number,
+            name: values.name,
+            strategy: values.strategy as "simultaneous" | "sequential",
+            ringTimeoutSec: Number(values.ringTimeoutSec) || 30,
+            failoverType: values.failover.type,
+            failoverId: values.failover.id,
+          });
+        })}
+      >
+        <Stack>
+          <ErrorAlert error={save.error} />
+          <Group grow>
+            <TextInput
+              label="Number"
+              description="Dial this from any phone in the tenant"
+              placeholder="600"
+              required
+              {...form.getInputProps("number")}
+            />
+            <TextInput label="Name" placeholder="Sales" required {...form.getInputProps("name")} />
+          </Group>
+          <Group grow>
+            <Select
+              label="Strategy"
+              data={[
+                { value: "simultaneous", label: "Ring everyone at once" },
+                { value: "sequential", label: "Ring one at a time" },
+              ]}
+              allowDeselect={false}
+              {...form.getInputProps("strategy")}
+            />
+            <NumberInput label="Ring for (seconds)" min={5} {...form.getInputProps("ringTimeoutSec")} />
+          </Group>
+          <DestinationPicker
+            label="If nobody answers"
+            description="Falls back to the group's own voicemail when left empty"
+            value={form.values.failover}
+            onChange={(next) => form.setFieldValue("failover", next)}
           />
-          <TextInput
-            label="Name"
-            placeholder="Sales"
-            value={name}
-            onChange={(e) => setName(e.currentTarget.value)}
-            required
-          />
-        </Group>
-        <Group grow>
-          <Select
-            label="Strategy"
-            data={[
-              { value: "simultaneous", label: "Ring everyone at once" },
-              { value: "sequential", label: "Ring one at a time" },
-            ]}
-            value={strategy}
-            onChange={(v) => setStrategy((v as "simultaneous" | "sequential") ?? "simultaneous")}
-            allowDeselect={false}
-          />
-          <NumberInput label="Ring for (seconds)" value={timeout} onChange={setTimeout} min={5} />
-        </Group>
-        <DestinationPicker
-          label="If nobody answers"
-          description="Falls back to the group's own voicemail when left empty"
-          value={failover}
-          onChange={setFailover}
-        />
-        <Button
-          onClick={() => save.mutate()}
-          loading={save.isPending}
-          disabled={!number || !name}
-        >
-          {group ? "Save" : "Create"}
-        </Button>
-      </Stack>
+          <Button type="submit" loading={save.isPending} disabled={group ? !form.isDirty() : false}>
+            {group ? "Save" : "Create"}
+          </Button>
+        </Stack>
+      </form>
     </Modal>
   );
 }
 
 function MembersModal({ group, onClose }: { group: RingGroup; onClose: () => void }) {
   const qc = useQueryClient();
-  const [extensionId, setExtensionId] = useState("");
-  const [delaySec, setDelaySec] = useState<number | string>(0);
+  const form = useForm({
+    mode: "controlled",
+    initialValues: {
+      extensionId: "",
+      delaySec: 0 as number | string,
+    },
+  });
 
   const members = useQuery({
     queryKey: ["ring-group-members", group.id],
@@ -134,17 +168,23 @@ function MembersModal({ group, onClose }: { group: RingGroup; onClose: () => voi
     void qc.invalidateQueries({ queryKey: ["ring-group-members", group.id] });
   };
   const add = useMutation({
-    mutationFn: () =>
-      endpoints.addRingGroupMember(group.id, { extensionId, delaySec: Number(delaySec) || 0 }),
+    mutationFn: (values: typeof form.values) =>
+      endpoints.addRingGroupMember(group.id, {
+        extensionId: values.extensionId,
+        delaySec: Number(values.delaySec) || 0,
+      }),
     onSuccess: () => {
-      setExtensionId("");
-      setDelaySec(0);
+      notifySaved("Member added");
+      form.reset();
       invalidate();
     },
   });
   const remove = useMutation({
     mutationFn: (memberId: string) => endpoints.removeRingGroupMember(group.id, memberId),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      notifyRemoved("Member removed");
+      invalidate();
+    },
   });
 
   const inGroup = new Set((members.data ?? []).map((m) => m.extensionId));
@@ -195,32 +235,32 @@ function MembersModal({ group, onClose }: { group: RingGroup; onClose: () => voi
           </Table.Tbody>
         </Table>
 
-        <Group align="flex-end">
-          <Select
-            label="Add extension"
-            data={available.map((e) => ({ value: e.id, label: `${e.number} — ${e.displayName}` }))}
-            value={extensionId}
-            onChange={(v) => setExtensionId(v ?? "")}
-            searchable
-            nothingFoundMessage="Everyone is already a member"
-            style={{ flex: 1 }}
-          />
-          {/* Only meaningful on a simultaneous group - a sequential group already rings in
-              order, and the Lua ignores the delay there. */}
-          {group.strategy === "simultaneous" && (
-            <NumberInput
-              label="Delay"
-              description="Seconds"
-              value={delaySec}
-              onChange={setDelaySec}
-              min={0}
-              w={110}
+        <form onSubmit={form.onSubmit((values) => add.mutate(values))}>
+          <Group align="flex-end">
+            <Select
+              label="Add extension"
+              data={available.map((e) => ({ value: e.id, label: `${e.number} — ${e.displayName}` }))}
+              searchable
+              nothingFoundMessage="Everyone is already a member"
+              style={{ flex: 1 }}
+              {...form.getInputProps("extensionId")}
             />
-          )}
-          <Button onClick={() => add.mutate()} disabled={!extensionId} loading={add.isPending}>
-            Add
-          </Button>
-        </Group>
+            {/* Only meaningful on a simultaneous group - a sequential group already rings in
+                order, and the Lua ignores the delay there. */}
+            {group.strategy === "simultaneous" && (
+              <NumberInput
+                label="Delay"
+                description="Seconds"
+                min={0}
+                w={110}
+                {...form.getInputProps("delaySec")}
+              />
+            )}
+            <Button type="submit" disabled={!form.values.extensionId} loading={add.isPending}>
+              Add
+            </Button>
+          </Group>
+        </form>
       </Stack>
     </Modal>
   );
@@ -238,15 +278,20 @@ function RingGroupsTab() {
   });
   const remove = useMutation({
     mutationFn: (id: string) => endpoints.deleteRingGroup(id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["ring-groups"] }),
+    onSuccess: () => {
+      notifyRemoved("Ring group removed");
+      void qc.invalidateQueries({ queryKey: ["ring-groups"] });
+    },
   });
 
   return (
     <>
       <Group justify="flex-end" mb="sm">
-        <Button size="sm" onClick={() => setCreating(true)}>
-          New ring group
-        </Button>
+        <RoleGate resource="callflow" action="create">
+          <Button size="sm" onClick={() => setCreating(true)}>
+            New ring group
+          </Button>
+        </RoleGate>
       </Group>
       <ErrorAlert error={remove.error} />
       <QueryState
@@ -286,16 +331,22 @@ function RingGroupsTab() {
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} justify="flex-end">
-                    <Button size="xs" variant="subtle" onClick={() => setMembers(g)}>
-                      Members
-                    </Button>
-                    <Button size="xs" variant="subtle" onClick={() => setEditing(g)}>
-                      Edit
-                    </Button>
-                    <DeleteButton
-                      what={`ring group ${g.name}`}
-                      onConfirm={() => remove.mutate(g.id)}
-                    />
+                    <RoleGate resource="callflow" action="update" mode="disable">
+                      <Button size="xs" variant="subtle" onClick={() => setMembers(g)}>
+                        Members
+                      </Button>
+                    </RoleGate>
+                    <RoleGate resource="callflow" action="update" mode="disable">
+                      <Button size="xs" variant="subtle" onClick={() => setEditing(g)}>
+                        Edit
+                      </Button>
+                    </RoleGate>
+                    <RoleGate resource="callflow" action="delete" mode="disable">
+                      <DeleteButton
+                        what={`ring group ${g.name}`}
+                        onConfirm={() => remove.mutate(g.id)}
+                      />
+                    </RoleGate>
                   </Group>
                 </Table.Td>
               </Table.Tr>
@@ -316,6 +367,15 @@ function RingGroupsTab() {
  * IVR menus
  * ------------------------------------------------------------------------------------ */
 
+type IvrFormValues = {
+  number: string;
+  name: string;
+  greetingSound: string;
+  timeoutSec: number | string;
+  maxRetries: number | string;
+  onTimeout: DestinationValue;
+};
+
 function IvrModal({
   menu,
   opened,
@@ -326,30 +386,30 @@ function IvrModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [number, setNumber] = useState(menu?.number ?? "");
-  const [name, setName] = useState(menu?.name ?? "");
-  const [greeting, setGreeting] = useState(menu?.greetingSound ?? "");
-  const [timeoutSec, setTimeoutSec] = useState<number | string>(menu?.timeoutSec ?? 5);
-  const [maxRetries, setMaxRetries] = useState<number | string>(menu?.maxRetries ?? 3);
-  const [onTimeout, setOnTimeout] = useState<DestinationValue>({
-    type: menu?.timeoutType ?? null,
-    id: menu?.timeoutId ?? null,
+  const form = useForm<IvrFormValues>({
+    mode: "controlled",
+    initialValues: {
+      number: menu?.number ?? "",
+      name: menu?.name ?? "",
+      greetingSound: menu?.greetingSound ?? "",
+      timeoutSec: menu?.timeoutSec ?? 5,
+      maxRetries: menu?.maxRetries ?? 3,
+      onTimeout: {
+        type: menu?.timeoutType ?? null,
+        id: menu?.timeoutId ?? null,
+      },
+    },
+    validate: {
+      number: (v) => (v.trim() ? null : "Number is required"),
+      name: (v) => (v.trim() ? null : "Name is required"),
+    },
   });
 
   const save = useMutation({
-    mutationFn: () => {
-      const body = {
-        number,
-        name,
-        greetingSound: greeting || null,
-        timeoutSec: Number(timeoutSec) || 5,
-        maxRetries: Number(maxRetries) || 3,
-        timeoutType: onTimeout.type,
-        timeoutId: onTimeout.id,
-      };
-      return menu ? endpoints.updateIvrMenu(menu.id, body) : endpoints.createIvrMenu(body);
-    },
+    mutationFn: (body: Partial<IvrMenu>) =>
+      menu ? endpoints.updateIvrMenu(menu.id, body) : endpoints.createIvrMenu(body),
     onSuccess: () => {
+      notifySaved(menu ? "IVR menu saved" : "IVR menu created");
       void qc.invalidateQueries({ queryKey: ["ivr-menus"] });
       onClose();
     },
@@ -357,58 +417,83 @@ function IvrModal({
 
   return (
     <Modal opened={opened} onClose={onClose} title={menu ? `Edit ${menu.name}` : "New IVR menu"} size="lg">
-      <Stack>
-        <ErrorAlert error={save.error} />
-        <Group grow>
+      <form
+        onSubmit={form.onSubmit((values) => {
+          if (menu) {
+            const body: Partial<IvrMenu> = {};
+            if (form.isDirty("number")) body.number = values.number;
+            if (form.isDirty("name")) body.name = values.name;
+            if (form.isDirty("greetingSound")) body.greetingSound = values.greetingSound || null;
+            if (form.isDirty("timeoutSec")) body.timeoutSec = Number(values.timeoutSec) || 5;
+            if (form.isDirty("maxRetries")) body.maxRetries = Number(values.maxRetries) || 3;
+            if (form.isDirty("onTimeout")) {
+              body.timeoutType = values.onTimeout.type;
+              body.timeoutId = values.onTimeout.id;
+            }
+            if (Object.keys(body).length === 0) {
+              onClose();
+              return;
+            }
+            save.mutate(body);
+            return;
+          }
+          save.mutate({
+            number: values.number,
+            name: values.name,
+            greetingSound: values.greetingSound || null,
+            timeoutSec: Number(values.timeoutSec) || 5,
+            maxRetries: Number(values.maxRetries) || 3,
+            timeoutType: values.onTimeout.type,
+            timeoutId: values.onTimeout.id,
+          });
+        })}
+      >
+        <Stack>
+          <ErrorAlert error={save.error} />
+          <Group grow>
+            <TextInput label="Number" placeholder="700" required {...form.getInputProps("number")} />
+            <TextInput label="Name" placeholder="Main menu" required {...form.getInputProps("name")} />
+          </Group>
           <TextInput
-            label="Number"
-            placeholder="700"
-            value={number}
-            onChange={(e) => setNumber(e.currentTarget.value)}
-            required
+            label="Greeting"
+            description="A sound file path FreeSWITCH can play"
+            placeholder="/usr/local/freeswitch/sounds/custom/greeting.wav"
+            {...form.getInputProps("greetingSound")}
           />
-          <TextInput
-            label="Name"
-            placeholder="Main menu"
-            value={name}
-            onChange={(e) => setName(e.currentTarget.value)}
-            required
+          <Group grow>
+            <NumberInput
+              label="Wait for a digit (seconds)"
+              min={1}
+              {...form.getInputProps("timeoutSec")}
+            />
+            <NumberInput label="Attempts" min={1} {...form.getInputProps("maxRetries")} />
+          </Group>
+          <DestinationPicker
+            label="If they press nothing"
+            description="The most common path in practice — rotary phones, handsets put down, speech that never registers"
+            value={form.values.onTimeout}
+            onChange={(next) => form.setFieldValue("onTimeout", next)}
           />
-        </Group>
-        <TextInput
-          label="Greeting"
-          description="A sound file path FreeSWITCH can play"
-          placeholder="/usr/local/freeswitch/sounds/custom/greeting.wav"
-          value={greeting}
-          onChange={(e) => setGreeting(e.currentTarget.value)}
-        />
-        <Group grow>
-          <NumberInput
-            label="Wait for a digit (seconds)"
-            value={timeoutSec}
-            onChange={setTimeoutSec}
-            min={1}
-          />
-          <NumberInput label="Attempts" value={maxRetries} onChange={setMaxRetries} min={1} />
-        </Group>
-        <DestinationPicker
-          label="If they press nothing"
-          description="The most common path in practice — rotary phones, handsets put down, speech that never registers"
-          value={onTimeout}
-          onChange={setOnTimeout}
-        />
-        <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!number || !name}>
-          {menu ? "Save" : "Create"}
-        </Button>
-      </Stack>
+          <Button type="submit" loading={save.isPending} disabled={menu ? !form.isDirty() : false}>
+            {menu ? "Save" : "Create"}
+          </Button>
+        </Stack>
+      </form>
     </Modal>
   );
 }
 
+const IVR_DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"];
+
 function IvrOptionsModal({ menu, onClose }: { menu: IvrMenu; onClose: () => void }) {
   const qc = useQueryClient();
-  const [digit, setDigit] = useState("1");
-  const [dest, setDest] = useState<DestinationValue>({ type: null, id: null });
+  const form = useForm({
+    mode: "controlled",
+    initialValues: {
+      digit: "1",
+      dest: { type: null, id: null } as DestinationValue,
+    },
+  });
 
   const options = useQuery({
     queryKey: ["ivr-options", menu.id],
@@ -417,22 +502,24 @@ function IvrOptionsModal({ menu, onClose }: { menu: IvrMenu; onClose: () => void
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["ivr-options", menu.id] });
 
   const setOption = useMutation({
-    mutationFn: () =>
-      endpoints.setIvrOption(menu.id, digit, {
-        destinationType: dest.type!,
-        destinationId: dest.id,
+    mutationFn: (values: typeof form.values) =>
+      endpoints.setIvrOption(menu.id, values.digit, {
+        destinationType: values.dest.type!,
+        destinationId: values.dest.id,
       }),
     onSuccess: () => {
-      setDest({ type: null, id: null });
+      notifySaved("Option saved");
+      form.setFieldValue("dest", { type: null, id: null });
       invalidate();
     },
   });
   const removeOption = useMutation({
     mutationFn: (d: string) => endpoints.deleteIvrOption(menu.id, d),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      notifyRemoved("Option removed");
+      invalidate();
+    },
   });
-
-  const DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"];
 
   return (
     <Modal opened onClose={onClose} title={`Options for ${menu.name}`} size="lg">
@@ -484,26 +571,28 @@ function IvrOptionsModal({ menu, onClose }: { menu: IvrMenu; onClose: () => void
           </Table.Tbody>
         </Table>
 
-        <Group align="flex-end">
-          <Select
-            label="Digit"
-            data={DIGITS}
-            value={digit}
-            onChange={(v) => setDigit(v ?? "1")}
-            w={90}
-            allowDeselect={false}
-          />
-          <div style={{ flex: 1 }}>
-            <DestinationPicker label="Goes to" value={dest} onChange={setDest} allowNone={false} />
-          </div>
-          <Button
-            onClick={() => setOption.mutate()}
-            disabled={!dest.type}
-            loading={setOption.isPending}
-          >
-            Set
-          </Button>
-        </Group>
+        <form onSubmit={form.onSubmit((values) => setOption.mutate(values))}>
+          <Group align="flex-end">
+            <Select
+              label="Digit"
+              data={IVR_DIGITS}
+              w={90}
+              allowDeselect={false}
+              {...form.getInputProps("digit")}
+            />
+            <div style={{ flex: 1 }}>
+              <DestinationPicker
+                label="Goes to"
+                value={form.values.dest}
+                onChange={(next) => form.setFieldValue("dest", next)}
+                allowNone={false}
+              />
+            </div>
+            <Button type="submit" disabled={!form.values.dest.type} loading={setOption.isPending}>
+              Set
+            </Button>
+          </Group>
+        </form>
       </Stack>
     </Modal>
   );
@@ -521,15 +610,20 @@ function IvrTab() {
   });
   const remove = useMutation({
     mutationFn: (id: string) => endpoints.deleteIvrMenu(id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["ivr-menus"] }),
+    onSuccess: () => {
+      notifyRemoved("IVR menu removed");
+      void qc.invalidateQueries({ queryKey: ["ivr-menus"] });
+    },
   });
 
   return (
     <>
       <Group justify="flex-end" mb="sm">
-        <Button size="sm" onClick={() => setCreating(true)}>
-          New IVR menu
-        </Button>
+        <RoleGate resource="callflow" action="create">
+          <Button size="sm" onClick={() => setCreating(true)}>
+            New IVR menu
+          </Button>
+        </RoleGate>
       </Group>
       <ErrorAlert error={remove.error} />
       <QueryState
@@ -567,13 +661,19 @@ function IvrTab() {
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} justify="flex-end">
-                    <Button size="xs" variant="subtle" onClick={() => setOptions(m)}>
-                      Options
-                    </Button>
-                    <Button size="xs" variant="subtle" onClick={() => setEditing(m)}>
-                      Edit
-                    </Button>
-                    <DeleteButton what={`IVR ${m.name}`} onConfirm={() => remove.mutate(m.id)} />
+                    <RoleGate resource="callflow" action="update" mode="disable">
+                      <Button size="xs" variant="subtle" onClick={() => setOptions(m)}>
+                        Options
+                      </Button>
+                    </RoleGate>
+                    <RoleGate resource="callflow" action="update" mode="disable">
+                      <Button size="xs" variant="subtle" onClick={() => setEditing(m)}>
+                        Edit
+                      </Button>
+                    </RoleGate>
+                    <RoleGate resource="callflow" action="delete" mode="disable">
+                      <DeleteButton what={`IVR ${m.name}`} onConfirm={() => remove.mutate(m.id)} />
+                    </RoleGate>
                   </Group>
                 </Table.Td>
               </Table.Tr>
@@ -673,6 +773,14 @@ function RuleEditor({
   );
 }
 
+type TimeConditionFormValues = {
+  name: string;
+  timezone: string;
+  rules: TimeConditionRule[];
+  onMatch: DestinationValue;
+  onNoMatch: DestinationValue;
+};
+
 function TimeConditionModal({
   condition,
   opened,
@@ -685,36 +793,33 @@ function TimeConditionModal({
   const qc = useQueryClient();
   const tenant = useQuery({ queryKey: ["tenant"], queryFn: endpoints.tenant });
 
-  const [name, setName] = useState(condition?.name ?? "");
-  const [timezone, setTimezone] = useState(condition?.timezone ?? "");
-  const [rules, setRules] = useState<TimeConditionRule[]>(
-    condition?.rules ?? [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
-  );
-  const [onMatch, setOnMatch] = useState<DestinationValue>({
-    type: condition?.matchType ?? null,
-    id: condition?.matchId ?? null,
-  });
-  const [onNoMatch, setOnNoMatch] = useState<DestinationValue>({
-    type: condition?.noMatchType ?? null,
-    id: condition?.noMatchId ?? null,
+  const form = useForm<TimeConditionFormValues>({
+    mode: "controlled",
+    initialValues: {
+      name: condition?.name ?? "",
+      timezone: condition?.timezone ?? "",
+      rules: condition?.rules ?? [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+      onMatch: {
+        type: condition?.matchType ?? null,
+        id: condition?.matchId ?? null,
+      },
+      onNoMatch: {
+        type: condition?.noMatchType ?? null,
+        id: condition?.noMatchId ?? null,
+      },
+    },
+    validate: {
+      name: (v) => (v.trim() ? null : "Name is required"),
+    },
   });
 
   const save = useMutation({
-    mutationFn: () => {
-      const body = {
-        name,
-        timezone: timezone || tenant.data?.timezone || "Etc/UTC",
-        rules,
-        matchType: onMatch.type,
-        matchId: onMatch.id,
-        noMatchType: onNoMatch.type,
-        noMatchId: onNoMatch.id,
-      };
-      return condition
+    mutationFn: (body: Partial<TimeCondition>) =>
+      condition
         ? endpoints.updateTimeCondition(condition.id, body)
-        : endpoints.createTimeCondition(body);
-    },
+        : endpoints.createTimeCondition(body),
     onSuccess: () => {
+      notifySaved(condition ? "Time condition saved" : "Time condition created");
       void qc.invalidateQueries({ queryKey: ["time-conditions"] });
       onClose();
     },
@@ -727,47 +832,84 @@ function TimeConditionModal({
       title={condition ? `Edit ${condition.name}` : "New time condition"}
       size="lg"
     >
-      <Stack>
-        <ErrorAlert error={save.error} />
-        <Group grow>
-          <TextInput
-            label="Name"
-            placeholder="Business hours"
-            value={name}
-            onChange={(e) => setName(e.currentTarget.value)}
-            required
-          />
-          <TextInput
-            label="Timezone"
-            description="Evaluated here, not on the server clock"
-            placeholder={tenant.data?.timezone ?? "America/Toronto"}
-            value={timezone}
-            onChange={(e) => setTimezone(e.currentTarget.value)}
-          />
-        </Group>
+      <form
+        onSubmit={form.onSubmit((values) => {
+          if (condition) {
+            const body: Partial<TimeCondition> = {};
+            if (form.isDirty("name")) body.name = values.name;
+            if (form.isDirty("timezone")) {
+              body.timezone = values.timezone || tenant.data?.timezone || "Etc/UTC";
+            }
+            if (form.isDirty("rules")) body.rules = values.rules;
+            if (form.isDirty("onMatch")) {
+              body.matchType = values.onMatch.type;
+              body.matchId = values.onMatch.id;
+            }
+            if (form.isDirty("onNoMatch")) {
+              body.noMatchType = values.onNoMatch.type;
+              body.noMatchId = values.onNoMatch.id;
+            }
+            if (Object.keys(body).length === 0) {
+              onClose();
+              return;
+            }
+            save.mutate(body);
+            return;
+          }
+          save.mutate({
+            name: values.name,
+            timezone: values.timezone || tenant.data?.timezone || "Etc/UTC",
+            rules: values.rules,
+            matchType: values.onMatch.type,
+            matchId: values.onMatch.id,
+            noMatchType: values.onNoMatch.type,
+            noMatchId: values.onNoMatch.id,
+          });
+        })}
+      >
+        <Stack>
+          <ErrorAlert error={save.error} />
+          <Group grow>
+            <TextInput label="Name" placeholder="Business hours" required {...form.getInputProps("name")} />
+            <TextInput
+              label="Timezone"
+              description="Evaluated here, not on the server clock"
+              placeholder={tenant.data?.timezone ?? "America/Toronto"}
+              {...form.getInputProps("timezone")}
+            />
+          </Group>
 
-        <Text size="sm" fw={500}>
-          Rules
-        </Text>
-        {rules.map((r, i) => (
-          <RuleEditor
-            key={i}
-            rule={r}
-            onChange={(next) => setRules(rules.map((x, j) => (j === i ? next : x)))}
-            onRemove={() => setRules(rules.filter((_, j) => j !== i))}
+          <Text size="sm" fw={500}>
+            Rules
+          </Text>
+          {form.values.rules.map((r, i) => (
+            <RuleEditor
+              key={i}
+              rule={r}
+              onChange={(next) => form.setFieldValue(`rules.${i}`, next)}
+              onRemove={() => form.removeListItem("rules", i)}
+            />
+          ))}
+          <Button variant="default" size="xs" onClick={() => form.insertListItem("rules", {})}>
+            Add rule
+          </Button>
+
+          <DestinationPicker
+            label="Inside these hours"
+            value={form.values.onMatch}
+            onChange={(next) => form.setFieldValue("onMatch", next)}
           />
-        ))}
-        <Button variant="default" size="xs" onClick={() => setRules([...rules, {}])}>
-          Add rule
-        </Button>
+          <DestinationPicker
+            label="Outside them"
+            value={form.values.onNoMatch}
+            onChange={(next) => form.setFieldValue("onNoMatch", next)}
+          />
 
-        <DestinationPicker label="Inside these hours" value={onMatch} onChange={setOnMatch} />
-        <DestinationPicker label="Outside them" value={onNoMatch} onChange={setOnNoMatch} />
-
-        <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!name}>
-          {condition ? "Save" : "Create"}
-        </Button>
-      </Stack>
+          <Button type="submit" loading={save.isPending} disabled={condition ? !form.isDirty() : false}>
+            {condition ? "Save" : "Create"}
+          </Button>
+        </Stack>
+      </form>
     </Modal>
   );
 }
@@ -794,15 +936,20 @@ function TimeConditionsTab() {
   });
   const remove = useMutation({
     mutationFn: (id: string) => endpoints.deleteTimeCondition(id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["time-conditions"] }),
+    onSuccess: () => {
+      notifyRemoved("Time condition removed");
+      void qc.invalidateQueries({ queryKey: ["time-conditions"] });
+    },
   });
 
   return (
     <>
       <Group justify="flex-end" mb="sm">
-        <Button size="sm" onClick={() => setCreating(true)}>
-          New time condition
-        </Button>
+        <RoleGate resource="callflow" action="create">
+          <Button size="sm" onClick={() => setCreating(true)}>
+            New time condition
+          </Button>
+        </RoleGate>
       </Group>
       <ErrorAlert error={remove.error} />
       <QueryState
@@ -848,13 +995,17 @@ function TimeConditionsTab() {
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} justify="flex-end">
-                    <Button size="xs" variant="subtle" onClick={() => setEditing(t)}>
-                      Edit
-                    </Button>
-                    <DeleteButton
-                      what={`time condition ${t.name}`}
-                      onConfirm={() => remove.mutate(t.id)}
-                    />
+                    <RoleGate resource="callflow" action="update" mode="disable">
+                      <Button size="xs" variant="subtle" onClick={() => setEditing(t)}>
+                        Edit
+                      </Button>
+                    </RoleGate>
+                    <RoleGate resource="callflow" action="delete" mode="disable">
+                      <DeleteButton
+                        what={`time condition ${t.name}`}
+                        onConfirm={() => remove.mutate(t.id)}
+                      />
+                    </RoleGate>
                   </Group>
                 </Table.Td>
               </Table.Tr>

@@ -6,7 +6,6 @@
  * who set something by accident and cannot remember how - having the code in front of them is
  * the difference between fixing it and guessing.
  */
-import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
@@ -20,24 +19,32 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
+import { useForm } from "@mantine/form";
 import { endpoints, type Extension } from "../lib/api";
+import { notifySaved } from "../lib/notify";
 import { ErrorAlert } from "./Resource";
+
+type CallHandlingValues = {
+  dnd: boolean;
+  callWaitingEnabled: boolean;
+  ringTimeoutSec: number | string;
+  forwardAllTo: string;
+  forwardBusyTo: string;
+  forwardNoAnswerTo: string;
+};
 
 function ForwardField({
   label,
   code,
   clearCode,
-  value,
-  onChange,
   description,
+  ...inputProps
 }: {
   label: string;
   code: string;
   clearCode: string;
-  value: string;
-  onChange: (v: string) => void;
   description: string;
-}) {
+} & ReturnType<ReturnType<typeof useForm<CallHandlingValues>>["getInputProps"]>) {
   return (
     <TextInput
       label={
@@ -51,8 +58,7 @@ function ForwardField({
       }
       description={description}
       placeholder="Leave blank for none"
-      value={value}
-      onChange={(e) => onChange(e.currentTarget.value)}
+      {...inputProps}
     />
   );
 }
@@ -65,25 +71,22 @@ export function CallHandlingModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [dnd, setDnd] = useState(extension.dnd);
-  const [callWaiting, setCallWaiting] = useState(extension.callWaitingEnabled);
-  const [ringTimeout, setRingTimeout] = useState<number | string>(extension.ringTimeoutSec ?? "");
-  const [fwdAll, setFwdAll] = useState(extension.forwardAllTo ?? "");
-  const [fwdBusy, setFwdBusy] = useState(extension.forwardBusyTo ?? "");
-  const [fwdNa, setFwdNa] = useState(extension.forwardNoAnswerTo ?? "");
+  const form = useForm<CallHandlingValues>({
+    mode: "controlled",
+    initialValues: {
+      dnd: extension.dnd,
+      callWaitingEnabled: extension.callWaitingEnabled,
+      ringTimeoutSec: extension.ringTimeoutSec ?? "",
+      forwardAllTo: extension.forwardAllTo ?? "",
+      forwardBusyTo: extension.forwardBusyTo ?? "",
+      forwardNoAnswerTo: extension.forwardNoAnswerTo ?? "",
+    },
+  });
 
   const save = useMutation({
-    mutationFn: () =>
-      endpoints.updateExtension(extension.id, {
-        dnd,
-        callWaitingEnabled: callWaiting,
-        // Empty means "inherit the tenant default", which is not the same as zero.
-        ringTimeoutSec: ringTimeout === "" ? null : Number(ringTimeout),
-        forwardAllTo: fwdAll || null,
-        forwardBusyTo: fwdBusy || null,
-        forwardNoAnswerTo: fwdNa || null,
-      }),
+    mutationFn: (body: Partial<Extension>) => endpoints.updateExtension(extension.id, body),
     onSuccess: () => {
+      notifySaved("Call handling saved");
       void qc.invalidateQueries({ queryKey: ["extensions"] });
       onClose();
     },
@@ -96,81 +99,94 @@ export function CallHandlingModal({
       title={`Call handling — ${extension.number} ${extension.displayName}`}
       size="lg"
     >
-      <Stack>
-        <ErrorAlert error={save.error} />
-
-        <Switch
-          label={
-            <Group gap={6}>
-              <span>Do not disturb</span>
-              <Code>*78</Code>
-              <Text size="xs" c="dimmed">
-                off with <Code>*79</Code>
-              </Text>
-            </Group>
+      <form
+        onSubmit={form.onSubmit((values) => {
+          const body: Partial<Extension> = {};
+          if (form.isDirty("dnd")) body.dnd = values.dnd;
+          if (form.isDirty("callWaitingEnabled")) body.callWaitingEnabled = values.callWaitingEnabled;
+          if (form.isDirty("ringTimeoutSec")) {
+            body.ringTimeoutSec = values.ringTimeoutSec === "" ? null : Number(values.ringTimeoutSec);
           }
-          description="The phone does not ring. Callers still reach the no-answer treatment below."
-          checked={dnd}
-          onChange={(e) => setDnd(e.currentTarget.checked)}
-        />
+          if (form.isDirty("forwardAllTo")) body.forwardAllTo = values.forwardAllTo || null;
+          if (form.isDirty("forwardBusyTo")) body.forwardBusyTo = values.forwardBusyTo || null;
+          if (form.isDirty("forwardNoAnswerTo")) body.forwardNoAnswerTo = values.forwardNoAnswerTo || null;
+          if (Object.keys(body).length === 0) {
+            onClose();
+            return;
+          }
+          save.mutate(body);
+        })}
+      >
+        <Stack>
+          <ErrorAlert error={save.error} />
 
-        <Switch
-          label="Call waiting"
-          description="Off sends a second simultaneous call to the busy treatment instead of ringing again."
-          checked={callWaiting}
-          onChange={(e) => setCallWaiting(e.currentTarget.checked)}
-        />
+          <Switch
+            label={
+              <Group gap={6}>
+                <span>Do not disturb</span>
+                <Code>*78</Code>
+                <Text size="xs" c="dimmed">
+                  off with <Code>*79</Code>
+                </Text>
+              </Group>
+            }
+            description="The phone does not ring. Callers still reach the no-answer treatment below."
+            {...form.getInputProps("dnd", { type: "checkbox" })}
+          />
 
-        <NumberInput
-          label="Ring for (seconds)"
-          description="Blank inherits the tenant default"
-          value={ringTimeout}
-          onChange={setRingTimeout}
-          min={5}
-          max={120}
-        />
+          <Switch
+            label="Call waiting"
+            description="Off sends a second simultaneous call to the busy treatment instead of ringing again."
+            {...form.getInputProps("callWaitingEnabled", { type: "checkbox" })}
+          />
 
-        <Divider label="Forwarding" labelPosition="left" />
+          <NumberInput
+            label="Ring for (seconds)"
+            description="Blank inherits the tenant default"
+            min={5}
+            max={120}
+            {...form.getInputProps("ringTimeoutSec")}
+          />
 
-        <ForwardField
-          label="All calls"
-          code="*72"
-          clearCode="*73"
-          value={fwdAll}
-          onChange={setFwdAll}
-          description="Overrides everything else, including do not disturb — the phone never rings."
-        />
-        <ForwardField
-          label="When busy"
-          code="*90"
-          clearCode="*91"
-          value={fwdBusy}
-          onChange={setFwdBusy}
-          description="Also used when call waiting is off and a call is already up."
-        />
-        <ForwardField
-          label="When there is no answer"
-          code="*92"
-          clearCode="*93"
-          value={fwdNa}
-          onChange={setFwdNa}
-          description="Takes precedence over voicemail. Also used when do not disturb is on."
-        />
+          <Divider label="Forwarding" labelPosition="left" />
 
-        <Text size="xs" c="dimmed">
-          Forward targets are dialled the way a user would dial them, and go out through the
-          tenant's own outbound routes.
-        </Text>
+          <ForwardField
+            label="All calls"
+            code="*72"
+            clearCode="*73"
+            description="Overrides everything else, including do not disturb — the phone never rings."
+            {...form.getInputProps("forwardAllTo")}
+          />
+          <ForwardField
+            label="When busy"
+            code="*90"
+            clearCode="*91"
+            description="Also used when call waiting is off and a call is already up."
+            {...form.getInputProps("forwardBusyTo")}
+          />
+          <ForwardField
+            label="When there is no answer"
+            code="*92"
+            clearCode="*93"
+            description="Takes precedence over voicemail. Also used when do not disturb is on."
+            {...form.getInputProps("forwardNoAnswerTo")}
+          />
 
-        <Group justify="flex-end">
-          <Button variant="subtle" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={() => save.mutate()} loading={save.isPending}>
-            Save
-          </Button>
-        </Group>
-      </Stack>
+          <Text size="xs" c="dimmed">
+            Forward targets are dialled the way a user would dial them, and go out through the
+            tenant's own outbound routes.
+          </Text>
+
+          <Group justify="flex-end">
+            <Button variant="subtle" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={save.isPending} disabled={!form.isDirty()}>
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </form>
     </Modal>
   );
 }
