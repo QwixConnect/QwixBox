@@ -1,6 +1,6 @@
 [Unit]
-# Managed by the Qwixbox installer.
-Description=Run the Qwixbox health check every 5 minutes
+# Managed by the QwixBox installer.
+Description=Run the QwixBox health check every 5 minutes
 
 [Timer]
 OnBootSec=5min

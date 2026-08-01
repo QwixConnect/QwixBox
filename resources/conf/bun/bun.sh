@@ -1,4 +1,4 @@
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 export BUN_INSTALL="@BUN_INSTALL@"
 case ":$PATH:" in
   *":$BUN_INSTALL/bin:"*) ;;

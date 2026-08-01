@@ -1,6 +1,6 @@
 [Unit]
-# Managed by the Qwixbox installer.
-Description=Qwixbox scheduled maintenance
+# Managed by the QwixBox installer.
+Description=QwixBox scheduled maintenance
 After=postgresql.service
 
 [Service]

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 # Mirrors Kamailio's registered contacts into the nftables sip_known set.
 set -uo pipefail
 

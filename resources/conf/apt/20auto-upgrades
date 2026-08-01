@@ -1,4 +1,4 @@
-// Managed by the Qwixbox installer.
+// Managed by the QwixBox installer.
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";

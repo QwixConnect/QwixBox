@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-Qwixbox is an installer for a full VoIP PBX stack on Debian 13: Kamailio (public SIP edge) in front of FreeSWITCH (media/PBX core), with rtpengine, PostgreSQL, Redis and a Bun/Hono API. There is no test suite — it is bash plus the assets it deploys.
+QwixBox is an installer for a full VoIP PBX stack on Debian 13: Kamailio (public SIP edge) in front of FreeSWITCH (media/PBX core), with rtpengine, PostgreSQL, Redis and a Bun/Hono API. There is no test suite — it is bash plus the assets it deploys.
 
 - `install.sh` — master installer. Runs `steps/*.sh` in order. Idempotent: each step's marker in `/var/lib/qwixbox/` holds the SHA-256 of the script that satisfied it, so a step re-runs automatically when its script changes. Flags: `--list`, `--only`, `--from`, `--force`, `--dry-run`. Logs to `/var/log/qwixbox/`.
 - `lib/common.sh` — shared helpers, sourced by every step. `apt_install` only installs what is missing; `write_file` writes from stdin and returns 1 when the content was already correct (so callers can skip a reload); `config_ensure_secret` generates a secret once and persists it. It also sources `lib/detect.sh`, `lib/tui.sh`, `lib/wizard.sh` and `lib/dns-cloudflare.sh`, so every step gets them from its single `. lib/common.sh` line.

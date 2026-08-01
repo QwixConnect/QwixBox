@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Qwixbox - master installer for the VoIP PBX stack.
+# QwixBox - master installer for the VoIP PBX stack.
 #
 # Runs the numbered step scripts in order. Safe to re-run: each step records a marker keyed
 # on the script's own checksum, so a completed step is skipped until its script changes.
@@ -163,7 +163,7 @@ if [ "$DO_MENU" -eq 1 ]; then
   [ "$DO_QUIET" -eq 1 ] && quiet_arg=(--quiet)
 
   while true; do
-    choice="$(tui_menu "Qwixbox" \
+    choice="$(tui_menu "QwixBox" \
       "install"   "Run all pending steps" \
       "status"    "Show each step and its state" \
       "step"      "Run one step again" \
@@ -311,7 +311,7 @@ notify_result() {
   local status="$1" detail="$2" to hook subject
   to="$(config_peek INSTALL_NOTIFY_EMAIL)"
   hook="$(config_peek INSTALL_NOTIFY_WEBHOOK)"
-  subject="Qwixbox install $status on $(hostname -f 2>/dev/null || hostname)"
+  subject="QwixBox install $status on $(hostname -f 2>/dev/null || hostname)"
 
   if [ -n "$to" ] && [ -x /usr/sbin/sendmail ]; then
     printf 'To: %s\nSubject: %s\n\n%s\n\nLog: %s\n' \
@@ -355,7 +355,7 @@ on_exit() {
 }
 trap on_exit EXIT
 
-info "Qwixbox installer starting"
+info "QwixBox installer starting"
 info "Logging to $LOG_FILE"
 [ "$DO_DRYRUN" -eq 1 ] && warn "DRY RUN - no step will actually execute"
 

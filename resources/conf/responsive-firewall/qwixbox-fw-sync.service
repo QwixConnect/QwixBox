@@ -1,5 +1,5 @@
 [Unit]
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 Description=Sync registered SIP endpoints into the firewall
 After=kamailio.service postgresql.service
 

@@ -19,7 +19,7 @@ TLS_DIR="/etc/qwixbox/tls"
 ### valid root on a first run where the portal has not been built yet.
 if [ ! -d "$WEB_ROOT" ]; then
   install -d -m 0755 "$WEB_ROOT"
-  printf '<!doctype html><title>Qwixbox</title><p>Portal not built yet - run 43-portal-web.sh.\n' \
+  printf '<!doctype html><title>QwixBox</title><p>Portal not built yet - run 43-portal-web.sh.\n' \
     > "$WEB_ROOT/index.html"
 fi
 if [ ! -f "$TLS_DIR/fullchain.pem" ]; then

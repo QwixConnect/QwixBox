@@ -1,5 +1,5 @@
 <configuration name="logfile.conf" description="File Logging">
-  <!-- Managed by the Qwixbox installer.
+  <!-- Managed by the QwixBox installer.
 
        Default console logging is extremely chatty. Keep the file log at info and let
        50-logrotate handle retention. -->

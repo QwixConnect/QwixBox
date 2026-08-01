@@ -1,5 +1,5 @@
 /**
- * Qwixbox API.
+ * QwixBox API.
  *
  * Binds loopback only — nginx terminates TLS and proxies in (steps/42-nginx.sh).
  */

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 set -euo pipefail
 
 BACKUP_DIR="@BACKUP_DIR@"

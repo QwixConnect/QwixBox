@@ -113,7 +113,7 @@ gcloud compute ssh qwix-amd64-test --zone=us-east1-b
 On the instance:
 
 ```bash
-git clone https://github.com/QwixPBX/QwixPBX.git && cd QwixPBX
+git clone https://github.com/QwixConnect/QwixBox.git && cd QwixBox
 sudo ./install.sh
 ```
 

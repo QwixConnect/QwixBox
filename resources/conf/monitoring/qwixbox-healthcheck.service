@@ -1,6 +1,6 @@
 [Unit]
-# Managed by the Qwixbox installer.
-Description=Qwixbox health check
+# Managed by the QwixBox installer.
+Description=QwixBox health check
 
 [Service]
 Type=oneshot

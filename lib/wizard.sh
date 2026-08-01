@@ -67,7 +67,7 @@ _wizard_apply_detected() {
 _wizard_express() {
   local domain provider guess
 
-  tui_msg "This configures Qwixbox on this machine.
+  tui_msg "This configures QwixBox on this machine.
 
 It needs four things: your domain, the hostname phones will register against, your company name,
 and an email address. Everything else is detected and shown before anything is written.
@@ -96,7 +96,7 @@ supports it, the records can be created for you." \
   if provider="$(dc_provider_name "$domain" 2>/dev/null)" && [ -n "$provider" ]; then
     if tui_yesno "Your DNS is at ${provider}, which supports automatic setup.
 
-Qwixbox can create the records it needs - you approve once in your browser and never touch a DNS
+QwixBox can create the records it needs - you approve once in your browser and never touch a DNS
 dashboard. No password or API key is stored anywhere.
 
 Set DNS up automatically?" 14 74; then

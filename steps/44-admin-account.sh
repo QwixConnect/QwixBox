@@ -91,7 +91,7 @@ if [ "$ACCOUNT_EXISTED" -eq 0 ]; then
   CRED_FILE="$CONFIG_DIR/first-login"
   umask 077
   cat > "$CRED_FILE" <<EOF
-# Qwixbox first sign-in. Delete this file once you are in.
+# QwixBox first sign-in. Delete this file once you are in.
 url=https://${PBX_FQDN}/
 email=${ADMIN_EMAIL}
 password=${ADMIN_PASSWORD}

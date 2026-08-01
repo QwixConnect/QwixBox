@@ -1,4 +1,4 @@
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 /usr/local/freeswitch/log/*.log {
     daily
     rotate 30

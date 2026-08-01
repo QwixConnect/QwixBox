@@ -1,5 +1,5 @@
 <configuration name="event_socket.conf" description="Socket Client">
-  <!-- Managed by the Qwixbox installer.
+  <!-- Managed by the QwixBox installer.
 
        The stock config listens on "::". On a host without IPv6 that fails to bind outright, and
        where it does work it exposes the control socket far wider than intended. ESL is a full

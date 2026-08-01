@@ -26,7 +26,7 @@ deploy_template "$TPL/90-qwixbox.conf" /etc/redis/redis.conf.d/90-qwixbox.conf 0
 ### Debian's redis.conf does not include a conf.d directory by default.
 if ! grep -q "^include /etc/redis/redis.conf.d/" /etc/redis/redis.conf; then
   install -d -m 0750 -o redis -g redis /etc/redis/redis.conf.d
-  printf '\n# Added by the Qwixbox installer.\ninclude /etc/redis/redis.conf.d/*.conf\n' \
+  printf '\n# Added by the QwixBox installer.\ninclude /etc/redis/redis.conf.d/*.conf\n' \
     >> /etc/redis/redis.conf
   info "Enabled /etc/redis/redis.conf.d includes"
 fi

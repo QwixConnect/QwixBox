@@ -1,5 +1,5 @@
 <profile name="internal">
-  <!-- Managed by the Qwixbox installer. Fed by Kamailio over loopback.
+  <!-- Managed by the QwixBox installer. Fed by Kamailio over loopback.
 
        One internal profile bound to loopback. Authentication happens at Kamailio, so this
        profile trusts what reaches it (accept-blind-auth) but only accepts it from the trusted
@@ -10,7 +10,7 @@
     <param name="rtp-ip" value="$${local_ip_v4}"/>
     <param name="context" value="default"/>
     <param name="dialplan" value="XML"/>
-    <param name="user-agent-string" value="Qwixbox"/>
+    <param name="user-agent-string" value="QwixBox"/>
 
     <param name="apply-inbound-acl" value="trusted"/>
     <param name="auth-calls" value="false"/>

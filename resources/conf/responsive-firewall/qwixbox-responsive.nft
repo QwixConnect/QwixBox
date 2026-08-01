@@ -1,5 +1,5 @@
 #!/usr/sbin/nft -f
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 #
 # Populated at runtime by qwixbox-fw-sync from Kamailio's live registrations.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by the Qwixbox installer. Run by certbot after every successful renewal.
+# Managed by the QwixBox installer. Run by certbot after every successful renewal.
 set -euo pipefail
 FQDN="@PBX_FQDN@"
 SRC="/etc/letsencrypt/live/$FQDN"

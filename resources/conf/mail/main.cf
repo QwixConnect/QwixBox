@@ -1,4 +1,4 @@
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 #
 # Postfix here is a submission-only MTA: it accepts mail from local processes (FreeSWITCH's
 # switch_simple_email() and the API's fax delivery, both via /usr/sbin/sendmail) and sends it

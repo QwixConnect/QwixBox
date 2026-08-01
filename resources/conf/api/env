@@ -1,4 +1,4 @@
-# Managed by the Qwixbox installer. Regenerated on every deploy - do not hand-edit.
+# Managed by the QwixBox installer. Regenerated on every deploy - do not hand-edit.
 NODE_ENV=production
 PORT=@API_PORT@
 HOST=127.0.0.1

@@ -10,7 +10,7 @@
 # the README instead; this exists to save typing, not to hide anything.
 set -euo pipefail
 
-REPO="${QWIXBOX_REPO:-https://github.com/QwixPBX/qwixbox.git}"
+REPO="${QWIXBOX_REPO:-https://github.com/QwixConnect/QwixBox.git}"
 BRANCH="${QWIXBOX_BRANCH:-main}"
 DEST="${QWIXBOX_DEST:-/usr/src/qwixbox}"
 
@@ -23,15 +23,15 @@ die() { printf '\n  Error: %s\n\n' "$*" >&2; exit 1; }
 [ -r /etc/os-release ] || die "Cannot identify this system - /etc/os-release is missing."
 # shellcheck disable=SC1091
 . /etc/os-release
-[ "${ID:-}" = "debian" ] || die "Qwixbox installs on Debian 13. This is ${PRETTY_NAME:-unknown}."
+[ "${ID:-}" = "debian" ] || die "QwixBox installs on Debian 13. This is ${PRETTY_NAME:-unknown}."
 case "${VERSION_ID:-}" in
   13*) ;;
-  *) die "Qwixbox installs on Debian 13. This is ${PRETTY_NAME:-unknown}." ;;
+  *) die "QwixBox installs on Debian 13. This is ${PRETTY_NAME:-unknown}." ;;
 esac
 
 case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
   amd64|x86_64|arm64|aarch64) ;;
-  *) die "Unsupported architecture: $(uname -m). Qwixbox builds on amd64 and arm64." ;;
+  *) die "Unsupported architecture: $(uname -m). QwixBox builds on amd64 and arm64." ;;
 esac
 
 export DEBIAN_FRONTEND=noninteractive

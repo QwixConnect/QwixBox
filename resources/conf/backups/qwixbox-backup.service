@@ -1,6 +1,6 @@
 [Unit]
-# Managed by the Qwixbox installer.
-Description=Qwixbox backup
+# Managed by the QwixBox installer.
+Description=QwixBox backup
 After=postgresql.service
 
 [Service]

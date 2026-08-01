@@ -118,7 +118,7 @@ export const auth = betterAuth({
     async sendResetPassword({ user, url }) {
       const sent = await sendMail({
         to: user.email,
-        subject: "Reset your Qwixbox password",
+        subject: "Reset your QwixBox password",
         tag: "auth",
         text:
           `Someone asked to reset the password for ${user.email} on ${env.pbxFqdn}.\n\n` +

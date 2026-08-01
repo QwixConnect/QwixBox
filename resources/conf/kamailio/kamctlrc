@@ -1,4 +1,4 @@
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 SIP_DOMAIN=@PBX_SIP_DOMAIN@
 DBENGINE=PGSQL
 DBHOST=127.0.0.1

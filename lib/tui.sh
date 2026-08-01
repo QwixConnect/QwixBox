@@ -8,7 +8,7 @@
 
 # shellcheck shell=bash
 
-TUI_TITLE="Qwixbox installer"
+TUI_TITLE="QwixBox installer"
 
 ### False without a terminal or without whiptail, which is what keeps every automated run on the
 ### existing non-interactive path. Checked before each widget, never assumed.

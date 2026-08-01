@@ -1,6 +1,6 @@
 [Unit]
-# Managed by the Qwixbox installer.
-Description=Nightly Qwixbox backup
+# Managed by the QwixBox installer.
+Description=Nightly QwixBox backup
 
 [Timer]
 OnCalendar=*-*-* 03:20:00

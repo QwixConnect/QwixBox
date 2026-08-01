@@ -1,6 +1,6 @@
 [Unit]
-# Managed by the Qwixbox installer.
-Description=Qwixbox API
+# Managed by the QwixBox installer.
+Description=QwixBox API
 After=@api_after@
 Wants=network-online.target
 @api_requires@

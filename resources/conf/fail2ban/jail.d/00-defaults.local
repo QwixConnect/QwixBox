@@ -1,4 +1,4 @@
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 [DEFAULT]
 banaction = nftables-multiport
 banaction_allports = nftables-allports

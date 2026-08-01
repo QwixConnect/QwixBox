@@ -202,7 +202,7 @@ function AppLayout() {
     <AppShell header={{ height: 56 }} navbar={{ width: 220, breakpoint: "sm" }} padding="md">
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between">
-          <Title order={4}>Qwixbox</Title>
+          <Title order={4}>QwixBox</Title>
           <Group gap="sm">
             <HealthBadge />
             <AccountMenu />

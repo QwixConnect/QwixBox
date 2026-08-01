@@ -34,7 +34,7 @@ case "$ACME_CHALLENGE" in
     ### certbot refuses to use a credentials file that is group- or world-readable, and says so
     ### only in its own output - so the mode is set here rather than left to umask.
     write_file "$CF_CREDS" 0600 root:root <<EOF || true
-# Managed by the Qwixbox installer. Used by certbot's Cloudflare DNS plugin.
+# Managed by the QwixBox installer. Used by certbot's Cloudflare DNS plugin.
 dns_cloudflare_api_token = ${CLOUDFLARE_API_TOKEN}
 EOF
     chmod 0600 "$CF_CREDS"

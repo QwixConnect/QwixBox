@@ -1,6 +1,6 @@
 [Unit]
-# Managed by the Qwixbox installer.
-Description=Nightly Qwixbox maintenance
+# Managed by the QwixBox installer.
+Description=Nightly QwixBox maintenance
 
 [Timer]
 # After the backup, so anything pruned here is already captured.

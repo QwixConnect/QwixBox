@@ -216,5 +216,5 @@ else
 fi
 ok "DKIM signing for ${MAIL_DOMAIN} (selector ${DKIM_SELECTOR})"
 info "Test delivery with:"
-info "  printf 'To: you@example.com\\nSubject: Qwixbox test\\n\\nhello\\n' | /usr/sbin/sendmail -t"
+info "  printf 'To: you@example.com\\nSubject: QwixBox test\\n\\nhello\\n' | /usr/sbin/sendmail -t"
 info "Queue: mailq   Log: /var/log/postfix.log"

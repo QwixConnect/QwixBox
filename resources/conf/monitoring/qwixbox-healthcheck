@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 # Exit 0 = healthy, 1 = degraded. Suitable for a monitoring agent or cron alert.
 set -uo pipefail
 

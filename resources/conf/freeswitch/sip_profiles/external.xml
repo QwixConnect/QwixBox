@@ -1,5 +1,5 @@
 <profile name="external">
-  <!-- Managed by the Qwixbox installer. Outbound leg to Kamailio's egress listener.
+  <!-- Managed by the QwixBox installer. Outbound leg to Kamailio's egress listener.
 
        A SEPARATE profile from `internal` on purpose: it is one of the two independent signals
        (alongside KAM_EGRESS_PORT) that let Kamailio tell its ingress pass from its egress pass.
@@ -24,7 +24,7 @@
     <param name="rtp-ip" value="$${local_ip_v4}"/>
     <param name="context" value="egress"/>
     <param name="dialplan" value="XML"/>
-    <param name="user-agent-string" value="Qwixbox"/>
+    <param name="user-agent-string" value="QwixBox"/>
 
     <param name="auth-calls" value="false"/>
     <param name="apply-inbound-acl" value="trusted"/>

@@ -1,4 +1,4 @@
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 #
 # Debian's opendkim reads this on top of /etc/opendkim.conf. Leaving SOCKET set here would
 # override the Socket directive in opendkim.conf and put the socket back outside Postfix's

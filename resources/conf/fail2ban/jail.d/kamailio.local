@@ -1,4 +1,4 @@
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 [kamailio-auth]
 enabled  = true
 filter   = kamailio-auth

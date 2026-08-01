@@ -20,7 +20,7 @@ command -v bun >/dev/null || die "Bun is not installed - run 40-bun.sh first."
 ### FreeSWITCH's ESL; it has no reason to be able to log in.
 if ! id -u "$API_USER" >/dev/null 2>&1; then
   adduser --system --group --home "$API_DIR" --shell /usr/sbin/nologin \
-    --gecos "Qwixbox API" "$API_USER"
+    --gecos "QwixBox API" "$API_USER"
   info "Created service account: $API_USER"
 fi
 

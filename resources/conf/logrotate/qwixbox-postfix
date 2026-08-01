@@ -1,4 +1,4 @@
-# Managed by the Qwixbox installer.
+# Managed by the QwixBox installer.
 #
 # main.cf sets maillog_file, so Postfix writes this file itself through postlogd rather than
 # going via syslog. That is why there is no rsyslog rule for it and why the postfix user owns it.
