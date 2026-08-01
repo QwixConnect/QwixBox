@@ -2,7 +2,7 @@
 
 What is left before this can carry a paying customer's phone calls. Ordered by what blocks what.
 
-Last updated after the call-path work of 2026-07-31.
+Last updated 2026-08-01, after the portal, installer and password-reset work.
 
 ## What is proven
 
@@ -20,40 +20,39 @@ Verified by doing it, in a Debian 13 arm64 container, not by reading code:
 | **Outbound → carrier** | INVITE delivered to the carrier with the translated number |
 | Portal auth and isolation | anonymous `/` login page, app routes 404, `/api/*` 401, `viewer` refused writes |
 | Outbound mail | Postfix loopback-only, OpenDKIM signature confirmed on the sendmail path |
+| **Registration** | A real softphone completes digest auth against the projected HA1 |
+| First sign-in | The installer creates the account and tenant; password shown once, absent from every log |
+| Password reset | Emailed link validated end to end: reset works, old password refused, token single-use |
+| Portal surface | Extensions, trunks, routing, call flows, calls, faxes, users, audit, settings |
 
-## The two things that make everything above less than it sounds
+## The one thing that makes everything above less than it sounds
 
-**1. No call has ever carried audio.** Every test captured SIP *signalling* with `netcat`. The
-media path — rtpengine relaying RTP, codec negotiation, who hears whom — has never run.
-`rtpengine_manage()` is wired into the Kamailio config and rtpengine answers on its control
-socket, but "the INVITE arrived" and "the two parties can hear each other" are different claims
-and only the first has been made.
+**No call has been confirmed to carry audio.** Every call test so far has read SIP *signalling*.
+The media path — rtpengine relaying RTP, codec negotiation, who actually hears whom — has not
+been verified end to end. `rtpengine_manage()` is wired into the Kamailio config and rtpengine
+answers on its control socket, but "the INVITE arrived" and "the two parties can hear each other"
+are different claims and only the first has been made.
 
-**2. No phone has ever actually registered.** Registrations were injected with
-`kamctl ul add`. A real `REGISTER` with digest authentication was never completed end to end —
-Kamailio was observed challenging correctly with `401 WWW-Authenticate`, and the test client
-never finished the handshake. So the HA1 projection is proven to *exist* in the `subscriber`
-table but not proven to *authenticate anyone*.
+Everything that depends on audio is therefore unproven: voicemail recording and delivery, IVR
+DTMF selection, fax. Close this before anything else on the list.
 
-Both are cheap to close and everything else is guesswork until they are. Do them first.
+~~No phone has ever actually registered.~~ **Closed.** A real softphone now completes digest
+authentication against the HA1 projection, so that projection is proven to authenticate somebody
+rather than merely to exist.
 
 ## Blockers
 
 Step-by-step instructions for items 1 and 6 are in
 **[testing-on-real-hardware.md](testing-on-real-hardware.md)**.
 
-### 1. Register a real softphone and make a real call
+### 1. Confirm two-way audio
 
-Point a softphone (Zoiper, Linphone, a desk phone) at the server, register extension 1001,
-register 1002, and call between them. Confirm two-way audio.
+Registration is done. What remains is the media path: register two extensions, call between them,
+and confirm both parties hear each other. Then repeat over the internet rather than a LAN — the
+NAT and `advertise` handling in the Kamailio config has not been exercised by a remote endpoint.
 
-This single test closes both unknowns above and exercises the whole stack the way a customer
-will: digest auth against the HA1 projection, NAT handling, rtpengine media relay, codec
-negotiation. Nothing else on this list is worth doing before it passes, because a failure here
-invalidates the assumptions the rest rests on.
-
-Then repeat over the internet rather than loopback — the NAT and `advertise` handling in the
-Kamailio config has never seen a real remote endpoint.
+Nothing else on this list is worth doing before this passes. Voicemail recording, IVR DTMF and
+fax all sit behind it, and a failure here invalidates the assumptions the rest rests on.
 
 ### ~~2. Verify the call features that already have code~~ — done, and four bugs fixed
 
@@ -77,8 +76,7 @@ calls. Getting there required fixing four things that had never worked:
 
 Still open here: **voicemail has been reached and answered but no message has been recorded or
 delivered**, and IVR **DTMF selection** is untested — both need real audio, so they fold into
-item 1. The unregistered-callee fallback also still needs a real inbound leg; Kamailio returns
-`480` as designed, but the loopback harness tears the caller down before the treatment runs.
+item 1.
 
 ### ~~3. A second user per tenant~~ — done
 
@@ -119,17 +117,24 @@ new Kamailio routing have never been built or run on x86_64.
 
 Not blockers for a working phone system, but they will be asked for immediately.
 
-- **Portal coverage.** There are pages for extensions, trunks, routing, call flows and calls.
-  There is no page for voicemail, faxes, or users — despite the APIs existing for the first two.
-- **Restore-from-portal / self-service password reset.** Every account operation is a CLI run on
-  the server today.
+- ~~**Portal coverage.**~~ Done. Faxes, users and audit now have pages, alongside extensions,
+  trunks, routing, call flows, calls and settings. Still no voicemail page — there is no voicemail
+  API either, and no message has been recorded to put in one.
+- ~~**Self-service password reset.**~~ Done. better-auth's flow is wired to the local MTA and
+  verified end to end. Account creation is also no longer a CLI-only path: the installer creates
+  the first account and tenant, and the Users page adds the rest.
+- **A voicemail API and page.** The one portal gap left, and it is blocked on item 1 rather than
+  on effort — there is nothing to list until a message can be recorded.
 - **STIR/SHAKEN.** Required for US and Canadian PSTN origination. `33-stir-shaken.sh` currently
   fails to build `libstirshaken` on Debian 13 (deprecated OpenSSL API under `-Werror`). It is off
   by default so it does not block an install, but "we can turn it on" is not true right now.
   Note `trunk.carrierSigns` exists for the case where the carrier signs on your behalf, which is
   the realistic path for a small operator and avoids the STI-CA procurement entirely.
-- **Cloudflare DNS.** The integration is unit-tested against stubs (9/9) and has never spoken to
-  the real API. One manual run against a real zone.
+- **DNS automation against a real provider.** Domain Connect discovery is verified against live
+  records (IONOS answers; a domain without the record falls through in about a second), but no
+  template has been onboarded with a DNS provider yet, so the approval flow has never completed.
+  Onboarding is a per-provider agreement, not code. The Cloudflare token path is unit-tested
+  against stubs and has never spoken to the real API.
 - **Monitoring that reaches a human.** `52-monitoring.sh` installs `prometheus-node-exporter` and
   a healthcheck timer; nothing consumes the metrics and nothing pages anyone.
 

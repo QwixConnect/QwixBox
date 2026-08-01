@@ -7,6 +7,8 @@ checked against the code rather than copied.
 
 For what blocks a shippable product, see **[mvp.md](mvp.md)** — this file is the long view.
 
+Re-checked against the code on 2026-08-01.
+
 ## Status key
 
 | Mark | Meaning |
@@ -21,26 +23,30 @@ The distinction between **Working** and **Untested** is the one that matters. Fo
 2026-07-31 were all code that read as correct and did nothing, and static review caught none of
 them. "Deployed" is not evidence.
 
+**Everything marked Working is proven at the signalling layer.** Two-way audio has not been
+confirmed on any call, so voicemail recording, IVR DTMF and fax remain unproven regardless of how
+complete their code looks. [mvp.md](mvp.md) item 1 is that test.
+
 ## Where the product is
 
 | # | Area | Status | Notes |
 |---|---|---|---|
 | 1 | Multi-tenancy & administration | **Working** | Tenant = better-auth organization; `requireTenant` refuses an unscoped request |
-| 2 | User management & authentication | **Working** | better-auth, RBAC via `createAccessControl`, no self-service registration by design. Multiple users per tenant via `add-tenant-user.ts`, with the role enforced (a viewer is refused writes) |
+| 2 | User management & authentication | **Working** | better-auth, RBAC via `createAccessControl`, no self-service registration by design. Users page in the portal, roles enforced server-side per request, password reset by email verified end to end. The installer creates the first account and tenant |
 | 3 | Extension & device management | **Partial** | Extensions work; one credential set per extension. Multi-device in [backlog](design/backlog.md) |
-| 4 | Dialplan & call routing | **Working** | Extension-to-extension, inbound DID and outbound-to-carrier all verified by placing calls |
+| 4 | Dialplan & call routing | **Working** | Extension-to-extension, inbound DID and outbound-to-carrier all verified by placing calls. Signalling only — see the media note below |
 | 5 | Call features | **Working** | Ring groups (simultaneous fan-out + failover), time conditions and the forwarding/DND feature codes all verified by placing calls. No MoH management or parking |
 | 6 | Voicemail | **Partial** | Reached and answered (`*97`, ring-group failover) with prompts loading; no message has been left or delivered to email, and that needs real audio |
 | 7 | IVR | **Partial** | A call traverses the menu and the timeout destination is honoured; DTMF selection needs a real endpoint |
 | 8 | Conference rooms | **Not started** | [backlog](design/backlog.md) |
 | 9 | Call centre / contact centre | **Schema only** | A bare `queue` table. The big one — [design](design/call-centre.md) |
-| 10 | CDR & reporting | **Partial** | CDR ingest wired; no call has produced one yet, and no reporting beyond a call list |
+| 10 | CDR & reporting | **Partial** | CDR ingest wired; call list with filters, aggregate summary and CSV export in the portal. No reporting beyond that |
 | 11 | Real-time monitoring | **Not started** | ESL client exists (`services/esl.ts`); no wallboard |
 | 12 | Trunks & providers | **Working** | Encrypted credentials, Kamailio projection, and outbound delivery to a carrier verified |
 | 13 | Contacts & directory | **Not started** | [backlog](design/backlog.md); `mod_cidlookup` is built and unused |
-| 14 | WebRTC & softphone | **Untested** | WSS listens and rtpengine is in the media path in config; no browser client has connected |
-| 15 | System administration | **Partial** | Installer, wizard, health checks and log rotation work. Backups run and **have never been restored** |
-| 16 | Integration & APIs | **Partial** | The REST API is the integration surface; no webhooks |
+| 14 | WebRTC & softphone | **Untested** | WSS listens and rtpengine is in the media path in config; no browser client has connected. A native softphone does register |
+| 15 | System administration | **Partial** | Installer, four-question wizard, one-line bootstrap, health checks and log rotation work. DNS records created automatically via Domain Connect or a Cloudflare token. Backups run and **have never been restored** |
+| 16 | Integration & APIs | **Partial** | The REST API is the integration surface and the portal is a client of it. Audit trail readable via `/api/audit`. No webhooks |
 | 17 | Billing & invoicing | **Not started** | v1 marked this complete; it was not — [design](design/billing.md) |
 | 18 | Call transcription & AI | **Not started** | Premium in v1's plan |
 | 19 | AI digital receptionist | **Not started** | See below |
@@ -66,8 +72,9 @@ before there is a product to sell would be the wrong order.
 **4 — Call routing.** All three paths were broken and are now fixed and verified: outbound died
 in Kamailio's empty `dr_*` tables (and again in `mod_hiredis` corrupting the route pattern), while
 extension-to-extension and inbound DID both died because FreeSWITCH held no registrations —
-endpoints register to Kamailio. See `CLAUDE.md` for the mechanics. **Media has still never been
-tested**, only signalling; [mvp.md](mvp.md) covers what that leaves open.
+endpoints register to Kamailio. See `CLAUDE.md` for the mechanics. Registration is now proven on
+real hardware, but **media has still never been tested** — only signalling; [mvp.md](mvp.md)
+covers what that leaves open.
 
 **9 — Call centre.** The largest single gap and the best-documented part of v1. The architecture is
 settled: `mod_callcenter` runs the queue, we own configuration and history. See

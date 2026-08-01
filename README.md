@@ -1,8 +1,74 @@
-# qwixbox
+# QwixBox
 
-Builds a production VoIP PBX on a fresh Debian 13 server: Kamailio as the public SIP edge,
-FreeSWITCH as the media/PBX core behind it, rtpengine for media relay, PostgreSQL and Redis
-for state, and a Bun/Hono API.
+An open-source, multi-tenant VoIP PBX that installs onto a bare Debian 13 server with one
+command. Same job as FreePBX, FusionPBX and FSPBX — extensions, trunks, IVRs, ring groups,
+voicemail, call detail records — built on a different set of choices.
+
+**What is different**
+
+- **Two engines, not one.** Kamailio owns the public SIP ports and does registration, digest
+  auth and flood control; FreeSWITCH sits behind it on loopback and never faces the internet.
+  Most alternatives expose a single engine that does both jobs. Splitting them is why an
+  unauthenticated scanner reaching port 5060 cannot reach the media core at all.
+- **Multi-tenant by construction, not by convention.** A tenant is an organization, and the API
+  refuses to run a query that is not scoped to one — an unscoped query is a data breach, so it
+  is an error rather than a default.
+- **A modern stack.** TypeScript on Bun for the API, React for the portal, PostgreSQL and Redis
+  for state. FreePBX and FusionPBX are PHP; this is not a criticism of them, it is the reason
+  the two codebases feel different to extend.
+- **API-first.** The portal is a client of the same REST API you get. There is no admin action
+  that only exists as a form.
+- **The installer is part of the product.** 28 idempotent steps, a four-question wizard, and a
+  re-run that is quiet instead of destructive. Not a tarball and a wiki page.
+
+**Stack:** Kamailio (SIP edge) → FreeSWITCH (media/PBX core) → rtpengine (media relay),
+PostgreSQL, Redis, nginx, Postfix/OpenDKIM, and a Bun/Hono API with a React portal.
+
+## Status
+
+Honest, because the alternative wastes your afternoon:
+
+| | |
+|---|---|
+| **Installs and configures** | Proven. 28 steps from bare Debian, idempotent, 38 postflight checks |
+| **Registration** | Proven on real hardware. A softphone completes digest auth against the projected HA1 |
+| **Call setup** | Proven. Extension-to-extension, inbound DID and outbound-to-carrier all deliver the INVITE |
+| **Two-way audio** | **Not yet confirmed.** rtpengine is wired and answers on its control socket; no call has been listened to end to end |
+| **Portal** | Working. Extensions, trunks, routing, call flows, calls, faxes, users, audit, settings |
+| **Voicemail, fax, IVR DTMF** | Written and deployed; each needs the media path before it can be called done |
+
+Not ready to carry a paying customer's calls yet — [docs/mvp.md](docs/mvp.md) is the list of what
+stands between here and there, and [docs/roadmap.md](docs/roadmap.md) marks all 27 product areas
+against the code rather than against intent.
+
+## What it does
+
+**Telephony** — extensions with encrypted SIP credentials, SIP trunks (IP or registration auth),
+inbound DID routing, outbound routing with regex patterns and digit manipulation, ring groups
+(simultaneous or sequential, with failover), IVR menus, time conditions for business hours and
+holidays, and per-user call handling: DND, call forwarding (all / busy / no answer), call waiting
+and ring timeout.
+
+**Feature codes** — `*97`/`*98` voicemail, `*78`/`*79` DND, `*72`/`*73` forward-all,
+`*90`/`*91` on busy, `*92`/`*93` on no answer. Matched before the directory so a tenant cannot
+shadow one, and always attributed to the authenticated registration rather than the `From:`
+header.
+
+**Portal** — extensions, trunks, routing, call flows, call history with CSV export, faxes, users
+and roles, an audit trail, and tenant settings. Four roles (`owner`, `admin`, `member`, `viewer`)
+enforced server-side on every request, with the role re-read from the membership row rather than
+trusted from the session.
+
+**Platform** — multi-tenant with SIP-domain isolation, per-tenant concurrent-call limits, TLS
+throughout (SIP TLS, WSS, HTTPS) with automatic Let's Encrypt, nftables and fail2ban, a
+responsive SIP firewall that tightens on sources that have never registered, DKIM-signed outbound
+mail, scheduled backups, and DNS records created for you — automatically at GoDaddy, IONOS,
+Cloudflare and six other providers via [Domain Connect](https://www.domainconnect.org/), or with
+a Cloudflare API token.
+
+**Deliberately absent** — no self-service registration (a portal account administers telephony,
+so a compromise is toll fraud on someone else's bill) and no default credential (the installer
+generates one and shows it once).
 
 ## Layout
 
@@ -41,8 +107,9 @@ sudo ./install.sh
 ```
 
 Either way the first run opens a setup wizard on a terminal, so there is nothing to edit by hand.
-It asks three things — your domain, the hostname phones will register against, and an email
-address for the certificate — and shows everything else it detected before writing anything.
+It asks four things — your domain, the hostname phones will register against, your company name,
+and an email address — and shows everything else it detected before writing anything. When it
+finishes you have a portal account and a password to sign in with; there is no default login.
 `sudo ./install.sh --menu` gives the same wizard plus per-step re-runs, status and logs.
 
 Without a terminal — CI, `nohup`, a provisioning script — nothing prompts. The first run writes
@@ -590,11 +657,10 @@ The JavaScript bundle under `/assets/` stays public — the login page is served
 route names are readable by anyone; the gate stops the console being *usable* or indexable, it
 does not make the feature list secret.
 
-Sessions last 8 hours. **There is no password reset yet** — no reset email is configured, so a
-forgotten password means deleting the account and recreating it, which also drops its tenant
-membership and needs the `member` row from
-[step 8](#8-roles-and-adding-more-people) putting back (or `provision-tenant.ts` re-run, if they
-were the owner). Worth knowing before you hand out an account.
+Sessions last 8 hours. **Forgot your password?** is on the login page and emails a link that
+expires in an hour and works once. It needs a working MTA, which `15-mail.sh` installs — without
+one the request still answers "check your email" (deliberately, so the reply cannot be used to
+discover which addresses exist) and the API log records that the send failed.
 
 ## Feature codes
 
