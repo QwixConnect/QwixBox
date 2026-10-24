@@ -1,9 +1,11 @@
+import { diallable, validatePcre } from "../lib/dialplan-safe";
+import { isIP } from "node:net";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { db } from "../db";
 import {
   extension,
-  queue,
   inboundRoute,
   ivrMenu,
   ivrOption,
@@ -53,14 +55,24 @@ async function badDestination(
     return null;
   }
 
-  if (
-    effectiveType === "external" ||
-    effectiveType === "hangup" ||
-    effectiveType === "voicemail" ||
-    effectiveType === "fax"
-  ) {
-    return null;
+  if (effectiveType === "queue") return "Queues are not implemented";
+  if (effectiveType === "external")
+    return diallable(effectiveId)
+      ? null
+      : "External destination must be diallable digits";
+  if (effectiveType === "voicemail") {
+    // Existing contract is a mailbox NUMBER, never an extension UUID.
+    return (await tenantOwns(
+      extension,
+      extension.organizationId,
+      extension.number,
+      effectiveId,
+      organizationId,
+    ))
+      ? null
+      : "Mailbox number does not belong to this tenant";
   }
+  if (effectiveType === "hangup" || effectiveType === "fax") return null;
   if (effectiveId === undefined || effectiveId === null || effectiveId === "") {
     return `destinationId is required when destinationType is ${String(effectiveType)}`;
   }
@@ -102,14 +114,6 @@ async function badDestination(
           id_,
           organizationId,
         );
-      case "queue":
-        return tenantOwns(
-          queue,
-          queue.organizationId,
-          queue.id,
-          id_,
-          organizationId,
-        );
       default:
         return false;
     }
@@ -141,19 +145,36 @@ export const trunks = crudRoutes({
     "enabled",
   ],
   present: ({ passwordEnc: _p, ...rest }) => rest,
-  validate: async (body) => {
-    if (body.authMode === "register" && !body.username) {
+  validate: async (body, _organizationId, existing) => {
+    const merged = { ...existing, ...body };
+    if (merged.authMode === "register" && merged.enabled !== false)
+      return "Carrier registration is not implemented. Use IP authentication, or disable this trunk.";
+    if ((merged.authMode ?? "ip") === "ip" && !isIP(String(merged.host)))
+      return "IP authentication requires an IP literal";
+    if (merged.authMode === "register" && !merged.username) {
       return "username is required when authMode is register";
     }
     return null;
   },
+  beforeDelete: async (organizationId, row) => {
+    const routes = await db.query.outboundRoute.findMany({
+      where: and(
+        eq(outboundRoute.organizationId, organizationId),
+        eq(outboundRoute.trunkId, String(row.id)),
+      ),
+    });
+    return routes.length
+      ? `Trunk is used by routes: ${routes.map((r) => r.name).join(", ")}`
+      : null;
+  },
   afterChange: async (organizationId, row, action) => {
     if (action === "delete") {
       await removeTrunkAddress(row.id as string);
-    } else if (row.authMode === "ip") {
+    } else {
       await syncTrunkAddress(row as never);
     }
-    await reloadKamailio();
+    if (!(await reloadKamailio()))
+      throw new Error("Kamailio reload failed; retry reconciliation");
     await cacheRouteTable(organizationId);
   },
 });
@@ -203,14 +224,23 @@ export const inboundRoutes = crudRoutes({
     "priority",
     "enabled",
   ],
-  validate: async (body, organizationId, existing) =>
-    badDestination(
+  validate: async (body, organizationId, existing) => {
+    const did = body.didPattern ?? existing?.didPattern;
+    if (typeof did === "string") {
+      const owned = await db.query.inboundRoute.findFirst({
+        where: eq(inboundRoute.didPattern, did),
+      });
+      if (owned && owned.id !== existing?.id)
+        throw new HTTPException(409, { message: "DID is already assigned" });
+    }
+    return badDestination(
       body.destinationType,
       body.destinationId,
       organizationId,
       existing?.destinationType,
       existing?.destinationId,
-    ),
+    );
+  },
   afterChange: async (organizationId) => {
     await cacheInboundRoutes(organizationId);
   },
@@ -226,6 +256,7 @@ export const outboundRoutes = crudRoutes({
   writable: [
     "name",
     "pattern",
+    "patternSyntax",
     "trunkId",
     "stripDigits",
     "prependDigits",
@@ -245,13 +276,12 @@ export const outboundRoutes = crudRoutes({
       );
       if (!owned) return "trunkId does not belong to this tenant";
     }
-    if (typeof body.pattern === "string") {
-      try {
-        new RegExp(body.pattern);
-      } catch {
-        return `pattern is not a valid regular expression: ${body.pattern}`;
-      }
-    }
+    const pattern = body.pattern ?? existing?.pattern;
+    const problem = await validatePcre(pattern);
+    if (problem) return problem;
+    if (existing?.patternSyntax !== "pcre" && body.pattern === undefined)
+      return "Legacy route requires an explicitly reviewed PCRE pattern";
+    body.patternSyntax = "pcre";
     const effectiveTrunk =
       body.trunkId !== undefined ? body.trunkId : existing?.trunkId;
     const effectiveEmergency =
@@ -474,6 +504,8 @@ ivrOptions.put("/:id/options/:digit", async (c) => {
     );
   if (!menu) return c.json({ error: "Not found" }, 404);
 
+  if (!/^[0-9*#]$/.test(c.req.param("digit")))
+    return c.json({ error: "Invalid IVR digit" }, 400);
   const body = await c.req.json<{
     destinationType?: string;
     destinationId?: string;

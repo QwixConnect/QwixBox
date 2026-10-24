@@ -65,6 +65,8 @@ function Dashboard() {
     );
   }
 
+  if (extensions.error) return <Alert color="red" title="Could not load extensions">{extensions.error.message}</Alert>;
+
   const rows = extensions.data ?? [];
   const enabled = rows.filter((e) => e.enabled).length;
 

@@ -1,4 +1,5 @@
 import pg from "pg";
+import { isIP } from "node:net";
 import { env } from "../env";
 import { computeHa1, computeHa1b } from "../lib/crypto";
 import type {
@@ -36,8 +37,12 @@ export async function syncSubscriber(
     console.warn(
       "[kamailio-sync] KAMAILIO_DATABASE_URL not set — subscriber not projected",
     );
-    return false;
+    throw new Error(
+      "KAMAILIO_DATABASE_URL is required for subscriber projection",
+    );
   }
+
+  if (!ext.enabled) return removeSubscriber(ext.number, sipDomain);
 
   const ha1 = computeHa1(ext.number, sipDomain, plaintextPassword);
   const ha1b = computeHa1b(ext.number, sipDomain, plaintextPassword);
@@ -56,7 +61,7 @@ export async function syncSubscriber(
       `[kamailio-sync] subscriber ${ext.number}@${sipDomain}:`,
       (err as Error).message,
     );
-    return false;
+    throw err;
   }
 }
 
@@ -65,7 +70,7 @@ export async function removeSubscriber(
   sipDomain: string,
 ): Promise<boolean> {
   const p = getPool();
-  if (!p) return false;
+  if (!p) throw new Error("KAMAILIO_DATABASE_URL is required for projection");
   try {
     await p.query(
       `DELETE FROM subscriber WHERE username = $1 AND domain = $2`,
@@ -81,13 +86,13 @@ export async function removeSubscriber(
       `[kamailio-sync] remove ${username}@${sipDomain}:`,
       (err as Error).message,
     );
-    return false;
+    throw err;
   }
 }
 
 export async function syncDomain(sipDomain: string): Promise<boolean> {
   const p = getPool();
-  if (!p) return false;
+  if (!p) throw new Error("KAMAILIO_DATABASE_URL is required for projection");
   try {
     await p.query(
       `INSERT INTO domain (domain, did) VALUES ($1, $1) ON CONFLICT (domain) DO NOTHING`,
@@ -99,33 +104,43 @@ export async function syncDomain(sipDomain: string): Promise<boolean> {
       `[kamailio-sync] domain ${sipDomain}:`,
       (err as Error).message,
     );
-    return false;
+    throw err;
   }
 }
 
 export async function syncTrunkAddress(trunk: TrunkRow): Promise<boolean> {
   const p = getPool();
-  if (!p || trunk.authMode !== "ip") return false;
+  if (!p)
+    throw new Error("KAMAILIO_DATABASE_URL is required for trunk projection");
+  const client = await p.connect();
   try {
-    await p.query(
-      `INSERT INTO address (grp, ip_addr, mask, port, tag)
-       VALUES (1, $1, 32, $2, $3)
-       ON CONFLICT DO NOTHING`,
-      [trunk.host, trunk.port, trunk.id],
-    );
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      trunk.id,
+    ]);
+    await client.query("DELETE FROM address WHERE tag = $1", [trunk.id]);
+    if (trunk.enabled && trunk.authMode === "ip") {
+      const version = isIP(trunk.host);
+      if (!version)
+        throw new Error("IP-authenticated trunks require an IP literal");
+      await client.query(
+        "INSERT INTO address (grp, ip_addr, mask, port, tag) VALUES (1, $1, $2, $3, $4)",
+        [trunk.host, version === 6 ? 128 : 32, trunk.port, trunk.id],
+      );
+    }
+    await client.query("COMMIT");
     return true;
   } catch (err) {
-    console.error(
-      `[kamailio-sync] trunk address ${trunk.host}:`,
-      (err as Error).message,
-    );
-    return false;
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
   }
 }
 
 export async function removeTrunkAddress(trunkId: string): Promise<boolean> {
   const p = getPool();
-  if (!p) return false;
+  if (!p) throw new Error("KAMAILIO_DATABASE_URL is required for projection");
   try {
     await p.query(`DELETE FROM address WHERE tag = $1`, [trunkId]);
     return true;
@@ -134,7 +149,7 @@ export async function removeTrunkAddress(trunkId: string): Promise<boolean> {
       `[kamailio-sync] remove trunk address:`,
       (err as Error).message,
     );
-    return false;
+    throw err;
   }
 }
 

@@ -183,11 +183,15 @@ function AppLayout() {
       <AppShell.Main>
         {/* Held until the organization question is settled, so pages do not mount and fire a
             wave of 403s against a session that is one request away from being scoped. */}
-        {org.isSuccess && org.data === false ? (
+        {org.isError ? (
+          <Alert color="red" title="Could not select an organization">
+            <Stack><Text>{org.error.message}</Text><Button onClick={() => void org.refetch()}>Retry</Button></Stack>
+          </Alert>
+        ) : org.isSuccess && org.data === false ? (
           <NoTenant email={session?.user.email ?? ""} />
         ) : org.isSuccess ? (
           <Outlet />
-        ) : null}
+        ) : <Text>Loading organization…</Text>}
       </AppShell.Main>
     </AppShell>
   );

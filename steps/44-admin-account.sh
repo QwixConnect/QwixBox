@@ -33,7 +33,7 @@ ADMIN_NAME="${ADMIN_NAME:-${ADMIN_EMAIL%%@*}}"
 # does not find one, so a probe would make the account it was asking about.
 ACCOUNT_EXISTED=0
 if ! CREATE_OUT="$(bun_as "$API_USER" "$API_DIR" \
-      "bun run src/cli/create-user.ts --email '$ADMIN_EMAIL' --name '$ADMIN_NAME' --password '$ADMIN_PASSWORD'" 2>&1)"; then
+      bun run src/cli/create-user.ts --email "$ADMIN_EMAIL" --name "$ADMIN_NAME" --password "$ADMIN_PASSWORD" 2>&1)"; then
   if printf '%s' "$CREATE_OUT" | grep -q "already exists"; then
     ACCOUNT_EXISTED=1
     ok "Portal account $ADMIN_EMAIL already exists - leaving its password alone."
@@ -44,11 +44,6 @@ if ! CREATE_OUT="$(bun_as "$API_USER" "$API_DIR" \
 else
   ok "Created portal account $ADMIN_EMAIL"
 fi
-
-bun_as "$API_USER" "$API_DIR" \
-  "bun run src/cli/provision-tenant.ts --name '$TENANT_NAME' --slug '$TENANT_SLUG' --domain '$PBX_SIP_DOMAIN' --owner '$ADMIN_EMAIL'" \
-  >/dev/null || die "Could not provision tenant '$TENANT_NAME' for $ADMIN_EMAIL."
-ok "Tenant '$TENANT_NAME' ($TENANT_SLUG) on $PBX_SIP_DOMAIN"
 
 if [ "$ACCOUNT_EXISTED" -eq 0 ]; then
   CRED_FILE="$CONFIG_DIR/first-login"
@@ -65,5 +60,11 @@ EOF
 
   printf '%s\n' "$BANNER" >&3 2>/dev/null || printf '%s\n' "$BANNER"
 fi
+
+bun_as "$API_USER" "$API_DIR" \
+  bun run src/cli/provision-tenant.ts --name "$TENANT_NAME" --slug "$TENANT_SLUG" --domain "$PBX_SIP_DOMAIN" --owner "$ADMIN_EMAIL" \
+  >/dev/null || die "Could not provision tenant '$TENANT_NAME' for $ADMIN_EMAIL."
+ok "Tenant '$TENANT_NAME' ($TENANT_SLUG) on $PBX_SIP_DOMAIN"
+
 
 ok "Portal account ready"

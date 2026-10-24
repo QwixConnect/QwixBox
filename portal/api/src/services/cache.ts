@@ -1,3 +1,4 @@
+import { callState, destinationNumber } from "./call-state";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import {
@@ -16,7 +17,7 @@ import { decrypt } from "../lib/crypto";
 import { esl } from "./esl";
 import { keys, safeDel, safeDelPattern, safeSet } from "./redis";
 
-function renderDirectoryUser(
+export function renderDirectoryUser(
   ext: typeof extension.$inferSelect,
   tenant: typeof tenantSettings.$inferSelect,
   password: string,
@@ -39,7 +40,7 @@ function renderDirectoryUser(
     <param name="vm-mailto" value="${escapeXml(ext.voicemailEmail)}"/>`
     : "";
 
-  return `<user id="${ext.number}" cacheable="${cacheMs}">
+  return `<user id="${escapeXml(ext.number)}" cacheable="${cacheMs}">
   <params>
     <param name="password" value="${escapeXml(password)}"/>
     <param name="vm-enabled" value="${ext.voicemailEnabled ? "true" : "false"}"/>
@@ -47,16 +48,16 @@ function renderDirectoryUser(
     ${vmEmail}
   </params>
   <variables>
-    <variable name="organization_id" value="${ext.organizationId}"/>
-    <variable name="user_context" value="tenant_${tenant.organizationId}"/>
+    <variable name="organization_id" value="${escapeXml(ext.organizationId)}"/>
+    <variable name="user_context" value="tenant_${escapeXml(tenant.organizationId)}"/>
     <variable name="effective_caller_id_name" value="${escapeXml(callerName)}"/>
     <variable name="effective_caller_id_number" value="${escapeXml(callerNumber)}"/>
     <variable name="outbound_caller_id_name" value="${escapeXml(callerName)}"/>
     <variable name="outbound_caller_id_number" value="${escapeXml(callerNumber)}"/>
     <variable name="absolute_codec_string" value="${escapeXml(codecs)}"/>
     <variable name="max_concurrent" value="${ext.maxConcurrentCalls ?? tenant.maxConcurrentCalls}"/>
-    <variable name="sip_h_X-Tenant-ID" value="${ext.organizationId}"/>
-    <variable name="sip_h_X-Auth-User" value="${ext.number}"/>
+    <variable name="sip_h_X-Tenant-ID" value="${escapeXml(ext.organizationId)}"/>
+    <variable name="sip_h_X-Auth-User" value="${escapeXml(ext.number)}"/>
   </variables>
 </user>`;
 }
@@ -123,6 +124,7 @@ export async function invalidateExtension(
 export type CachedRoute = {
   id: string;
   pattern: string;
+  patternSyntax: string;
   priority: number;
   isEmergency: boolean;
   stripDigits: number;
@@ -157,10 +159,23 @@ export async function cacheRouteTable(organizationId: string): Promise<void> {
       ),
     );
 
+  const legacy = rows.filter(({ route }) => route.patternSyntax !== "pcre");
+  if (legacy.length)
+    console.warn(
+      `[cache] quarantined ${legacy.length} legacy outbound route(s) for tenant ${organizationId}; explicit PCRE review required`,
+    );
   const routes: CachedRoute[] = rows
+    .filter(({ route }) => route.patternSyntax === "pcre")
+    .filter(
+      ({ trunkRow }) =>
+        trunkRow?.enabled &&
+        trunkRow.authMode === "ip" &&
+        trunkRow.organizationId === organizationId,
+    )
     .map(({ route, trunkRow }) => ({
       id: route.id,
       pattern: route.pattern,
+      patternSyntax: route.patternSyntax,
       priority: route.priority,
       isEmergency: route.isEmergency,
       stripDigits: route.stripDigits,
@@ -199,13 +214,15 @@ export async function cacheInboundRoutes(
     ),
   });
 
+  await safeDelPattern(`qwixbox:did:${tenant.sipDomain}:*`);
   await Promise.all(
     rows.map(async (r) =>
       safeSet(
         keys.did(tenant.sipDomain, r.didPattern),
         JSON.stringify({
           destinationType: r.destinationType,
-          destinationId: await resolveDestinationId(
+          destinationId: await destinationNumber(
+            organizationId,
             r.destinationType,
             r.destinationId,
           ),
@@ -233,24 +250,11 @@ export async function cacheTenantSettings(
       egressMode: tenant.egressMode,
       maxConcurrentCalls: tenant.maxConcurrentCalls,
       recordingPolicy: tenant.recordingPolicy,
+      stirShakenEnabled: tenant.stirShakenEnabled,
       timezone: tenant.timezone,
       enabled: tenant.enabled,
     }),
   );
-}
-
-async function resolveDestinationId(
-  type: string | null,
-  id: string | null,
-): Promise<string | null> {
-  if (type !== "extension" || !id) return id;
-
-  const target = await db.query.extension.findFirst({
-    where: eq(extension.id, id),
-  });
-  if (target) return target.number;
-
-  return id;
 }
 
 export async function cacheRingGroups(organizationId: string): Promise<void> {
@@ -267,35 +271,9 @@ export async function cacheRingGroups(organizationId: string): Promise<void> {
   });
 
   for (const group of groups) {
-    const members = await db
-      .select({
-        number: extension.number,
-        position: ringGroupMember.position,
-        delaySec: ringGroupMember.delaySec,
-        enabled: extension.enabled,
-      })
-      .from(ringGroupMember)
-      .innerJoin(extension, eq(ringGroupMember.extensionId, extension.id))
-      .where(eq(ringGroupMember.ringGroupId, group.id));
-
     await safeSet(
       keys.ringGroup(tenant.sipDomain, group.id),
-      JSON.stringify({
-        id: group.id,
-        number: group.number,
-        name: group.name,
-        strategy: group.strategy,
-        ringTimeoutSec: group.ringTimeoutSec,
-        failoverType: group.failoverType,
-        failoverId: await resolveDestinationId(
-          group.failoverType,
-          group.failoverId,
-        ),
-        members: members
-          .filter((m) => m.enabled)
-          .sort((a, b) => a.position - b.position)
-          .map((m) => ({ number: m.number, delaySec: m.delaySec })),
-      }),
+      JSON.stringify(await callState(tenant.sipDomain, "rg", group.id)),
     );
 
     await cacheFeatureNumber(
@@ -334,36 +312,9 @@ export async function cacheIvrMenus(organizationId: string): Promise<void> {
   });
 
   for (const menu of menus) {
-    const options = await db.query.ivrOption.findMany({
-      where: eq(ivrOption.ivrMenuId, menu.id),
-    });
     await safeSet(
       keys.ivr(tenant.sipDomain, menu.id),
-      JSON.stringify({
-        id: menu.id,
-        number: menu.number,
-        name: menu.name,
-        greetingSound: menu.greetingSound,
-        invalidSound: menu.invalidSound,
-        timeoutSec: menu.timeoutSec,
-        maxRetries: menu.maxRetries,
-        timeoutType: menu.timeoutType,
-        timeoutId: await resolveDestinationId(menu.timeoutType, menu.timeoutId),
-        options: Object.fromEntries(
-          await Promise.all(
-            options.map(async (o) => [
-              o.digit,
-              {
-                type: o.destinationType,
-                id: await resolveDestinationId(
-                  o.destinationType,
-                  o.destinationId,
-                ),
-              },
-            ]),
-          ),
-        ),
-      }),
+      JSON.stringify(await callState(tenant.sipDomain, "ivr", menu.id)),
     );
 
     await cacheFeatureNumber(tenant.sipDomain, menu.number, "ivr", menu.id);
@@ -388,16 +339,7 @@ export async function cacheTimeConditions(
   for (const cond of conditions) {
     await safeSet(
       keys.timeCondition(tenant.sipDomain, cond.id),
-      JSON.stringify({
-        id: cond.id,
-        name: cond.name,
-        timezone: cond.timezone,
-        rules: cond.rules,
-        matchType: cond.matchType,
-        matchId: await resolveDestinationId(cond.matchType, cond.matchId),
-        noMatchType: cond.noMatchType,
-        noMatchId: await resolveDestinationId(cond.noMatchType, cond.noMatchId),
-      }),
+      JSON.stringify(await callState(tenant.sipDomain, "tc", cond.id)),
     );
   }
 }

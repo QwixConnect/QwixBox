@@ -82,6 +82,7 @@ export const tenantSettings = pgTable(
       .notNull(),
     timezone: text("timezone").default("Etc/UTC").notNull(),
 
+    faxNotifyEmail: text("fax_notify_email"),
     defaultCallerIdName: text("default_caller_id_name"),
     defaultCallerIdNumber: text("default_caller_id_number"),
 
@@ -254,7 +255,7 @@ export const inboundRoute = pgTable(
   },
   (table) => [
     index("inbound_route_org_idx").on(table.organizationId),
-    index("inbound_route_did_idx").on(table.didPattern),
+    uniqueIndex("inbound_route_did_unique").on(table.didPattern),
   ],
 );
 
@@ -268,9 +269,10 @@ export const outboundRoute = pgTable(
 
     name: text("name").notNull(),
     pattern: text("pattern").notNull(),
+    patternSyntax: text("pattern_syntax").default("legacy").notNull(),
 
     trunkId: text("trunk_id").references(() => trunk.id, {
-      onDelete: "cascade",
+      onDelete: "restrict",
     }),
 
     stripDigits: integer("strip_digits").default(0).notNull(),

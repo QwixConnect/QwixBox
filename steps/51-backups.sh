@@ -26,7 +26,7 @@ systemctl enable --now qwixbox-backup.timer >/dev/null 2>&1 || true
 
 info "Running an initial backup to prove it works"
 if /usr/local/sbin/qwixbox-backup; then
-  ok "Backup verified"
+  ok "Initial backup completed (a restore test is still required)"
 else
   warn "The first backup reported errors - check the output above."
 fi

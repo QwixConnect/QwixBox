@@ -3,15 +3,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prebuild": "cp ../bootstrap.sh public/bootstrap.sh",
+    "prebuild": "node scripts/bootstrap-asset.mjs",
+    "postbuild": "node scripts/bootstrap-asset.mjs --check-dist",
+    "predeploy": "node scripts/bootstrap-asset.mjs --release-check",
+    "pretest": "node scripts/bootstrap-asset.mjs",
     "dev": "npm run prebuild && astro dev",
     "build": "astro build",
     "test": "node --experimental-strip-types worker_test.mjs",
-    "preview": "astro build && wrangler dev",
-    "deploy": "astro build && wrangler deploy"
+    "preview": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
-    "astro": "^6.3.1"
+    "astro": "^6.3.1",
+    "@astrojs/markdown-remark": "7.2.0"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

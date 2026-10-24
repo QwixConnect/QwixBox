@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { changeMembership } from "../services/membership";
 import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db";
@@ -46,29 +47,6 @@ if (!org) {
   process.exit(1);
 }
 
-const existing = await db.query.member.findFirst({
-  where: and(eq(member.organizationId, org.id), eq(member.userId, account.id)),
-});
-
-if (existing) {
-  if (existing.role === role) {
-    console.log(`${email} is already ${role} of ${tenant} - nothing to do.`);
-    process.exit(0);
-  }
-  await db.update(member).set({ role }).where(eq(member.id, existing.id));
-  console.log(
-    `Changed ${email} from ${existing.role} to ${role} in ${tenant}.`,
-  );
-} else {
-  await db.insert(member).values({
-    id: randomUUID(),
-    organizationId: org.id,
-    userId: account.id,
-    role,
-    createdAt: new Date(),
-  });
-  console.log(`Added ${email} to ${tenant} as ${role}.`);
-}
-
-console.log("They can sign in and select the tenant now.");
+await changeMembership({ organizationId: org.id, email, role });
+console.log(`Updated membership for ${email} in ${tenant}.`);
 process.exit(0);

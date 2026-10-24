@@ -1,9 +1,9 @@
+import { unsafeTenantSettings } from "../lib/dialplan-safe";
 import { Hono } from "hono";
-import { and, eq } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { changeMembership } from "../services/membership";
 import { db } from "../db";
-import { member, tenantSettings, user } from "../db/schema";
-import { ROLES, type RoleName } from "../auth";
+import { tenantSettings } from "../db/schema";
 import { recordAudit } from "../lib/audit";
 import { rebuildTenant } from "../services/cache";
 import { syncDomain, reloadKamailio } from "../services/kamailio-sync";
@@ -36,7 +36,21 @@ tenants.post("/", requireRole("owner", "admin"), async (c) => {
     defaultCallerIdNumber?: string;
   }>();
 
-  if (!body.sipDomain) return c.json({ error: "sipDomain is required" }, 400);
+  const unsafe = unsafeTenantSettings(body);
+  if (unsafe) return c.json({ error: unsafe }, 400);
+  if (typeof body.sipDomain !== "string" || !body.sipDomain)
+    return c.json({ error: "sipDomain is required" }, 400);
+
+  const provisioned = await db.query.tenantSettings.findFirst({
+    where: eq(tenantSettings.organizationId, organizationId),
+  });
+  if (provisioned) {
+    if (provisioned.sipDomain !== body.sipDomain)
+      return c.json({ error: "sipDomain cannot be changed" }, 409);
+    return c.json(provisioned);
+  }
+  if (!/^(?=.{1,253}$)[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(body.sipDomain))
+    return c.json({ error: "Invalid SIP domain" }, 400);
 
   const existing = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.sipDomain, body.sipDomain),
@@ -62,9 +76,10 @@ tenants.post("/", requireRole("owner", "admin"), async (c) => {
   const [row] = await db
     .insert(tenantSettings)
     .values(values)
-    .onConflictDoUpdate({ target: tenantSettings.organizationId, set: values })
+    .onConflictDoNothing()
     .returning();
-  if (!row) return c.json({ error: "Provisioning failed" }, 500);
+  if (!row)
+    return c.json({ error: "Tenant or domain already provisioned" }, 409);
 
   if (row.dispatcherSetId === 0) {
     return c.json(
@@ -97,6 +112,8 @@ tenants.patch("/", requirePermission("tenant", "update"), async (c) => {
   const organizationId = c.get("organizationId");
   const body = await c.req.json<Record<string, unknown>>();
 
+  const unsafe = unsafeTenantSettings(body);
+  if (unsafe) return c.json({ error: unsafe }, 400);
   if ("sipDomain" in body) {
     return c.json(
       {
@@ -124,6 +141,15 @@ tenants.patch("/", requirePermission("tenant", "update"), async (c) => {
   if (!existing) return c.json({ error: "Tenant is not provisioned" }, 404);
 
   const patch: Partial<typeof tenantSettings.$inferInsert> = {};
+  if ("faxNotifyEmail" in body) {
+    if (
+      body.faxNotifyEmail !== null &&
+      (typeof body.faxNotifyEmail !== "string" ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.faxNotifyEmail))
+    )
+      return c.json({ error: "Invalid fax notification email" }, 400);
+    patch.faxNotifyEmail = body.faxNotifyEmail as string | null;
+  }
   if (typeof body.maxConcurrentCalls === "number")
     patch.maxConcurrentCalls = body.maxConcurrentCalls;
   if (typeof body.timezone === "string") patch.timezone = body.timezone;
@@ -151,9 +177,6 @@ tenants.patch("/", requirePermission("tenant", "update"), async (c) => {
   }
   if (typeof body.stirShakenEnabled === "boolean")
     patch.stirShakenEnabled = body.stirShakenEnabled;
-  if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
-  if (typeof body.dispatcherSetId === "number")
-    patch.dispatcherSetId = body.dispatcherSetId;
 
   if (Object.keys(patch).length === 0) {
     return c.json({ error: "No recognised fields to update" }, 400);
@@ -179,98 +202,60 @@ tenants.patch("/", requirePermission("tenant", "update"), async (c) => {
 });
 
 tenants.post("/members", requireRole("owner", "admin"), async (c) => {
-  const organizationId = c.get("organizationId");
   const body = await c.req.json<{ email?: string; role?: string }>();
-  const email = body.email?.trim().toLowerCase();
-  const role = (body.role ?? "member") as RoleName;
-
-  if (!email) return c.json({ error: "email is required" }, 400);
-  if (!(role in ROLES)) {
-    return c.json(
-      {
-        error: `Unknown role "${role}"`,
-        detail: `Known roles: ${Object.keys(ROLES).join(", ")}`,
-      },
-      400,
-    );
-  }
-
-  const account = await db.query.user.findFirst({
-    where: eq(user.email, email),
+  if (typeof body.email !== "string" || !body.email.trim())
+    return c.json({ error: "email is required" }, 400);
+  const result = await changeMembership({
+    organizationId: c.get("organizationId"),
+    actorId: c.get("userId"),
+    email: body.email,
+    role: body.role,
   });
-  if (!account) {
-    return c.json(
-      {
-        error: `No account for ${email}`,
-        detail:
-          `Create it first on the server:\n` +
-          `cd /opt/qwixbox-api && sudo -u qwixbox bun run src/cli/create-user.ts --email ${email}`,
-      },
-      404,
-    );
-  }
-
-  const existing = await db.query.member.findFirst({
-    where: and(
-      eq(member.organizationId, organizationId),
-      eq(member.userId, account.id),
-    ),
-  });
-
-  if (existing) {
-    if (existing.role === role) {
-      return c.json({
-        id: existing.id,
-        userId: account.id,
-        email,
-        role,
-        status: "unchanged",
-      });
-    }
-    const [updated] = await db
-      .update(member)
-      .set({ role })
-      .where(eq(member.id, existing.id))
-      .returning();
-    await recordAudit(c, {
-      action: "update",
-      entityType: "member",
-      entityId: existing.id,
-      before: existing,
-      after: updated,
-    });
-    return c.json({
-      id: existing.id,
-      userId: account.id,
-      email,
-      role,
-      status: "updated",
-    });
-  }
-
-  const id = randomUUID();
-  const [row] = await db
-    .insert(member)
-    .values({
-      id,
-      organizationId,
-      userId: account.id,
-      role,
-      createdAt: new Date(),
-    })
-    .returning();
-
   await recordAudit(c, {
-    action: "create",
+    action: result.status,
     entityType: "member",
-    entityId: id,
-    after: row,
+    entityId: result.after?.id,
+    before: result.before,
+    after: result.after,
   });
-
   return c.json(
-    { id, userId: account.id, email, role, status: "created" },
-    201,
+    { ...result.after, email: body.email, status: result.status },
+    result.status === "created" ? 201 : 200,
   );
+});
+
+tenants.patch("/members/:id", requireRole("owner", "admin"), async (c) => {
+  const body = await c.req.json<{ role: string }>();
+  const result = await changeMembership({
+    organizationId: c.get("organizationId"),
+    actorId: c.get("userId"),
+    memberId: c.req.param("id"),
+    role: body.role,
+  });
+  await recordAudit(c, {
+    action: "update",
+    entityType: "member",
+    entityId: c.req.param("id"),
+    before: result.before,
+    after: result.after,
+  });
+  return c.json(result.after);
+});
+
+tenants.delete("/members/:id", requireRole("owner", "admin"), async (c) => {
+  const result = await changeMembership({
+    organizationId: c.get("organizationId"),
+    actorId: c.get("userId"),
+    memberId: c.req.param("id"),
+    remove: true,
+  });
+  await recordAudit(c, {
+    action: "delete",
+    entityType: "member",
+    entityId: c.req.param("id"),
+    before: result.before,
+  });
+  return c.body(null, 204);
 });
 
 tenants.post("/rebuild-cache", requireRole("owner", "admin"), async (c) => {

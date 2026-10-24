@@ -15,7 +15,7 @@ STEPS=(
   "01-base-packages.sh|all|Common tooling, CA certificates, unattended security upgrades"
   "02-dns.sh|all|Public DNS records via the configured provider (optional)"
 
-  "10-ssh-hardening.sh|all|Key-only SSH, no root login, restricted auth"
+  "10-ssh-hardening.sh|all|Key-only SSH, retain root key access when needed"
   "11-firewall.sh|all|nftables: default deny, SIP/RTP/HTTPS allowlist, SIP rate limiting"
   "12-fail2ban.sh|all|Jails for sshd, FreeSWITCH (mod_fail2ban) and Kamailio"
   "13-tls-certs.sh|all|Let's Encrypt certificates + renewal hooks for SIP TLS, WSS and the API"
@@ -92,11 +92,11 @@ if [ "$IS_TTY" -eq 1 ] && [ "$DO_QUIET" -eq 0 ] && [ -f "$BANNER_FILE" ]; then
 fi
 
 if [ "$DO_CONFIGURE" -eq 1 ]; then
+  rc=0
   ( # shellcheck source=lib/common.sh
     . "$SCRIPT_DIR/lib/common.sh"
     tui_available || die "--configure needs a terminal and whiptail (apt install whiptail)."
-    run_wizard )
-  rc=$?
+    run_wizard ) || rc=$?
   [ "$rc" -eq 0 ] && info "Configuration saved. Run 'sudo ./install.sh' to install."
   exit "$rc"
 fi
@@ -121,10 +121,10 @@ if [ "$DO_MENU" -eq 1 ]; then
 
     case "$choice" in
       install)   exec "$0" "${quiet_arg[@]}" ;;
-      status)    "$0" --list | ${PAGER:-less} -R ;;
-      configure) "$0" --configure ;;
-      health)    /usr/local/sbin/qwixbox-healthcheck 2>&1 | ${PAGER:-less} -R ;;
-      log)       ls -t "$LOG_DIR"/install-*.log 2>/dev/null | head -1 | xargs -r ${PAGER:-less} -R ;;
+      status)    "$0" --list | ${PAGER:-less} -R || true ;;
+      configure) "$0" --configure || true ;;
+      health)    /usr/local/sbin/qwixbox-healthcheck 2>&1 | ${PAGER:-less} -R || true ;;
+      log)       ls -t "$LOG_DIR"/install-*.log 2>/dev/null | head -1 | xargs -r ${PAGER:-less} -R || true ;;
       quit)      exit 0 ;;
       step)
         args=()
@@ -132,7 +132,7 @@ if [ "$DO_MENU" -eq 1 ]; then
           args+=("${entry%%|*}" "${entry##*|}")
         done
         if picked="$(tui_menu "Which step? It will be re-run even if already complete." "${args[@]}")"; then
-          "$0" --only "$picked" --force
+          "$0" --only "$picked" --force || true
           printf '\nPress Enter to return to the menu.'; read -r _
         fi
         ;;
@@ -165,17 +165,7 @@ step_applies() {
 }
 
 marker_for() { printf '%s/%s.done' "$STATE_DIR" "$1"; }
-script_hash() {
-  local path="$1" input
-  {
-    sha256sum "$path"
-    # shellcheck disable=SC2013  # word splitting is the point: one line, several paths
-    for input in $(sed -n 's/^#[[:space:]]*step-inputs:[[:space:]]*//p' "$path"); do
-      [ -e "$SCRIPT_DIR/$input" ] || die "$(basename "$path"): step-inputs path not found: $input"
-      ( cd "$SCRIPT_DIR" && find "$input" -type f -exec sha256sum {} + | sort -k2 )
-    done
-  } | sha256sum | cut -d' ' -f1
-}
+. "$SCRIPT_DIR/lib/step-state.sh"
 
 step_state() {
   local name="$1" path="$STEP_DIR/$1" marker
@@ -211,6 +201,11 @@ if [ "$DO_LIST" -eq 1 ]; then
 fi
 
 [ "$(id -u)" -eq 0 ] || die "Run this with sudo."
+
+# Prepare configuration while stderr/stdin are still the operator's terminal.
+if [ "$DO_DRYRUN" -eq 0 ]; then
+  ( . "$SCRIPT_DIR/lib/common.sh"; load_config )
+fi
 
 mkdir -p "$LOG_DIR" "$STATE_DIR" "$STEP_DIR"
 LOG_FILE="$LOG_DIR/install-$(date '+%Y%m%d-%H%M%S').log"
@@ -311,7 +306,7 @@ for entry in "${STEPS[@]}"; do
     continue
   fi
 
-  if [ "$DO_FORCE" -eq 0 ] && [ "$state" = "done" ]; then
+  if [ "$name" != 99-postflight.sh ] && [ "$DO_FORCE" -eq 0 ] && [ "$state" = "done" ]; then
     info "$prog SKIP  $name - already completed"
     skipped=$((skipped + 1))
     continue
@@ -331,7 +326,11 @@ for entry in "${STEPS[@]}"; do
   chmod +x "$path"
   "$path"
 
-  printf '%s' "$(script_hash "$path")" > "$(marker_for "$name")"
+  if [ "$name" != 99-postflight.sh ]; then
+    printf '%s' "$(script_hash "$path")" > "$(marker_for "$name")"
+  else
+    rm -f "$(marker_for "$name")"
+  fi
   ok "$name completed in $(( $(date +%s) - start_ts ))s"
   ran=$((ran + 1))
 done

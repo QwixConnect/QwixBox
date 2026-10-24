@@ -51,11 +51,11 @@ if change.value == nil then
 elseif change.value == "true" or change.value == "false" then
   encoded = change.value
 else
-  encoded = '"' .. change.value .. '"'
+  encoded = qwixbox.json_encode(change.value)
 end
 
-local payload = string.format('{"domain":"%s","number":"%s","%s":%s}',
-  domain, user, change.field, encoded)
+local payload = string.format('{"domain":%s,"number":%s,"%s":%s}',
+  qwixbox.json_encode(domain), qwixbox.json_encode(user), change.field, encoded)
 
 local applied, reply = qwixbox.api_post("/fs/feature", payload)
 

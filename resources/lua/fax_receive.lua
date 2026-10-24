@@ -1,7 +1,7 @@
 -- Inbound fax receive to TIFF, then notify the API.
 
 local domain = argv[1]
-local did = argv[2]
+local did = session and session:getVariable("qwixbox_did") or argv[2]
 
 local function log(level, fmt, ...)
   freeswitch.consoleLog(level, "[fax_receive] " .. string.format(fmt, ...) .. "\n")
@@ -12,7 +12,7 @@ if not session or not session:ready() then
   return
 end
 
-if not domain or not did then
+if not domain or not domain:match("^[%w.-]+$") or not did then
   log("err", "usage: fax_receive.lua <domain> <did>")
   session:hangup("NORMAL_TEMPORARY_FAILURE")
   return
@@ -54,14 +54,11 @@ log(ok and "notice" or "warning",
 
 local qwixbox = require "qwixbox"
 
-local payload = string.format(
-  '{"callUuid":"%s","domain":"%s","did":"%s","callerNumber":"%s","callerName":"%s",' ..
-  '"filePath":"%s","pages":%s,"status":"%s","failureReason":"%s","remoteStationId":"%s"}',
-  uuid, domain, did, caller, caller_name:gsub('"', ""), tiff,
-  tonumber(pages) or 0, ok and "received" or "failed",
-  tostring(result_text):gsub('"', ""), remote_id:gsub('"', ""))
+local payload = qwixbox.json_encode({ callUuid = uuid, domain = domain, did = did,
+  callerNumber = caller, callerName = caller_name, filePath = tiff, pages = tonumber(pages) or 0,
+  status = ok and "received" or "failed", failureReason = tostring(result_text), remoteStationId = remote_id })
+local sent, reply = qwixbox.api_post("/fs/fax", payload)
 
-local sent, reply = qwixbox.api_post("/fs/fax", (payload:gsub("'", "")))
 if not sent then
   log("err", "could not report fax to the API (%s) - TIFF is on disk at %s", tostring(reply), tiff)
 end

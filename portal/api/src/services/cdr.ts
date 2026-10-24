@@ -53,6 +53,7 @@ export type ParsedCdr = {
   destinationNumber: string;
   authUser: string | null;
   gatewayName: string | null;
+  trunkId: string | null;
   startedAt: Date;
   answeredAt: Date | null;
   endedAt: Date | null;
@@ -91,9 +92,10 @@ export function parseCdrXml(xml: string): ParsedCdr | null {
 
   const gatewayName =
     decodeVar(vars.sip_gateway_name) ?? decodeVar(vars.gateway_name);
+  const trunkId = decodeVar(vars["sip_h_X-Trunk-ID"]);
   const legDirection = decodeVar(vars.direction);
   let direction: ParsedCdr["direction"];
-  if (gatewayName) {
+  if (gatewayName || trunkId) {
     direction = "outbound";
   } else if (legDirection === "outbound") {
     direction = "outbound";
@@ -115,6 +117,7 @@ export function parseCdrXml(xml: string): ParsedCdr | null {
     destinationNumber: destination,
     authUser: decodeVar(vars["sip_h_X-Auth-User"]) ?? str(profile.username),
     gatewayName,
+    trunkId,
     startedAt: started,
     answeredAt: epoch(vars.answer_epoch),
     endedAt: epoch(vars.end_epoch),
@@ -164,11 +167,13 @@ export async function ingestCdr(
   }
 
   let trunkId: string | null = null;
-  if (parsed.gatewayName) {
+  if (parsed.trunkId || parsed.gatewayName) {
     const t = await db.query.trunk.findFirst({
       where: and(
         eq(trunk.organizationId, organizationId),
-        eq(trunk.name, parsed.gatewayName),
+        parsed.trunkId
+          ? eq(trunk.id, parsed.trunkId)
+          : eq(trunk.name, parsed.gatewayName!),
       ),
     });
     trunkId = t?.id ?? null;

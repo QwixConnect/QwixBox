@@ -1,3 +1,4 @@
+import { unsafeDialplanFields } from "../lib/dialplan-safe";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { and, eq } from "drizzle-orm";
@@ -5,11 +6,16 @@ import { db } from "../db";
 import { extension, tenantSettings } from "../db/schema";
 import {
   encrypt,
+  decrypt,
   generateSipPassword,
   generateVoicemailPin,
 } from "../lib/crypto";
 import { recordAudit } from "../lib/audit";
-import { cacheExtension, invalidateExtension } from "../services/cache";
+import {
+  cacheExtension,
+  invalidateExtension,
+  cacheRingGroups,
+} from "../services/cache";
 import { syncSubscriber, removeSubscriber } from "../services/kamailio-sync";
 import {
   actionForMethod,
@@ -64,9 +70,24 @@ extensions.post("/", async (c) => {
     deviceMac?: string;
   }>();
 
+  const unsafe = unsafeDialplanFields(body);
+  if (unsafe) return c.json({ error: unsafe }, 400);
   if (!body.number || !body.displayName) {
     return c.json({ error: "number and displayName are required" }, 400);
   }
+
+  if (!/^[0-9]{1,15}$/.test(body.number))
+    return c.json({ error: "number must be 1 to 15 digits" }, 400);
+  if (
+    body.sipPassword !== undefined &&
+    (typeof body.sipPassword !== "string" || body.sipPassword.length < 12)
+  )
+    return c.json(
+      { error: "sipPassword must have at least 12 characters" },
+      400,
+    );
+  if (body.voicemailPin !== undefined && !/^\d{4,10}$/.test(body.voicemailPin))
+    return c.json({ error: "voicemailPin must be 4 to 10 digits" }, 400);
 
   const tenant = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.organizationId, organizationId),
@@ -156,6 +177,20 @@ extensions.patch("/:id", async (c) => {
     }>
   >();
 
+  const unsafe = unsafeDialplanFields(body);
+  if (unsafe) return c.json({ error: unsafe }, 400);
+  if ("number" in body)
+    return c.json({ error: "Extension numbers are immutable" }, 400);
+  if (
+    body.sipPassword !== undefined &&
+    (typeof body.sipPassword !== "string" || body.sipPassword.length < 12)
+  )
+    return c.json(
+      { error: "sipPassword must have at least 12 characters" },
+      400,
+    );
+  if (body.enabled !== undefined && typeof body.enabled !== "boolean")
+    return c.json({ error: "enabled must be boolean" }, 400);
   const patch: Partial<typeof extension.$inferInsert> = {};
   if (body.displayName !== undefined) patch.displayName = body.displayName;
   if (body.voicemailEnabled !== undefined)
@@ -219,10 +254,13 @@ extensions.patch("/:id", async (c) => {
     where: eq(tenantSettings.organizationId, organizationId),
   });
   if (tenant) {
-    if (body.sipPassword !== undefined) {
-      await syncSubscriber(row, tenant.sipDomain, body.sipPassword);
+    if (!row.enabled) {
+      await removeSubscriber(row.number, tenant.sipDomain);
+    } else {
+      await syncSubscriber(row, tenant.sipDomain, decrypt(row.sipPasswordEnc));
     }
     await cacheExtension(row.id);
+    await cacheRingGroups(organizationId);
   }
   await recordAudit(c, {
     action: "update",
@@ -262,6 +300,7 @@ extensions.delete("/:id", async (c) => {
   if (tenant) {
     await removeSubscriber(before.number, tenant.sipDomain);
     await invalidateExtension(organizationId, before.number, tenant.sipDomain);
+    await cacheRingGroups(organizationId);
   }
   await recordAudit(c, {
     action: "delete",

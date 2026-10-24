@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the React admin portal and publish it for nginx.
-# step-inputs: resources/conf/portal-web
+# step-inputs: resources/conf/portal-web portal/web
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
@@ -27,7 +27,6 @@ deploy_template "$TPL/env.production" "$BUILD_DIR/.env.production" 0644 "$BUILD_
 
 info "Installing portal dependencies"
 bun_as "$BUILD_USER" "$BUILD_DIR" bun install --frozen-lockfile \
-  || bun_as "$BUILD_USER" "$BUILD_DIR" bun install \
   || die "bun install failed for the portal."
 
 info "Building the portal"

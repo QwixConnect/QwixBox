@@ -1,14 +1,8 @@
+import { safeEqual } from "../lib/crypto";
 import { Hono } from "hono";
 import { ingestCdr } from "../services/cdr";
 
 export const fsCdr = new Hono();
-
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
 
 fsCdr.use("*", async (c, next) => {
   const expected = process.env.FS_XML_GATEWAY_SECRET;

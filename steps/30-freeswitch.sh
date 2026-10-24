@@ -121,14 +121,20 @@ sudo ./configure -C \
   --disable-libvpx
 
 sudo make -j"$JOBS"
+had_config=0
+[ ! -f "$PREFIX/conf/freeswitch.xml" ] || had_config=1
 sudo make install
 
 for rate in $FS_SOUND_RATES; do
   sudo make "sounds-en-us-callie-${rate}-install" "sounds-music-${rate}-install"
 done
 
-sudo rm -rf "$PREFIX/conf"
-sudo make config-minimal
+# Preserve an existing hardened tree. Only replace make install's fresh vanilla config.
+invalidate_step 31-freeswitch-config.sh
+if [ "$had_config" -eq 0 ]; then
+  sudo rm -rf "$PREFIX/conf"
+  sudo make config-minimal
+fi
 
 if [ ! -f "$PREFIX/conf/freeswitch.xml" ]; then
   echo "ERROR: $PREFIX/conf/freeswitch.xml is missing - 'make config-minimal' did not complete" >&2
@@ -190,7 +196,8 @@ sudo ln -sf "$PREFIX/bin/fs_cli" /usr/bin/fs_cli
 sudo ln -sf "$PREFIX/bin/freeswitch" /usr/sbin/freeswitch
 
 sudo chown -R freeswitch:freeswitch "$PREFIX"
-sudo chmod -R u+rwX,g+rwX,o+rX "$PREFIX"
+# Never make existing credential files world-readable on a rebuild.
+sudo chmod -R u+rwX,g+rwX "$PREFIX"
 
 sudo find "$PREFIX/conf" -type d -exec chmod g+s {} +
 
@@ -206,6 +213,8 @@ sudo sed "s|\${PREFIX}|$PREFIX|g" "$UNIT_TEMPLATE" \
 
 sudo systemctl daemon-reload
 sudo systemctl enable freeswitch.service
+# Apply the hardened configuration before starting a newly installed switch, including --only.
+"$REPO_DIR/steps/31-freeswitch-config.sh"
 sudo systemctl start freeswitch.service
 
 echo

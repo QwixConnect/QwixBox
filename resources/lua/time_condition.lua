@@ -3,7 +3,7 @@
 
 local qwixbox = require "qwixbox"
 
-local domain, id, depth = argv[1], argv[2], tonumber(argv[3] or "0")
+local domain, id, depth = argv[1], argv[2], tonumber(argv[3] or (session and session:getVariable("qwixbox_depth")) or "0")
 
 if not session or not session:ready() then return end
 if not domain or not id then

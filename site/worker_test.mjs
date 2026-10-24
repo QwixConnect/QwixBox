@@ -1,8 +1,16 @@
 // Exercises the hostname branching without wrangler, which pins every local request to the
 // first custom domain. Stubs ASSETS so the routing logic is what is under test.
 import worker from './worker.ts';
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
-const SCRIPT = "#!/usr/bin/env bash\n# One-line installer\necho hi\n";
+const SCRIPT = readFileSync(new URL('./public/bootstrap.sh', import.meta.url), 'utf8');
+if (SCRIPT.includes('@QWIXBOX_INSTALL_REF@')) throw new Error('Unpinned bootstrap asset');
+// Executing a download truncated before its final invocation must do no work.
+const prefix = SCRIPT.slice(0, SCRIPT.lastIndexOf('main "$@"'));
+const truncated = spawnSync('bash', { input: prefix, encoding: 'utf8' });
+if (truncated.status !== 0 || truncated.stdout || truncated.stderr) throw new Error('Truncated bootstrap executed work');
+
 const env = {
   ASSETS: {
     async fetch(req) {

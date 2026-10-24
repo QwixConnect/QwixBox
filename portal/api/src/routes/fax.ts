@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { fax } from "../db/schema";
-import { recordInboundFax, type FaxReport } from "../services/fax";
+import { faxPath, recordInboundFax, type FaxReport } from "../services/fax";
 import { safeEqual } from "../lib/crypto";
 import {
   actionForMethod,
@@ -40,7 +40,7 @@ faxHook.post("/", async (c) => {
       );
     }
     const id = await recordInboundFax(report);
-    return c.json({ id, status: "recorded" }, id ? 201 : 202);
+    return c.json({ ok: !!id, id, status: "recorded" }, id ? 201 : 202);
   } catch (err) {
     console.error("[fax] hook failed:", (err as Error).message);
     return c.json({ error: "recorded to disk only" }, 202);
@@ -77,7 +77,9 @@ faxes.get("/:id/download", async (c) => {
   });
   if (!row?.filePath) return c.json({ error: "Not found" }, 404);
 
-  const file = Bun.file(row.filePath);
+  const safePath = await faxPath(row.filePath).catch(() => null);
+  if (!safePath) return c.json({ error: "Document unavailable" }, 410);
+  const file = Bun.file(safePath);
   if (!(await file.exists())) {
     return c.json(
       {

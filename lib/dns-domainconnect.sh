@@ -68,7 +68,7 @@ dc_available() { dc_discover "$1" >/dev/null 2>&1; }
 
 dc_provider_name() {
   local settings
-  settings="$(dc_discover "${1:-}")" || return 1
+  settings="$(dc_discover)" || return 1
   printf '%s' "$(printf '%s' "$settings" | jq -r '.providerDisplayName // .providerName // empty')"
 }
 

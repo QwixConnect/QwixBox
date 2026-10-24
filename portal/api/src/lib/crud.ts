@@ -1,3 +1,4 @@
+import { unsafeDialplanFields } from "./dialplan-safe";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { and, eq, type SQL } from "drizzle-orm";
@@ -26,6 +27,8 @@ export type CrudOptions<T extends PgTable> = {
   required?: readonly string[];
 
   present?: (row: Row) => Row;
+
+  beforeDelete?: (organizationId: string, row: Row) => Promise<string | null>;
 
   afterChange?: (
     organizationId: string,
@@ -77,14 +80,7 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
 
   const after = async (orgId: string, row: Row, action: string) => {
     if (!opts.afterChange) return;
-    try {
-      await opts.afterChange(orgId, row, action);
-    } catch (err) {
-      console.error(
-        `[${opts.entityType}] afterChange failed:`,
-        (err as Error).message,
-      );
-    }
+    await opts.afterChange(orgId, row, action);
   };
 
   const scoped = (orgId: string, extra?: SQL) =>
@@ -122,6 +118,8 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
         return c.json({ error: `${field} is required` }, 400);
       }
     }
+    const unsafe = unsafeDialplanFields(body);
+    if (unsafe) return c.json({ error: unsafe }, 400);
     if (opts.validate) {
       const problem = await opts.validate(body, organizationId);
       if (problem) return c.json({ error: problem }, 400);
@@ -160,6 +158,8 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
     if (!before) return c.json({ error: "Not found" }, 404);
 
     const body = await c.req.json<Row>().catch(() => ({}) as Row);
+    const unsafe = unsafeDialplanFields(body);
+    if (unsafe) return c.json({ error: unsafe }, 400);
     if (opts.validate) {
       const problem = await opts.validate(body, organizationId, before as Row);
       if (problem) return c.json({ error: problem }, 400);
@@ -197,6 +197,8 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
       .where(scoped(organizationId, eq(opts.idColumn, id)));
     if (!before) return c.json({ error: "Not found" }, 404);
 
+    const conflict = await opts.beforeDelete?.(organizationId, before as Row);
+    if (conflict) return c.json({ error: conflict }, 409);
     await db
       .delete(opts.table)
       .where(scoped(organizationId, eq(opts.idColumn, id)));

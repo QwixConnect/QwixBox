@@ -404,9 +404,9 @@ export const endpoints = {
     id: string,
     digit: string,
     body: { destinationType: DestinationType; destinationId?: string | null; description?: string },
-  ) => api.put<IvrOption>(`/ivr-menus/${id}/options/${digit}`, body),
+  ) => api.put<IvrOption>(`/ivr-menus/${id}/options/${encodeURIComponent(digit)}`, body),
   deleteIvrOption: (id: string, digit: string) =>
-    api.delete<void>(`/ivr-menus/${id}/options/${digit}`),
+    api.delete<void>(`/ivr-menus/${id}/options/${encodeURIComponent(digit)}`),
 
   timeConditions: () => api.get<TimeCondition[]>("/time-conditions"),
   createTimeCondition: (body: Partial<TimeCondition>) =>

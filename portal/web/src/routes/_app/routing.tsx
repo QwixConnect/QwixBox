@@ -52,7 +52,7 @@ function InboundModal({
       },
     },
     validate: {
-      didPattern: (v) => (v.trim() ? null : "DID pattern is required"),
+      didPattern: (v) => (v.trim() ? null : "DID number is required"),
     },
   });
 
@@ -105,16 +105,16 @@ function InboundModal({
         <Stack>
           <ErrorAlert error={save.error} />
           <TextInput
-            label="DID pattern"
-            description="A regular expression matched against the dialled number"
-            placeholder="^14165551234$"
+            label="DID number"
+            description="Exact carrier number, including a leading + if the carrier sends one"
+            placeholder="+14165551234"
             required
             {...form.getInputProps("didPattern")}
           />
           <TextInput label="Description" {...form.getInputProps("description")} />
           <NumberInput
             label="Priority"
-            description="Lower is matched first"
+            description="Display order only; DID matching is exact"
             min={0}
             {...form.getInputProps("priority")}
           />

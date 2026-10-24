@@ -49,7 +49,10 @@ fsFeature.post("/", async (c) => {
     return c.json({ ok: false, error: "domain and number required" }, 400);
 
   const tenant = await db.query.tenantSettings.findFirst({
-    where: eq(tenantSettings.sipDomain, domain),
+    where: and(
+      eq(tenantSettings.sipDomain, domain),
+      eq(tenantSettings.enabled, true),
+    ),
   });
   if (!tenant) return c.json({ ok: false, error: "unknown domain" }, 404);
 
@@ -57,6 +60,7 @@ fsFeature.post("/", async (c) => {
     where: and(
       eq(extension.organizationId, tenant.organizationId),
       eq(extension.number, number),
+      eq(extension.enabled, true),
     ),
   });
   if (!before) return c.json({ ok: false, error: "unknown extension" }, 404);

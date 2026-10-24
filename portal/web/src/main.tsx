@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -9,6 +9,10 @@ import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 import { routeTree } from "./routeTree.gen";
 import { theme } from "./theme";
+
+// Vite removes this branch and module from production builds.
+const MockControls = import.meta.env.DEV && import.meta.env.MODE === "mock"
+  ? lazy(() => import("./mock/Controls")) : null;
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -42,6 +46,7 @@ if (!rootElement.innerHTML) {
         <Notifications position="top-right" />
         <QueryClientProvider client={queryClient}>
           <RouterProvider router={router} />
+          {MockControls && <Suspense fallback={null}><MockControls /></Suspense>}
         </QueryClientProvider>
       </MantineProvider>
     </StrictMode>,

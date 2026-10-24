@@ -1,5 +1,6 @@
 import { Group, Select, Stack, TextInput } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
+import { ErrorAlert } from "./Resource";
 import {
   DESTINATION_NEEDS_ROW,
   endpoints,
@@ -94,8 +95,13 @@ export function DestinationPicker({
     ? [{ value: "", label: "— none —" }, ...TYPE_OPTIONS]
     : TYPE_OPTIONS;
 
+  const activeQuery = value.type === "extension" || value.type === "voicemail" ? extensions
+    : value.type === "ring_group" ? ringGroups : value.type === "ivr" ? ivrMenus
+    : value.type === "time_condition" ? timeConditions : null;
+
   return (
     <Stack gap="xs">
+      <ErrorAlert error={activeQuery?.error} title="Could not load destinations" />
       <Group grow align="flex-start">
         <Select
           label={label}
@@ -116,8 +122,8 @@ export function DestinationPicker({
             value={value.id ?? ""}
             onChange={(next) => onChange({ ...value, id: next || null })}
             searchable
-            nothingFoundMessage="None configured yet"
-            disabled={loading}
+            nothingFoundMessage={activeQuery?.isSuccess ? "None configured yet" : "Loading destinations"}
+            disabled={loading || !!activeQuery?.error}
           />
         )}
 
@@ -135,6 +141,7 @@ export function DestinationPicker({
         {value.type === "voicemail" && (
           <Select
             label="Mailbox"
+            disabled={extensions.isPending || !!extensions.error}
             data={(extensions.data ?? []).map((e) => ({
               value: e.number,
               label: `${e.number} — ${e.displayName}`,

@@ -10,6 +10,7 @@ function M.log(tag, level, fmt, ...)
 end
 
 function M.redis_get(key)
+  if not key or key:find("[%% %c]") then return nil end
   local ok, result = pcall(function()
     return freeswitch.API():execute("hiredis_raw", M.REDIS_PROFILE .. " GET " .. key)
   end)
@@ -27,7 +28,33 @@ function M.json_decode(str)
 end
 
 function M.fetch(kind, domain, id)
-  return M.json_decode(M.redis_get(string.format("qwixbox:%s:%s:%s", kind, domain, id)))
+  local cached = M.json_decode(M.redis_get(string.format("qwixbox:%s:%s:%s", kind, domain, id)))
+  if cached then return cached end
+  local ok, reply = M.api_post("/fs/state", M.json_encode({ kind = kind, domain = domain, id = id }))
+  local result = ok and M.json_decode(reply)
+  return result and result.data or nil
+end
+
+-- FreeSWITCH regex returns the TEXT "true" or "false"; both strings are truthy in Lua.
+-- m:~ selects an explicit delimiter, preserving PCRE alternation with |.
+function M.regex_match(value, pattern)
+  if not value or not pattern or pattern:find("[~%s%c]") or value:find("[~%s%c]") then return false end
+  local ok, result = pcall(function() return freeswitch.API():execute("regex", "m:~" .. value .. "~" .. pattern) end)
+  return ok and result and result:match("^%s*(.-)%s*$") == "true"
+end
+
+function M.json_encode(value)
+  local function quote(s)
+    return '"' .. s:gsub('[%z\1-\31\\"]', function(c)
+      return string.format("\\u%04x", c:byte())
+    end) .. '"'
+  end
+  if value == nil then return "null" end
+  if type(value) == "string" then return quote(value) end
+  if type(value) == "boolean" or type(value) == "number" then return tostring(value) end
+  local fields = {}
+  for k, v in pairs(value) do table.insert(fields, quote(k) .. ":" .. M.json_encode(v)) end
+  return "{" .. table.concat(fields, ",") .. "}"
 end
 
 local MAX_DEPTH = 10
@@ -38,7 +65,7 @@ function M.api_post(path, payload)
 
   local cmd = string.format(
     "%s%s content-type application/json append_headers X-Gateway-Secret:%s timeout 5 post %s",
-    base, path, secret, payload)
+    base, path, secret, (payload:gsub(".", function(c) return string.format("%%%02X", c:byte()) end)))
 
   local ok, reply = pcall(function() return freeswitch.API():execute("curl", cmd) end)
   if not ok then
@@ -48,7 +75,8 @@ function M.api_post(path, payload)
 end
 
 function M.go(session, domain, dtype, did, depth)
-  depth = (depth or 0) + 1
+  depth = (tonumber(depth) or tonumber(session:getVariable("qwixbox_depth")) or 0) + 1
+  session:setVariable("qwixbox_depth", tostring(depth))
   if depth > MAX_DEPTH then
     M.log("qwixbox", "err", "destination chain exceeded %d hops at %s/%s - hanging up",
       MAX_DEPTH, tostring(dtype), tostring(did))
@@ -61,6 +89,15 @@ function M.go(session, domain, dtype, did, depth)
     return
   end
 
+  if not domain or not domain:match("^[%w.-]+$") or
+      (dtype ~= "hangup" and dtype ~= "fax" and (not did or not tostring(did):match("^[%w_.*#+-]+$"))) then
+    session:hangup("CALL_REJECTED")
+    return
+  end
+  if dtype == "external" and not tostring(did):match("^%+?[0-9*#]+$") then
+    session:hangup("CALL_REJECTED")
+    return
+  end
   if dtype == "extension" then
     session:execute("lua", string.format("extension.lua %s %s %d", domain, tostring(did), depth))
 

@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
@@ -67,6 +67,26 @@ export const ROLES = { owner, admin, member, viewer } as const;
 export type RoleName = keyof typeof ROLES;
 
 export const auth = betterAuth({
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      // Membership mutations go through the serialized service, including owner checks.
+      if (
+        [
+          "/organization/add-member",
+          "/organization/update-member-role",
+          "/organization/remove-member",
+          "/organization/leave",
+          "/organization/invite-member",
+          "/organization/accept-invitation",
+          "/organization/delete",
+        ].includes(ctx.path)
+      ) {
+        throw new APIError("FORBIDDEN", {
+          message: "Use the tenant membership API",
+        });
+      }
+    }),
+  },
   database: drizzleAdapter(db, { provider: "pg", schema }),
 
   secret: env.authSecret,
@@ -147,14 +167,11 @@ export const auth = betterAuth({
       organizationLimit: 1,
       creatorRole: "owner",
       async sendInvitationEmail(data) {
-        const url = `https://${env.pbxFqdn}/accept-invitation/${data.id}`;
         console.warn(
-          `[auth] invitation for ${data.email} to ${data.organization.name} was NOT emailed - ` +
-            `no transport is configured. Send this link manually: ${url}`,
+          `[auth] invitation delivery is unavailable for organization ${data.organization.id}`,
         );
       },
     }),
-
   ],
 });
 

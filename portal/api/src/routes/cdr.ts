@@ -1,3 +1,4 @@
+import { dateBound } from "../lib/date-range";
 import { Hono } from "hono";
 import {
   and,
@@ -7,6 +8,7 @@ import {
   gte,
   ilike,
   lte,
+  lt,
   or,
   sql,
   type SQL,
@@ -26,24 +28,20 @@ cdrs.use("*", requirePermission("cdr", "read"));
 const MAX_LIMIT = 200;
 const MAX_EXPORT = 10_000;
 
-function parseDate(value: string | undefined): Date | null | "invalid" {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? "invalid" : d;
-}
-
 function buildFilters(
   q: Record<string, string>,
   organizationId: string,
 ):
   | { filters: SQL[]; error?: undefined }
   | { filters?: undefined; error: Response } {
-  const from = parseDate(q.from);
-  const to = parseDate(q.to);
-  if (from === "invalid" || to === "invalid") {
+  let from, to;
+  try {
+    from = dateBound(q.from);
+    to = dateBound(q.to, true);
+  } catch {
     return {
       error: Response.json(
-        { error: "from and to must be parseable dates" },
+        { error: "from and to must be valid dates" },
         { status: 400 },
       ),
     };
@@ -65,8 +63,11 @@ function buildFilters(
     );
   }
   if (q.extensionId) filters.push(eq(cdr.extensionId, q.extensionId));
-  if (from) filters.push(gte(cdr.startedAt, from));
-  if (to) filters.push(lte(cdr.startedAt, to));
+  if (from) filters.push(gte(cdr.startedAt, from.date));
+  if (to)
+    filters.push(
+      to.exclusive ? lt(cdr.startedAt, to.date) : lte(cdr.startedAt, to.date),
+    );
   if (q.answered === "true") filters.push(sql`${cdr.answeredAt} is not null`);
   if (q.answered === "false") filters.push(sql`${cdr.answeredAt} is null`);
 
@@ -128,15 +129,9 @@ cdrs.get("/", async (c) => {
 
 cdrs.get("/summary", async (c) => {
   const organizationId = c.get("organizationId");
-  const from = parseDate(c.req.query("from"));
-  const to = parseDate(c.req.query("to"));
-  if (from === "invalid" || to === "invalid") {
-    return c.json({ error: "from and to must be parseable dates" }, 400);
-  }
-
-  const filters = [eq(cdr.organizationId, organizationId)];
-  if (from) filters.push(gte(cdr.startedAt, from));
-  if (to) filters.push(lte(cdr.startedAt, to));
+  const built = buildFilters(c.req.query(), organizationId);
+  if (built.error) return built.error;
+  const filters = built.filters;
 
   const [row] = await db
     .select({

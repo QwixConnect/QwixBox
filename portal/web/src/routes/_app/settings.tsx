@@ -85,7 +85,7 @@ function ProvisionForm() {
         <Alert color="orange" title="Dedicated tier needs a dispatcher set">
           {dedicatedWarning}
           <Text size="sm" mt="xs">
-            The tenant row was created. Open Settings and set <Code>dispatcherSetId</Code> before
+            The tenant row was created. Ask the operator to assign <Code>dispatcherSetId</Code> before
             calls will route.
           </Text>
         </Alert>
@@ -140,8 +140,6 @@ function EditSettingsModal({
       defaultCallerIdNumber: data.defaultCallerIdNumber ?? "",
       recordingPolicy: data.recordingPolicy,
       stirShakenEnabled: data.stirShakenEnabled,
-      enabled: data.enabled,
-      dispatcherSetId: data.dispatcherSetId,
     },
   });
 
@@ -169,8 +167,6 @@ function EditSettingsModal({
           }
           if (form.isDirty("recordingPolicy")) body.recordingPolicy = values.recordingPolicy;
           if (form.isDirty("stirShakenEnabled")) body.stirShakenEnabled = values.stirShakenEnabled;
-          if (form.isDirty("enabled")) body.enabled = values.enabled;
-          if (form.isDirty("dispatcherSetId")) body.dispatcherSetId = values.dispatcherSetId;
           if (Object.keys(body).length === 0) {
             onClose();
             return;
@@ -200,15 +196,6 @@ function EditSettingsModal({
             label="STIR/SHAKEN"
             {...form.getInputProps("stirShakenEnabled", { type: "checkbox" })}
           />
-          <Switch label="Enabled" {...form.getInputProps("enabled", { type: "checkbox" })} />
-          {data.tier === "dedicated" || data.dispatcherSetId === 0 ? (
-            <NumberInput
-              label="Dispatcher set ID"
-              description="Required for dedicated tier before calls route"
-              min={1}
-              {...form.getInputProps("dispatcherSetId")}
-            />
-          ) : null}
           <ErrorAlert error={mutation.error} />
           <Group justify="flex-end">
             <Button variant="subtle" onClick={onClose}>

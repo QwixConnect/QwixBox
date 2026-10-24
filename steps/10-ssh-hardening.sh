@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
-# Key-only SSH, no root login, restricted auth.
+# Key-only SSH; retain root key access on cloud hosts.
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 require_root
 load_config
 
-CONF=/etc/ssh/sshd_config.d/90-hardening.conf
+CONF=/etc/ssh/sshd_config.d/00-qwixbox-hardening.conf
 install -d -m 0755 /etc/ssh/sshd_config.d
 
 key_count=0
+root_key_count=0
 while IFS=: read -r user _ uid _ _ home _; do
   [ "$uid" -ge 1000 ] || [ "$user" = "root" ] || continue
+  if [ "$user" != root ] && ! id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qE '^(sudo|admin)$'; then
+    continue
+  fi
   [ -f "$home/.ssh/authorized_keys" ] || continue
-  n="$(grep -cvE '^\s*(#|$)' "$home/.ssh/authorized_keys" 2>/dev/null || echo 0)"
+  n="$(grep -cvE '^\s*(#|$)' "$home/.ssh/authorized_keys" 2>/dev/null || true)"
+  n="${n:-0}"
   if [ "$n" -gt 0 ]; then
     info "$user has $n authorised key(s)"
     key_count=$((key_count + n))
+    [ "$user" != root ] || root_key_count="$n"
   fi
 done < /etc/passwd
 
@@ -30,7 +36,11 @@ fi
 
 {
   echo "# Managed by the QwixBox installer."
-  echo "PermitRootLogin no"
+  if [ "$root_key_count" -gt 0 ]; then
+    echo "PermitRootLogin prohibit-password"
+  elif [ "$DISABLE_PASSWORDS" -eq 1 ]; then
+    echo "PermitRootLogin no"
+  fi
   echo "PubkeyAuthentication yes"
   if [ "$DISABLE_PASSWORDS" -eq 1 ]; then
     echo "PasswordAuthentication no"
@@ -52,6 +62,13 @@ fi
   echo "Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com"
   echo "MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com"
 } | write_file "$CONF" 0644 || true
+
+# OpenSSH takes the first value, so our settings must precede cloud-init's 50-*.conf.
+legacy=/etc/ssh/sshd_config.d/90-hardening.conf
+if [ -f "$legacy" ] && head -1 "$legacy" | grep -qx '# Managed by the QwixBox installer.'; then
+  rm -f "$legacy"
+  info "Removed superseded QwixBox SSH drop-in: $legacy"
+fi
 
 if [ -f /etc/ssh/moduli ] && awk '$5 < 3071' /etc/ssh/moduli | grep -q .; then
   awk '$5 >= 3071' /etc/ssh/moduli > /etc/ssh/moduli.strong

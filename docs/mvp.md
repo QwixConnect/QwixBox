@@ -2,7 +2,12 @@
 
 What is left before this can carry a paying customer's phone calls. Ordered by what blocks what.
 
-Last updated 2026-08-01, after the portal, installer and password-reset work.
+Last updated 2026-10-24. Earlier container results below are historical. Current source changes and
+verification limits are tracked in the repository-root REVIEW-PLAN.md and CHANGELOG.md.
+
+The SIP authentication regression now runs real Kamailio 6.0.1 against synthetic PostgreSQL
+credentials: valid REGISTER/INVITE credentials pass and wrong/empty passwords fail across two
+tenants. This validates the digest configuration, not audio, NAT, a full installer run or a real carrier.
 
 ## What is proven
 
@@ -88,10 +93,10 @@ added as `viewer` is refused a write (403) where the owner passes to validation 
 ### 4. Emergency calling
 
 `emergencyLocation` exists in `schema.ts` and **nothing else in the codebase references it**.
-Kamailio has the bypass path (`X-Emergency` skips fraud checks and route permissions) and
-`extension.lua` marks the leg, so a 911 call would be *placed* — but the dispatchable address
-that makes it useful is unwired, and there is no Kari's Law notification despite the ESL listener
-being mentioned in the code comments.
+Outbound route resolution marks a matching emergency route with `X-Emergency`;
+Kamailio has an egress bypass. Ingress call-cap handling still precedes that classification,
+so emergency bypass must be tested under saturation. Dispatchable location and notification
+are unwired; comments about an ESL listener do not implement them.
 
 This is a legal obligation in the US (RAY BAUM'S Act, Kari's Law) and Canada, not a feature.
 Either wire it or make it explicit to the first customer that the platform must not be their
@@ -135,7 +140,7 @@ Not blockers for a working phone system, but they will be asked for immediately.
   template has been onboarded with a DNS provider yet, so the approval flow has never completed.
   Onboarding is a per-provider agreement, not code. **The Cloudflare token path has never spoken
   to the real API** — earlier notes claimed "unit-tested against stubs (9/9)", but there is no
-  test suite in this repository and no such tests exist. Zone selection was exercised against a
+  DNS stub suite in this repository and no such DNS tests exist. Zone selection was exercised against a
   throwaway stub while fixing the override bug; nothing else has been.
 - **Monitoring that reaches a human.** `52-monitoring.sh` installs `prometheus-node-exporter` and
   a healthcheck timer; nothing consumes the metrics and nothing pages anyone.

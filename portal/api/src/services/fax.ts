@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { realpath } from "node:fs/promises";
+import { dirname, join, sep } from "node:path";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db";
-import { fax, tenantSettings } from "../db/schema";
+import { fax, tenantSettings, inboundRoute } from "../db/schema";
 import { env } from "../env";
 import { encodeHeader, sendRaw } from "../lib/mail";
 
@@ -18,8 +20,20 @@ export type FaxReport = {
   remoteStationId?: string;
 };
 
+export async function faxPath(file: string, domain?: string): Promise<string> {
+  const spool = await realpath(
+    process.env.FAX_SPOOL ?? "/var/spool/qwixbox-fax",
+  );
+  const root = domain ? join(spool, domain) : spool;
+  const path = await realpath(file);
+  if (!path.startsWith(root + sep) || !/\.(?:tiff?|pdf)$/i.test(path))
+    throw new Error("Invalid fax path");
+  return path;
+}
+
 async function convertToPdf(tiffPath: string): Promise<string | null> {
-  const pdfPath = tiffPath.replace(/\.tif{1,2}$/i, ".pdf");
+  if (!/\.tiff?$/i.test(tiffPath)) throw new Error("Expected a TIFF");
+  const pdfPath = join(dirname(tiffPath), `${randomUUID()}.pdf`);
   try {
     const proc = Bun.spawn(["tiff2pdf", "-o", pdfPath, tiffPath], {
       stdout: "pipe",
@@ -47,7 +61,7 @@ async function deliverByEmail(
   const boundary = `----qwixboxfax-${randomUUID()}`;
   const replyTo = env.mailReplyTo ? `Reply-To: ${env.mailReplyTo}\r\n` : "";
   let message =
-    `From: "${env.mailFromName}" <${env.mailFrom}>\r\n${replyTo}` +
+    `From: ${encodeHeader(env.mailFromName)} <${env.mailFrom}>\r\n${replyTo}` +
     `To: ${to}\r\nDate: ${new Date().toUTCString()}\r\n` +
     `Subject: ${encodeHeader(subject)}\r\nMIME-Version: 1.0\r\n` +
     `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n` +
@@ -78,7 +92,10 @@ export async function recordInboundFax(
   report: FaxReport,
 ): Promise<string | null> {
   const tenant = await db.query.tenantSettings.findFirst({
-    where: eq(tenantSettings.sipDomain, report.domain),
+    where: and(
+      eq(tenantSettings.sipDomain, report.domain),
+      eq(tenantSettings.enabled, true),
+    ),
   });
   if (!tenant) {
     console.error(
@@ -87,6 +104,15 @@ export async function recordInboundFax(
     return null;
   }
 
+  const did = await db.query.inboundRoute.findFirst({
+    where: and(
+      eq(inboundRoute.organizationId, tenant.organizationId),
+      eq(inboundRoute.didPattern, report.did),
+      eq(inboundRoute.enabled, true),
+    ),
+  });
+  if (!did) throw new Error("Unknown or disabled DID");
+  report.filePath = await faxPath(report.filePath, tenant.sipDomain);
   const id = randomUUID();
   await db.insert(fax).values({
     id,
@@ -114,8 +140,7 @@ export async function recordInboundFax(
     await db.update(fax).set({ filePath: pdf }).where(eq(fax.id, id));
   }
 
-  const to = tenant.emergencyNotifyEmail ?? tenant.defaultCallerIdName ?? null;
-  const recipient = report.callerNumber && to ? to : null;
+  const recipient = tenant.faxNotifyEmail;
   if (recipient && pdf) {
     const delivered = await deliverByEmail(
       recipient,
@@ -127,7 +152,11 @@ export async function recordInboundFax(
     if (delivered) {
       await db
         .update(fax)
-        .set({ status: "delivered", deliveredAt: new Date() })
+        .set({
+          status: "delivered",
+          deliveredAt: new Date(),
+          deliverToEmail: recipient,
+        })
         .where(eq(fax.id, id));
     }
   }

@@ -189,7 +189,7 @@ function MembersModal({ group, onClose }: { group: RingGroup; onClose: () => voi
   return (
     <Modal opened onClose={onClose} title={`Members of ${group.name}`} size="lg">
       <Stack>
-        <ErrorAlert error={add.error ?? remove.error} />
+        <ErrorAlert error={members.error ?? extensions.error ?? add.error ?? remove.error} />
         <Table>
           <Table.Thead>
             <Table.Tr>
@@ -219,7 +219,7 @@ function MembersModal({ group, onClose }: { group: RingGroup; onClose: () => voi
                 </Table.Td>
               </Table.Tr>
             ))}
-            {(members.data ?? []).length === 0 && (
+            {members.isSuccess && (members.data ?? []).length === 0 && (
               <Table.Tr>
                 <Table.Td colSpan={3}>
                   <Text c="dimmed" size="sm">
@@ -516,7 +516,7 @@ function IvrOptionsModal({ menu, onClose }: { menu: IvrMenu; onClose: () => void
   return (
     <Modal opened onClose={onClose} title={`Options for ${menu.name}`} size="lg">
       <Stack>
-        <ErrorAlert error={setOption.error ?? removeOption.error} />
+        <ErrorAlert error={options.error ?? setOption.error ?? removeOption.error} />
         <Table>
           <Table.Thead>
             <Table.Tr>
@@ -551,7 +551,7 @@ function IvrOptionsModal({ menu, onClose }: { menu: IvrMenu; onClose: () => void
                 </Table.Td>
               </Table.Tr>
             ))}
-            {(options.data ?? []).length === 0 && (
+            {options.isSuccess && (options.data ?? []).length === 0 && (
               <Table.Tr>
                 <Table.Td colSpan={3}>
                   <Text c="dimmed" size="sm">

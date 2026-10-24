@@ -1,4 +1,3 @@
-
 let allowed = false;
 
 export function allowOneSignup(): void {

@@ -2,7 +2,7 @@
 
 local qwixbox = require "qwixbox"
 
-local domain, id, depth = argv[1], argv[2], tonumber(argv[3] or "0")
+local domain, id, depth = argv[1], argv[2], tonumber(argv[3] or (session and session:getVariable("qwixbox_depth")) or "0")
 
 if not session or not session:ready() then return end
 if not domain or not id then
@@ -21,6 +21,13 @@ end
 session:answer()
 session:execute("playback", "silence_stream://500")
 
+local function safe_sound(sound)
+  return sound and sound:match("^[a-z0-9_][a-z0-9_/.-]*$") and not sound:find("..", 1, true)
+end
+if (menu.greetingSound and not safe_sound(menu.greetingSound)) or (menu.invalidSound and not safe_sound(menu.invalidSound)) then
+  session:hangup("CALL_REJECTED")
+  return
+end
 local greeting = menu.greetingSound or "silence_stream://1000"
 local invalid = menu.invalidSound or "silence_stream://500"
 local timeout_ms = (menu.timeoutSec or 5) * 1000
@@ -31,7 +38,8 @@ local options = menu.options or {}
 for attempt = 1, max_retries do
   if not session:ready() then return end
 
-  local digit = session:playAndGetDigits(1, 1, 1, timeout_ms, "#", greeting, invalid, "\\d|\\*|#")
+  -- All twelve keys are choices. A terminator would consume # before option lookup.
+  local digit = session:playAndGetDigits(1, 1, 1, timeout_ms, "", greeting, invalid, "[0-9*#]")
 
   if digit and digit ~= "" then
     local choice = options[digit]

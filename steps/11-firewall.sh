@@ -34,4 +34,8 @@ nft -c -f /etc/nftables.conf || die "nftables ruleset is invalid - not applying.
 
 systemctl enable --now nftables >/dev/null 2>&1 || systemctl enable nftables >/dev/null 2>&1 || true
 nft -f /etc/nftables.conf
+invalidate_step 14-responsive-firewall.sh
+if has_role sip && [ -f /etc/nftables.d/qwixbox-responsive.nft ]; then
+  "$REPO_DIR/steps/14-responsive-firewall.sh"
+fi
 ok "Firewall active: SSH limited to ${ADMIN_ALLOW_CIDR}, SIP ${SIP_PORT}/${SIPS_PORT}, RTP ${RTP_PORT_MIN}-${RTP_PORT_MAX}"

@@ -7,6 +7,8 @@ node_modules/
 config.env
 *.env
 !.env.example
+# Placeholder-only FreeSWITCH template; the deployed secret file stays outside the repo.
+!resources/conf/freeswitch/runtime.env
 
 # Backups left behind by lib/common.sh write_file
 *.bak-*
@@ -15,3 +17,10 @@ config.env
 
 # Local Claude Code / editor state, not project configuration.
 .claude/
+
+# Generated portal/site build output.
+dist/
+.astro/
+.wrangler/
+*.tsbuildinfo
+site/public/bootstrap.sh

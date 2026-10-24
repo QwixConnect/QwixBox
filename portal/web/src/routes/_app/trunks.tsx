@@ -112,13 +112,13 @@ function TrunkModal({
           <ErrorAlert error={save.error} />
           <TextInput
             label="Name"
-            description="Also the FreeSWITCH gateway name, which is how CDRs attribute a call to this carrier"
+            description="A label for this carrier connection"
             required
             {...form.getInputProps("name")}
           />
           <TextInput
             label="Host"
-            placeholder="sip.carrier.example"
+            placeholder="192.0.2.10"
             required
             {...form.getInputProps("host")}
           />
@@ -135,7 +135,7 @@ function TrunkModal({
             label="Authentication"
             data={[
               { value: "ip", label: "IP address" },
-              { value: "register", label: "Register with credentials" },
+              { value: "register", label: "Registration unavailable", disabled: true },
             ]}
             allowDeselect={false}
             {...form.getInputProps("authMode")}

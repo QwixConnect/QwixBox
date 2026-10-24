@@ -28,7 +28,7 @@ CDR_SPOOL="${CDR_SPOOL:-$PREFIX/log/xml_cdr}"
 FS_AUTOLOAD_ADD="mod_opus mod_lua mod_hiredis mod_pgsql mod_spandsp mod_voicemail mod_curl mod_xml_curl mod_xml_cdr mod_say_en mod_tone_stream"
 
 deploy_template "$TPL/autoload_configs/event_socket.conf.xml" \
-  "$CONF/autoload_configs/event_socket.conf.xml" 0644 freeswitch:freeswitch || true
+  "$CONF/autoload_configs/event_socket.conf.xml" 0640 root:freeswitch || true
 
 deploy_template "$TPL/fs_cli.conf" /etc/fs_cli.conf 0600 root:root || true
 
@@ -55,15 +55,21 @@ for script in "$REPO_DIR"/resources/lua/*.lua; do
 done
 
 apt_install libtiff-tools
-install -d -m 0770 -o freeswitch -g "$API_USER" "$FAX_SPOOL" 2>/dev/null || \
-  install -d -m 0775 -o freeswitch -g freeswitch "$FAX_SPOOL"
+getent group qwixbox-fax >/dev/null || groupadd --system qwixbox-fax
+usermod -a -G qwixbox-fax freeswitch
+install -d -m 2770 -o freeswitch -g qwixbox-fax "$FAX_SPOOL"
 
 deploy_template "$TPL/autoload_configs/lua.conf.xml" \
   "$CONF/autoload_configs/lua.conf.xml" 0644 freeswitch:freeswitch || true
 
 install -d -m 0755 /etc/systemd/system/freeswitch.service.d
-deploy_template "$TPL/systemd-env.conf" \
-  /etc/systemd/system/freeswitch.service.d/10-qwixbox-env.conf 0644 || true
+deploy_template "$TPL/runtime.env" "$CONFIG_DIR/freeswitch.env" 0600 root:root || true
+# Older versions placed secrets directly in this public drop-in. Restrict its backups too.
+for previous in /etc/systemd/system/freeswitch.service.d/10-qwixbox-env.conf*; do
+  [ ! -f "$previous" ] || chmod 0600 "$previous"
+done
+printf '[Service]\nEnvironmentFile=%s/freeswitch.env\n' "$CONFIG_DIR" \
+  | write_file /etc/systemd/system/freeswitch.service.d/10-qwixbox-env.conf 0644 || true
 systemctl daemon-reload
 
 deploy_template "$TPL/autoload_configs/hiredis.conf.xml" \
@@ -93,6 +99,7 @@ FS_AUTOLOAD_CONF="$CONF/autoload_configs/modules.conf.xml"
 pending=""
 for mod_name in $FS_AUTOLOAD_ADD; do
   if [ ! -f "$PREFIX/mod/${mod_name}.so" ]; then
+    [ "$mod_name" != mod_lua ] || die "mod_lua.so is required; rebuild FreeSWITCH before continuing."
     warn "${mod_name}.so was not built - skipping autoload"
     continue
   fi
@@ -140,6 +147,9 @@ else
 fi
 
 chown -R freeswitch:freeswitch "$CONF"
+chown root:freeswitch "$CONF/autoload_configs/event_socket.conf.xml"
+find "$CONF/autoload_configs" -maxdepth 1 -type f \
+  \( -name 'event_socket.conf.xml*' -o -name 'xml_curl.conf.xml*' -o -name 'hiredis.conf.xml*' \) -exec chmod 0640 {} +
 
 if systemctl is-active --quiet freeswitch; then
   restart_service freeswitch
@@ -164,7 +174,5 @@ if systemctl is-active --quiet freeswitch; then
 else
   warn "FreeSWITCH is not running - configuration written, start it with: systemctl start freeswitch"
 fi
-
-ok "FreeSWITCH configured (Lua XML handler primary, xml_curl fallback, Redis on ${REDIS_HOST})"
 
 ok "FreeSWITCH configured (ESL on 127.0.0.1:8021, SIP on 127.0.0.1:${FS_INTERNAL_SIP_PORT}, Opus preferred)"

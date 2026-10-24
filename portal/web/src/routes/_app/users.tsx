@@ -14,7 +14,7 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { authClient } from "../../lib/auth-client";
-import { endpoints } from "../../lib/api";
+import { api, endpoints } from "../../lib/api";
 import { notifyRemoved, notifySaved } from "../../lib/notify";
 import { ROLE_NAMES, useRole, type RoleName } from "../../lib/use-role";
 import { ErrorAlert, PageHeader, QueryState, RoleGate } from "../../components/Resource";
@@ -54,7 +54,7 @@ function AddMemberModal({ opened, onClose }: { opened: boolean; onClose: () => v
         <Stack>
           <TextInput
             label="Email"
-            description="Must already have a portal account. If not, the response shows the create-user command."
+            description="Must already have a portal account. Contact the operator to create an account."
             required
             {...form.getInputProps("email")}
           />
@@ -95,9 +95,8 @@ function UsersPage() {
 
   const updateRole = useMutation({
     mutationFn: ({ memberId, role }: { memberId: string; role: string }) =>
-      authClient.organization.updateMemberRole({ memberId, role }),
-    onSuccess: (res) => {
-      if (res.error) throw new Error(res.error.message);
+      api.patch(`/tenant/members/${memberId}`, { role }),
+    onSuccess: () => {
       notifySaved("Role updated");
       void qc.invalidateQueries({ queryKey: ["members"] });
       void qc.invalidateQueries({ queryKey: ["active-member-role"] });
@@ -106,9 +105,8 @@ function UsersPage() {
 
   const remove = useMutation({
     mutationFn: (memberIdOrEmail: string) =>
-      authClient.organization.removeMember({ memberIdOrEmail }),
-    onSuccess: (res) => {
-      if (res.error) throw new Error(res.error.message);
+      api.delete(`/tenant/members/${memberIdOrEmail}`),
+    onSuccess: () => {
       notifyRemoved("Member removed");
       void qc.invalidateQueries({ queryKey: ["members"] });
     },

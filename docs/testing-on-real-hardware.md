@@ -1,22 +1,21 @@
 # Testing on real hardware
 
 Two things cannot be tested in the container and are the remaining blockers in
-[mvp.md](mvp.md): a real softphone registering and carrying audio, and an x86_64 build. These are
+[mvp.md](mvp.md): confirmed two-way remote audio and an x86_64 build. These are
 the steps.
 
 ---
 
 ## 1. Register a softphone and make a real call
 
-This is the single highest-value test left. It closes two unknowns at once — that digest
-authentication works against the projected HA1, and that audio actually flows through rtpengine.
-Container testing injected registrations with `kamctl ul add` and captured signalling with
-`netcat`; neither proves either of those.
+This is the single highest-value test left. Digest authentication is now covered by a real Kamailio/PostgreSQL regression, including
+wrong/empty-password refusal for two tenants. These steps still need to prove actual audio
+through rtpengine, NAT and the installed stack.
 
 ### Prepare the server
 
 ```bash
-sudo ./install.sh                       # wizard: FQDN, email, admin CIDR, timezone
+sudo ./install.sh                       # setup wizard; skip manual account creation if step 44 already created it
 cd /opt/qwixbox-api
 sudo -u qwixbox bun run src/cli/create-user.ts --email you@example.com --name "You"
 sudo -u qwixbox bun run src/cli/provision-tenant.ts \
@@ -42,7 +41,7 @@ softphone on a laptop.
 |---|---|
 | Username / auth user | `1001` |
 | Password | what you set on the extension |
-| Domain / registrar | `pbx.example.com` (your `PBX_FQDN`) |
+| Domain / registrar | `pbx.example.com` (your `PBX_SIP_DOMAIN`) |
 | Transport | UDP or TLS on 5061; try UDP first |
 
 **Confirm the registration landed:**

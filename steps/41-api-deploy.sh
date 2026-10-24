@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hono API build, Drizzle push, systemd unit, secrets.
-# step-inputs: resources/conf/api
+# step-inputs: resources/conf/api portal/api
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
@@ -26,6 +26,10 @@ if getent group kamailio >/dev/null 2>&1; then
   fi
 fi
 
+if getent group qwixbox-fax >/dev/null 2>&1; then
+  usermod -a -G qwixbox-fax "$API_USER"
+fi
+
 install -d -m 0750 -o "$API_USER" -g "$API_USER" "$API_DIR"
 
 rsync -a --delete \
@@ -40,15 +44,20 @@ config_ensure_secret FS_XML_GATEWAY_SECRET 32
 
 deploy_template "$TPL/env" "$API_DIR/.env" 0640 "root:$API_USER" || true
 
+apt_install pcre2-utils
+
 info "Installing dependencies"
-bun_as "$API_USER" "$API_DIR" bun install --frozen-lockfile --production \
-  || bun_as "$API_USER" "$API_DIR" bun install \
+bun_as "$API_USER" "$API_DIR" bun install --frozen-lockfile \
   || die "bun install failed."
 
 if grep -q '"drizzle-kit"' "$API_DIR/package.json" 2>/dev/null && [ -f "$API_DIR/drizzle.config.ts" ]; then
+  bun_as "$API_USER" "$API_DIR" bun run src/cli/check-did-ownership.ts \
+    || die "Duplicate DID ownership must be resolved before applying this upgrade."
   info "Applying database migrations"
-  bun_as "$API_USER" "$API_DIR" bunx drizzle-kit push --force \
+  bun_as "$API_USER" "$API_DIR" bun run db:push --force \
     || die "Database migration failed - not starting the API against a mismatched schema."
+  bun_as "$API_USER" "$API_DIR" bun run src/cli/check-route-patterns.ts \
+    || die "Outbound pattern audit failed. Review legacy routes before starting this upgrade."
   ok "Migrations applied"
 fi
 

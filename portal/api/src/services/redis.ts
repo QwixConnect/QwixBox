@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { RedisClient } from "bun";
 import { env } from "../env";
 
@@ -54,6 +55,7 @@ export async function safeDelPattern(pattern: string): Promise<number> {
       `[redis] scan-delete ${pattern} failed:`,
       (err as Error).message,
     );
+    throw err;
   }
   return deleted;
 }
@@ -72,7 +74,7 @@ export async function safeSet(
     return true;
   } catch (err) {
     console.error(`[redis] set ${key} failed:`, (err as Error).message);
-    return false;
+    throw err;
   }
 }
 
@@ -83,25 +85,58 @@ export async function safeDel(...keysToDelete: string[]): Promise<boolean> {
     return true;
   } catch (err) {
     console.error(`[redis] del failed:`, (err as Error).message);
-    return false;
+    throw err;
   }
 }
 
-export async function claimWarm(): Promise<boolean> {
-  try {
-    const reply = await redis.send("SET", [
-      keys.warmSentinel(),
-      new Date().toISOString(),
-      "NX",
-    ]);
-    return reply === "OK";
-  } catch (err) {
-    console.warn(
-      "[cache] could not claim the warm sentinel:",
-      (err as Error).message,
-    );
-    return false;
-  }
+const WARM_LOCK = "qwixbox:warm-lock";
+const LOCK_TTL_MS = 30_000;
+
+export async function claimWarm(): Promise<string | null> {
+  if (await redis.get(keys.warmSentinel())) return null;
+  const token = randomUUID();
+  const result = await redis.send("SET", [
+    WARM_LOCK,
+    token,
+    "NX",
+    "PX",
+    String(LOCK_TTL_MS),
+  ]);
+  return result === "OK" ? token : null;
+}
+
+export async function renewWarm(token: string): Promise<boolean> {
+  return (
+    Number(
+      await redis.send("EVAL", [
+        "if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE',KEYS[1],ARGV[2]) else return 0 end",
+        "1",
+        WARM_LOCK,
+        token,
+        String(LOCK_TTL_MS),
+      ]),
+    ) === 1
+  );
+}
+
+export async function finishWarm(
+  token: string,
+  success: boolean,
+): Promise<boolean> {
+  return (
+    Number(
+      await redis.send("EVAL", [
+        "if redis.call('GET',KEYS[1]) ~= ARGV[1] then return 0 end; " +
+          "if ARGV[2] == '1' then redis.call('SET',KEYS[2],ARGV[3]) end; redis.call('DEL',KEYS[1]); return 1",
+        "2",
+        WARM_LOCK,
+        keys.warmSentinel(),
+        token,
+        success ? "1" : "0",
+        new Date().toISOString(),
+      ]),
+    ) === 1
+  );
 }
 
 export async function ping(): Promise<boolean> {

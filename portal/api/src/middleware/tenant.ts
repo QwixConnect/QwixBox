@@ -34,7 +34,7 @@ export const requireTenant = createMiddleware<AppEnv>(
     }
 
     // Role comes from the member row, not the session: session.activeOrganizationRole does not
-      // exist, and activeOrganizationId survives a revoked membership until the session expires.
+    // exist, and activeOrganizationId survives a revoked membership until the session expires.
     const [membership] = await db
       .select({ role: member.role })
       .from(member)

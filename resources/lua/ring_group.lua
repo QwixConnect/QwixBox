@@ -2,7 +2,7 @@
 
 local qwixbox = require "qwixbox"
 
-local domain, id, depth = argv[1], argv[2], tonumber(argv[3] or "0")
+local domain, id, depth = argv[1], argv[2], tonumber(argv[3] or (session and session:getVariable("qwixbox_depth")) or "0")
 
 if not session or not session:ready() then return end
 if not domain or not id then
@@ -29,7 +29,13 @@ if #members == 0 then
   return
 end
 
-local separator = (group.strategy == "sequential") and "|" or ","
+if group.strategy == "random" then
+  for i = #members, 2, -1 do
+    local j = math.random(i)
+    members[i], members[j] = members[j], members[i]
+  end
+end
+local separator = (group.strategy == "sequential" or group.strategy == "random") and "|" or ","
 
 local dials = {}
 for _, m in ipairs(members) do
@@ -61,6 +67,5 @@ qwixbox.log("ring_group", "info", "%s: nobody answered (%s)", group.name, cause)
 if group.failoverType then
   qwixbox.go(session, domain, group.failoverType, group.failoverId, depth)
 else
-  session:execute("answer", "")
-  session:execute("voicemail", string.format("default %s %s", domain, group.number))
+  session:hangup("NO_ANSWER")
 end

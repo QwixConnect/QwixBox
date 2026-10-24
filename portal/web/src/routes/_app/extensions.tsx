@@ -168,6 +168,7 @@ function Extensions() {
         </RoleGate>
       </Group>
 
+      <ErrorAlert error={toggle.error} />
       {rows.length === 0 ? (
         <Alert color="blue" title="No extensions yet">
           Create one to give someone a phone. It becomes registrable as soon as Kamailio has

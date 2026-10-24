@@ -6,6 +6,7 @@ async function eslCommand(
   command: string,
   timeoutMs = 5000,
 ): Promise<EslResult> {
+  if (/[\r\n\0]/.test(command)) throw new Error("Invalid ESL command");
   if (!env.fsEslPassword) {
     return { ok: false, body: "FS_ESL_PASSWORD is not set" };
   }
@@ -21,8 +22,7 @@ async function eslCommand(
       clearTimeout(timer);
       try {
         socket?.end();
-      } catch {
-      }
+      } catch {}
       resolve(result);
     };
 
@@ -76,7 +76,10 @@ async function eslCommand(
             const expected = Number(match[1]);
             const body = match[2] ?? "";
             if (Buffer.byteLength(body) >= expected) {
-              finish({ ok: true, body: body.trim() });
+              finish({
+                ok: !body.trim().startsWith("-ERR"),
+                body: body.trim(),
+              });
             }
           }
         },
@@ -97,6 +100,10 @@ export const esl = {
   api: eslCommand,
 
   async flushXmlCache(user?: string, domain?: string): Promise<boolean> {
+    for (const arg of [user, domain]) {
+      if (arg !== undefined && /[\s\x00-\x1f\x7f]/.test(arg))
+        throw new Error("Invalid ESL argument");
+    }
     const cmd =
       user && domain
         ? `xml_flush_cache id ${user} ${domain}`

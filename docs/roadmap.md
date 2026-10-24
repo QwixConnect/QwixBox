@@ -42,10 +42,10 @@ complete their code looks. [mvp.md](mvp.md) item 1 is that test.
 | 9 | Call centre / contact centre | **Schema only** | A bare `queue` table. The big one — [design](design/call-centre.md) |
 | 10 | CDR & reporting | **Partial** | CDR ingest wired; call list with filters, aggregate summary and CSV export in the portal. No reporting beyond that |
 | 11 | Real-time monitoring | **Not started** | ESL client exists (`services/esl.ts`); no wallboard |
-| 12 | Trunks & providers | **Working** | Encrypted credentials, Kamailio projection, and outbound delivery to a carrier verified |
+| 12 | Trunks & providers | **Working** | IP trunks and Kamailio projection; outbound signalling historically verified. Enabled registration trunks are rejected until their registration/challenge path exists |
 | 13 | Contacts & directory | **Not started** | [backlog](design/backlog.md); `mod_cidlookup` is built and unused |
 | 14 | WebRTC & softphone | **Untested** | WSS listens and rtpengine is in the media path in config; no browser client has connected. A native softphone does register |
-| 15 | System administration | **Partial** | Installer, four-question wizard, one-line bootstrap, health checks and log rotation work. DNS records created automatically via Domain Connect or a Cloudflare token. Backups run and **have never been restored** |
+| 15 | System administration | **Partial** | Installer, setup wizard, pinned bootstrap, health checks and log rotation exist. Cloudflare publication is implemented; Domain Connect discovery exists but provider approval is unverified. Backups now reject missing encryption config; a full restore remains unproven |
 | 16 | Integration & APIs | **Partial** | The REST API is the integration surface and the portal is a client of it. Audit trail readable via `/api/audit`. No webhooks |
 | 17 | Billing & invoicing | **Not started** | v1 marked this complete; it was not — [design](design/billing.md) |
 | 18 | Call transcription & AI | **Not started** | Premium in v1's plan |

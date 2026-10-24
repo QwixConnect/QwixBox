@@ -18,7 +18,7 @@ voicemail, call detail records — built on a different set of choices.
   the two codebases feel different to extend.
 - **API-first.** The portal is a client of the same REST API you get. There is no admin action
   that only exists as a form.
-- **The installer is part of the product.** 28 idempotent steps, a four-question wizard, and a
+- **The installer is part of the product.** 28 idempotent steps, a setup wizard, and a
   re-run that is quiet instead of destructive. Not a tarball and a wiki page.
 
 **Stack:** Kamailio (SIP edge) → FreeSWITCH (media/PBX core) → rtpengine (media relay),
@@ -59,12 +59,11 @@ and roles, an audit trail, and tenant settings. Four roles (`owner`, `admin`, `m
 enforced server-side on every request, with the role re-read from the membership row rather than
 trusted from the session.
 
-**Platform** — multi-tenant with SIP-domain isolation, per-tenant concurrent-call limits, TLS
+**Platform** — multi-tenant with SIP-domain isolation, a fixed per-account edge call cap, TLS
 throughout (SIP TLS, WSS, HTTPS) with automatic Let's Encrypt, nftables and fail2ban, a
 responsive SIP firewall that tightens on sources that have never registered, DKIM-signed outbound
-mail, scheduled backups, and DNS records created for you — automatically at GoDaddy, IONOS,
-Cloudflare and six other providers via [Domain Connect](https://www.domainconnect.org/), or with
-a Cloudflare API token.
+mail, scheduled backups, and Cloudflare DNS automation. Domain Connect discovery is implemented;
+its provider approval flow has not been verified. Manual DNS configuration is supported.
 
 **Deliberately absent** — no self-service registration (a portal account administers telephony,
 so a compromise is toll fraud on someone else's bill) and no default credential (the installer
@@ -123,15 +122,13 @@ get there, set by `DNS_PROVIDER`:
 
 | | What happens | Stores a credential |
 |---|---|---|
-| `domainconnect` | You approve once in your DNS provider's browser UI and the records appear | no |
+| `domainconnect` | Provider discovery and approval link; record creation remains unverified | no |
 | `cloudflare` | The installer writes them with an API token | yes, in `config.env` |
 | `none` | The installer prints the records for you to create | no |
 
-The wizard detects which apply. Automatic setup works when your DNS provider implements
-[Domain Connect](https://www.domainconnect.org/) — currently **GoDaddy, IONOS, Cloudflare,
-NameSilo, Plesk, Vercel, WordPress.com, Domain Chief and Glauca Digital**. Anywhere else,
-`none` prints the exact records and the install continues; that path is fully supported, not a
-consolation prize.
+The wizard discovers Domain Connect support, but discovery does not prove a provider has accepted
+the template or that the approval flow creates records. Use the Cloudflare token path or create
+the printed records manually until your provider flow has been verified.
 
 ### Getting a certificate without port 80
 
@@ -349,7 +346,7 @@ SMTP_HOST="smtp.provider.example"   # voicemail-to-email and fax-to-email need a
 SMTP_USER="..."
 SMTP_PASSWORD="..."
 SMTP_FROM="pbx@example.com"         # a domain you control, with SPF and DKIM
-MAX_CONCURRENT_CALLS=10             # toll-fraud ceiling per tenant
+MAX_CONCURRENT_CALLS=10             # configured value; dynamic tenant-limit enforcement is pending
 ```
 
 Then run it:
@@ -362,8 +359,8 @@ It runs unattended from here — roughly 20–40 minutes, most of it compiling F
 is logged to `/var/log/qwixbox/`. If it stops, fix what it reports and run the same
 command again; completed steps are skipped.
 
-Leave `SMTP_HOST` empty if you have no relay yet. Voicemail and fax still work, they just do
-not send email. Add it later with:
+Leave `SMTP_HOST` empty if you have no relay yet. Local voicemail/fax handling remains available,
+but email delivery then depends on direct outbound port 25. Add it later with:
 
 ```bash
 sudo ./install.sh --configure          # or edit /etc/qwixbox/config.env
@@ -376,7 +373,7 @@ Vultr block it until you ask them not to. With a relay, mail leaves over 587 and
 locally by OpenDKIM.
 
 `15-mail.sh` prints the DKIM, DMARC and SPF records to publish, or creates them for you when
-`DNS_PROVIDER="cloudflare"`. Publish them: mail signed with a key that is not in DNS fails
+`the selected DNS provider supports publication. Verify the records: mail signed with a key that is not in DNS fails
 verification exactly as if it were forged. Note that when you relay, the SPF record has to name
 **your relay provider's** servers — their `include:` — not this host.
 
@@ -402,8 +399,11 @@ installer.
 
 ### 7. Create an account and a tenant
 
+If step 44 created your account, use the generated first-login credentials described under
+[Portal access](#portal-access). The commands below are the fallback when `ADMIN_EMAIL` is empty.
+
 **There is no self-service registration.** A portal account administers telephony, and a
-compromise means toll fraud billed to a tenant, so accounts are created by you on the server —
+compromise means toll fraud billed to a tenant, so accounts are created by the installer or an operator —
 the signup endpoint returns 404 and the API refuses it. Both commands run from the *deployed*
 API directory, which has the environment file and dependencies; the git checkout does not.
 
@@ -469,26 +469,17 @@ the two things a customer most often wants withheld from a general admin.
 No role can read a stored trunk password back. It is encrypted at rest and stripped from every
 API response; `admin` can only replace it.
 
-Adding a second person means two commands today — `create-user.ts` for the account, then a
-`member` row for the tenant:
+Create the additional account on the server, then attach it through the portal Users page
+or the membership CLI:
 
 ```bash
 cd /opt/qwixbox-api
 sudo -u qwixbox bun run src/cli/create-user.ts --email ops@example.com --name "Ops"
-
-# There is no CLI for this yet, and re-running provision-tenant.ts will NOT add them -
-# it stops once the organization has any member. Insert the row directly:
-sudo -u postgres psql qwixbox -c "
-  INSERT INTO member (id, organization_id, user_id, role, created_at)
-  SELECT gen_random_uuid()::text,
-         (SELECT id FROM organization WHERE slug = 'acme'),
-         (SELECT id FROM \"user\" WHERE email = 'ops@example.com'),
-         'admin', now();"
+sudo -u qwixbox bun run src/cli/add-tenant-user.ts --email ops@example.com --tenant acme --role admin
 ```
 
-The portal has an invite endpoint, but it is not finished: there is no mail transport wired to
-it and no accept-invitation screen, so inviting someone logs a link to the journal and nothing
-else. Use the above until that is real.
+Invitations are unavailable. Existing accounts are added directly; owner changes are serialized
+so concurrent requests cannot remove the last owner.
 
 ### Cloud gotchas worth knowing
 
@@ -555,7 +546,7 @@ and mobile behind NAT.
 | `00-preflight` | Host validation, hostname, timezone, NTP, kernel/limit tuning |
 | `01-base-packages` | Tooling, CA certificates, unattended security upgrades |
 | `02-dns` | A record for `PBX_FQDN` via the DNS provider (optional) |
-| `10-ssh-hardening` | Key-only SSH (refuses to lock you out if no key exists) |
+| `10-ssh-hardening` | Key-only SSH; preserves root key access and leaves password authentication enabled when no keys exist |
 | `11-firewall` | nftables default-deny with SIP rate limiting |
 | `12-fail2ban` | Jails for sshd, FreeSWITCH and Kamailio |
 | `13-tls-certs` | Let's Encrypt plus renewal hooks shared by all services |
@@ -574,6 +565,7 @@ and mobile behind NAT.
 | `41-api-deploy` | API deploy, migrations, hardened systemd unit |
 | `42-nginx` | TLS termination and reverse proxy |
 | `43-portal-web` | Build the React admin portal and publish it |
+| `44-admin-account` | First account and tenant when ADMIN_EMAIL is configured |
 | `50-logrotate` | Log retention |
 | `51-backups` | Nightly database and config backups |
 | `52-monitoring` | Health checks and node_exporter |
@@ -584,7 +576,7 @@ and mobile behind NAT.
 
 `99-postflight.sh` lists what remains. In short:
 
-- Create your account with `create-user.ts`, then a tenant with `provision-tenant.ts` — see
+- If the installer did not create your account, use `create-user.ts`, then `provision-tenant.ts` — see
   [step 7](#7-create-an-account-and-a-tenant). There is no self-service signup: the endpoint
   returns 404 and the API refuses it
 - Give anyone else the narrowest role that works — a `viewer` cannot change anything, and a
@@ -593,8 +585,8 @@ and mobile behind NAT.
 - Create extensions **in the portal**, not with `kamctl add`. The API writes Kamailio's
   `subscriber` table itself, as an HA1 digest; a subscriber added by hand registers fine but is
   invisible to the portal and gets no dialplan, voicemail or CDR
-- Add a trunk and outbound routes so calls can leave. Number translation and least-cost routing
-  are business logic and are deliberately absent
+- Add a trunk and outbound routes so calls can leave. Strip/prepend number translation is supported;
+  least-cost routing and billing are absent
 - Narrow `ADMIN_ALLOW_CIDR` if it is still `0.0.0.0/0`
 - Set `OFFSITE_RSYNC_TARGET` so backups leave the host
 - Place a test call and confirm two-way audio in both directions
@@ -717,3 +709,31 @@ file up: without it the database passwords are unrecoverable.
 - STIR/SHAKEN is off by default. It is a source build (neither libstirshaken nor Kamailio's
   stirshaken module is packaged for Debian) and needs a certificate from an STI-CA.
 - Sound files are installed at 8kHz and 48kHz only. See `FS_SOUND_RATES`.
+
+## Local portal development
+
+For UI development without a PBX, run `bun run dev:mock` from `portal/web` and open
+http://127.0.0.1:5174/. It starts signed in with synthetic, editable in-memory data and provides
+role/empty/error/slow controls. See [portal/web/README.md](portal/web/README.md) for details.
+
+## Upgrading and verifying review fixes
+
+See the repository-root `CHANGELOG.md` and `REVIEW-PLAN.md` for implementation status and remaining
+verification. Run the installer from the updated checkout so changed source/template hashes redeploy
+the affected steps. Reapplying step 34 loads the corrected HA1 authentication settings; reapplying
+step 31 moves runtime gateway credentials into a root-only environment file. Existing secrets are
+preserved. Retest both successful and refused SIP authentication before returning the PBX to service.
+
+DIDs are exact numbers, globally owned by one route (including disabled routes). Preserve the carrier's
+leading `+` format. Step 41 refuses duplicate ownership before adding the unique index; resolve conflicts
+with the owning tenants first. Outbound patterns use PCRE; legacy patterns require explicit operator
+review with `src/cli/check-route-patterns.ts`. Enabled registration trunks are unavailable; use IP trunks.
+
+Backup success requires the encryption configuration in the archive. Keep `config.env` with database
+dumps, retain the corresponding key, and test a restore. Failed snapshots or offsite copies do not
+prune previous local backups. Regression-test instructions are in `tests/README.md`.
+
+The site publishes an immutable installer ref. Commit the tested runtime changes before
+`npm run deploy` in `site`; its predeploy check refuses a dirty installer/runtime tree. Local
+`npm run build` remains available for preview. `QWIXBOX_INSTALL_REF` can select a full reviewed
+commit SHA; `QWIXBOX_REF` overrides it when explicitly running the bootstrap source template.

@@ -163,6 +163,15 @@ is_all_in_one() {
   return 1
 }
 
+invalidate_step() {
+  local name="$1"
+  case "$name" in
+    *[!a-zA-Z0-9_.-]*|"") die "Invalid step name: $name" ;;
+  esac
+  rm -f "${QWIXBOX_STATE_DIR:-/var/lib/qwixbox}/$name.done"
+  info "Invalidated $name: its inputs were replaced"
+}
+
 internal_bind_addr() {
   if is_all_in_one; then
     printf '127.0.0.1'
@@ -312,16 +321,15 @@ restart_service() {
 bun_as() {
   local user="$1" dir="$2"
   shift 2
-  local home cache
-  home="$(getent passwd "$user" | cut -d: -f6)"
-  [ -n "$home" ] && [ -d "$home" ] || home="$dir"
-  cache="$home/.bun-cache"
+  local bun_user_home cache
+  bun_user_home="$(getent passwd "$user" | cut -d: -f6)"
+  [ -n "$bun_user_home" ] && [ -d "$bun_user_home" ] || bun_user_home="$dir"
+  cache="$bun_user_home/.bun-cache"
 
   install -d -m 0755 -o "$user" -g "$user" "$cache" "$cache/tmp" 2>/dev/null || true
 
-  su -s /bin/bash -c \
-    "cd '$dir' && BUN_INSTALL_CACHE_DIR='$cache' BUN_TMPDIR='$cache/tmp' TMPDIR='$cache/tmp' $*" \
-    "$user"
+  su -s /bin/bash -c 'cd -- "$1" && export BUN_INSTALL_CACHE_DIR="$2" BUN_TMPDIR="$2/tmp" TMPDIR="$2/tmp" && shift 2 && exec "$@"' \
+    "$user" -- bash "$dir" "$cache" "$@"
 }
 
 psql_super() { su - postgres -c "psql -v ON_ERROR_STOP=1 $*"; }

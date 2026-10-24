@@ -45,10 +45,7 @@ export async function recordAudit(
       entityId: input.entityId ?? null,
       before: redact(input.before) ?? null,
       after: redact(input.after) ?? null,
-      ipAddress:
-        c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
-        c.req.header("x-real-ip") ??
-        null,
+      ipAddress: c.req.header("x-real-ip") ?? null,
       userAgent: c.req.header("user-agent") ?? null,
     });
   } catch (err) {

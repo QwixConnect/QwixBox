@@ -42,7 +42,7 @@ const STATUS = [
           <button type="button" data-copy={INSTALL} aria-label="Copy install command">Copy</button>
         </div>
         <p class="cmd-note">
-          Debian 13, 2 vCPU, 4 GB. Opens a four-question wizard and hands you a login.
+          Debian 13, 2 vCPU, 4 GB. Opens a setup wizard and creates a login when an admin email is configured.
         </p>
       </div>
 
@@ -164,9 +164,8 @@ const STATUS = [
         <div>
           <dt>Platform</dt>
           <dd>
-            SIP-domain isolation, per-tenant call limits, TLS throughout with automatic Let's
-            Encrypt, nftables and fail2ban, DKIM-signed mail, scheduled backups, and DNS records
-            created for you at nine providers via Domain Connect.
+            SIP-domain isolation, an edge call cap, TLS throughout with automatic Let's
+            Encrypt, nftables and fail2ban, DKIM-signed mail, scheduled backups, Cloudflare DNS publication and Domain Connect provider discovery.
           </dd>
         </div>
       </dl>

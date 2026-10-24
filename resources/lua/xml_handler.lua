@@ -2,6 +2,7 @@
 -- mod_xml_curl. The directory dial-string here must match routes/fs-xml.ts.
 
 local M = {}
+local qwixbox = require "qwixbox"
 
 local REDIS_PROFILE = "default"
 local DEBUG = false
@@ -17,6 +18,7 @@ end
 local api = freeswitch.API()
 
 local function redis_get(key)
+  if not key or key:find("[%% %s%c]") then return nil end
   local ok, result = pcall(function()
     return api:execute("hiredis_raw", REDIS_PROFILE .. " GET " .. key)
   end)
@@ -134,7 +136,7 @@ local function context_xml(context, body)
   return string.format('    <context name="%s">\n%s\n    </context>', xml_escape(context), body)
 end
 
-local function build_outbound(route, destination, tenant)
+local function build_outbound(route, destination, tenant, caller, domain)
   local number = destination
   if route.stripDigits and route.stripDigits > 0 then
     number = number:sub(route.stripDigits + 1)
@@ -146,14 +148,21 @@ local function build_outbound(route, destination, tenant)
   local actions = {}
 
   table.insert(actions, action("set", "sip_h_X-Tenant-ID=" .. (tenant.organizationId or "")))
-  table.insert(actions, action("set", "sip_h_X-Auth-User=${sip_auth_username}"))
+  table.insert(actions, action("set", "sip_h_X-Auth-User=" .. (caller or "")))
   table.insert(actions, action("set", "sip_h_X-Correlation-ID=${uuid}"))
 
+  table.insert(actions, action("set", "sip_h_X-Tenant-Domain=" .. domain))
+  table.insert(actions, action("unset", "sip_h_X-Emergency"))
+  table.insert(actions, action("unset", "sip_h_X-Stir-Sign"))
+  if tenant.stirShakenEnabled then table.insert(actions, action("set", "sip_h_X-Stir-Sign=true")) end
+
   local transport = route.trunk.transport or "udp"
+  local host = route.trunk.host
+  if host:find(":", 1, true) then host = "[" .. host .. "]" end
   table.insert(actions, action("set", "sip_h_X-Trunk-ID=" .. route.trunk.id))
   table.insert(actions, action("set", string.format(
     "sip_h_X-Trunk-Target=%s:%d;transport=%s",
-    route.trunk.host, route.trunk.port or 5060, transport)))
+    host, route.trunk.port or 5060, transport)))
 
   if route.isEmergency then
     table.insert(actions, action("set", "sip_h_X-Emergency=true"))
@@ -176,9 +185,14 @@ end
 function M.dialplan(req, p)
   local destination = p:getHeader("Caller-Destination-Number")
     or p:getHeader("destination_number")
-  local domain = p:getHeader("variable_sip_auth_realm")
-    or p:getHeader("variable_domain_name")
-    or p:getHeader("Caller-Context")
+  -- Peer calls are resolved by the API using globally unambiguous exact DID ownership.
+  -- No peer may enter extension, feature or outbound routing, even with a forged From domain.
+  if p:getHeader("variable_sip_h_X-Trusted-Peer") == "1" then return nil end
+  local domain = p:getHeader("variable_sip_h_X-Tenant-Domain")
+  local caller = p:getHeader("variable_sip_h_X-Auth-User")
+  if caller and not caller:match("^[0-9A-Za-z_.-]+$") then caller = nil end
+  if domain and not domain:match("^[%w.-]+$") then return nil end
+  if destination and not destination:match("^%+?[0-9*#]+$") then return nil end
 
   if not destination or not domain then
     debug("dialplan request missing destination or domain - declining")
@@ -205,17 +219,16 @@ function M.dialplan(req, p)
   local routes = json_decode(redis_get("qwixbox:routes:" .. domain)) or {}
 
   for _, route in ipairs(routes) do
-    if route.isEmergency and destination:match(route.pattern) then
+    if caller and route.trunk and route.patternSyntax == "pcre" and route.isEmergency == true and qwixbox.regex_match(destination, route.pattern) then
       log("notice", "EMERGENCY call to %s from %s", destination, domain)
       return document(
         "dialplan",
-        context_xml(context, extension_xml("emergency", destination, build_outbound(route, destination, tenant)))
+        context_xml(context, extension_xml("emergency", destination, build_outbound(route, destination, tenant, caller, domain)))
       )
     end
   end
 
   if destination == "*97" or destination == "*98" then
-    local caller = p:getHeader("variable_sip_h_X-Auth-User") or p:getHeader("Caller-Username")
     local vm_args
     if destination == "*97" and caller then
       vm_args = string.format("check auth default %s %s", domain, caller)
@@ -255,7 +268,6 @@ function M.dialplan(req, p)
   end
 
   if feature_action then
-    local caller = p:getHeader("variable_sip_h_X-Auth-User") or p:getHeader("Caller-Username")
     if not caller then
       log("warning", "feature code %s from %s with no authenticated user - refusing",
         destination, domain)
@@ -283,33 +295,13 @@ function M.dialplan(req, p)
   end
 
   local function destination_actions(dtype, did_id)
-    local actions = {}
-    if dtype == "extension" then
-      table.insert(actions, action("lua", string.format("extension.lua %s %s", domain, did_id)))
-    elseif dtype == "ivr" then
-      table.insert(actions, action("answer", ""))
-      table.insert(actions, action("lua", string.format("ivr.lua %s %s", domain, did_id)))
-    elseif dtype == "ring_group" then
-      table.insert(actions, action("lua", string.format("ring_group.lua %s %s", domain, did_id)))
-    elseif dtype == "time_condition" then
-      table.insert(actions, action("lua", string.format("time_condition.lua %s %s", domain, did_id)))
-    elseif dtype == "fax" then
-      table.insert(actions, action("answer", ""))
-      table.insert(actions, action("playback", "silence_stream://2000"))
-      table.insert(actions, action("lua", string.format("fax_receive.lua %s %s", domain, destination)))
-    elseif dtype == "voicemail" then
-      table.insert(actions, action("answer", ""))
-      table.insert(actions, action("voicemail", string.format("default %s %s", domain, did_id)))
-    else
-      table.insert(actions, action("hangup", "UNALLOCATED_NUMBER"))
-    end
-    return actions
+    return { action("lua", string.format("destination.lua %s %s %s", domain, dtype, did_id or "-")) }
   end
 
   local did = json_decode(redis_get("qwixbox:did:" .. domain .. ":" .. destination))
   if did then
     return document("dialplan", context_xml(context,
-      extension_xml("did", destination, destination_actions(did.destinationType, did.destinationId))))
+      extension_xml("did", destination, { action("set", "qwixbox_did=" .. destination), (table.unpack or unpack)(destination_actions(did.destinationType, did.destinationId)) })))
   end
 
   local feature = json_decode(redis_get("qwixbox:num:" .. domain .. ":" .. destination))
@@ -319,13 +311,13 @@ function M.dialplan(req, p)
   end
 
   for _, route in ipairs(routes) do
-    if not route.isEmergency and destination:match(route.pattern) then
+    if caller and route.trunk and route.patternSyntax == "pcre" and route.isEmergency == false and qwixbox.regex_match(destination, route.pattern) then
       if not route.trunk then
         log("warning", "route %s matched but has no trunk", route.id)
       else
         return document(
           "dialplan",
-          context_xml(context, extension_xml("outbound", destination, build_outbound(route, destination, tenant)))
+          context_xml(context, extension_xml("outbound", destination, build_outbound(route, destination, tenant, caller, domain)))
         )
       end
     end
