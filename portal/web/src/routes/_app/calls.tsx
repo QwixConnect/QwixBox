@@ -1,270 +1,440 @@
-import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
-  Badge,
-  Button,
-  Card,
-  Group,
-  Pagination,
-  Select,
-  SimpleGrid,
-  Table,
-  Text,
-  TextInput,
+	ActionIcon,
+	Badge,
+	Box,
+	Button,
+	Group,
+	Modal,
+	Pagination,
+	SimpleGrid,
+	Stack,
+	Text,
+	TextInput,
+	UnstyledButton,
 } from "@mantine/core";
-import { endpoints, type Cdr, type CdrFilters } from "../../lib/api";
-import { PageHeader, QueryState, RoleGate } from "../../components/Resource";
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import {
+	IconArrowDownLeft,
+	IconArrowUpRight,
+	IconInfo,
+	IconKeypad,
+	IconPhone,
+	IconSearch,
+} from "../../components/Icons";
+import {
+	InitialsAvatar,
+	PageHeader,
+	QueryState,
+	RoleGate,
+	SegmentedTabs,
+	SurfaceCard,
+} from "../../components/Resource";
+import { useWebphone } from "../../components/WebphoneDrawer";
+import { type Cdr, type CdrFilters, endpoints } from "../../lib/api";
 
-const PAGE_SIZE = 50;
+export const Route = createFileRoute("/_app/calls")({
+	component: CallsPage,
+});
 
-function formatDuration(sec: number): string {
-  if (sec <= 0) return "—";
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
-
-function directionColour(d: Cdr["direction"]): string {
-  return d === "inbound" ? "blue" : d === "outbound" ? "grape" : "gray";
-}
-
-function SummaryCards({ from, to }: { from?: string; to?: string }) {
-  const { data } = useQuery({
-    queryKey: ["cdr-summary", from, to],
-    queryFn: () => endpoints.cdrSummary(from, to),
-  });
-
-  const cards = [
-    { label: "Calls", value: data ? String(data.calls) : "—" },
-    {
-      label: "Answered",
-      value:
-        data == null
-          ? "—"
-          : data.answerRate === null
-            ? "—"
-            : `${Math.round(data.answerRate * 100)}%`,
-    },
-    { label: "Inbound", value: data ? String(data.inbound) : "—" },
-    { label: "Outbound", value: data ? String(data.outbound) : "—" },
-    { label: "Billable", value: data ? formatDuration(data.billableSec) : "—" },
-  ];
-
-  return (
-    <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} mb="md">
-      {cards.map((c) => (
-        <Card key={c.label} withBorder padding="sm">
-          <Text size="xs" c="dimmed">
-            {c.label}
-          </Text>
-          <Text size="xl" fw={600}>
-            {c.value}
-          </Text>
-        </Card>
-      ))}
-    </SimpleGrid>
-  );
+function formatDurationMinSec(sec: number): string {
+	const m = Math.floor(sec / 60);
+	const s = sec % 60;
+	if (m === 0) return `${s}s`;
+	return `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
 function CallsPage() {
-  const [direction, setDirection] = useState("");
-  const [number, setNumber] = useState("");
-  const [answered, setAnswered] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [page, setPage] = useState(1);
+	const { startCall, openKeypad } = useWebphone();
+	const [page, setPage] = useState(1);
+	const [tab, setTab] = useState<"all" | "missed" | "inbound" | "outbound">(
+		"all",
+	);
+	const [search, setSearch] = useState("");
+	const [selectedCall, setSelectedCall] = useState<Cdr | null>(null);
+	const pageSize = 25;
 
-  const filters: CdrFilters = {
-    direction: direction || undefined,
-    number: number || undefined,
-    answered: answered || undefined,
-    from: from || undefined,
-    to: to || undefined,
-    limit: PAGE_SIZE,
-    offset: (page - 1) * PAGE_SIZE,
-  };
+	const filters: CdrFilters = {
+		limit: pageSize,
+		offset: (page - 1) * pageSize,
+		direction:
+			tab === "inbound"
+				? "inbound"
+				: tab === "outbound"
+					? "outbound"
+					: undefined,
+		answered: tab === "missed" ? "false" : undefined,
+		number: search || undefined,
+	};
 
-  const { data, isPending, isSuccess, isPaused, error } = useQuery({
-    queryKey: ["cdr", filters],
-    queryFn: () => endpoints.cdr(filters),
-    placeholderData: keepPreviousData,
-  });
+	const cdr = useQuery({
+		queryKey: ["cdr", filters],
+		queryFn: () => endpoints.cdr(filters),
+	});
 
-  const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
+	const allRows = cdr.data?.rows ?? [];
+	const rows =
+		tab === "missed" ? allRows.filter((r) => !r.answeredAt) : allRows;
 
-  const resetPage = <T,>(setter: (v: T) => void) => (v: T) => {
-    setter(v);
-    setPage(1);
-  };
+	const totalPages = cdr.data
+		? Math.max(1, Math.ceil(cdr.data.total / pageSize))
+		: 1;
 
-  return (
-    <>
-      <PageHeader
-        title="Calls"
-        description="Every call FreeSWITCH handled. Read-only by design — a phone system whose billing history can be edited through its own API is not one anyone should buy."
-        action={
-          <RoleGate resource="cdr" action="export">
-            <Button
-              component="a"
-              href={endpoints.cdrExportUrl({
-                direction: direction || undefined,
-                number: number || undefined,
-                answered: answered || undefined,
-                from: from || undefined,
-                to: to || undefined,
-              })}
-              download
-            >
-              Export CSV
-            </Button>
-          </RoleGate>
-        }
-      />
+	const answeredCount = allRows.filter((r) => Boolean(r.answeredAt)).length;
+	const missedCount = allRows.filter((r) => !r.answeredAt).length;
 
-      <SummaryCards from={from || undefined} to={to || undefined} />
+	return (
+		<Stack gap={24}>
+			<PageHeader
+				title="Recents"
+				subtitle="Complete call detail records (CDR), STIR/SHAKEN attestation, and one-click callback."
+				actions={
+					<Group gap={10}>
+						<RoleGate resource="cdr" action="export">
+							<Button
+								component="a"
+								href={endpoints.cdrExportUrl(filters)}
+								variant="default"
+								radius="xl"
+								styles={{
+									root: {
+										background: "var(--qb-surface)",
+										border: "none",
+										color: "var(--qb-text-primary)",
+									},
+								}}
+							>
+								Export CSV
+							</Button>
+						</RoleGate>
+						<Button
+							radius="xl"
+							leftSection={<IconKeypad size={17} />}
+							onClick={() => openKeypad()}
+						>
+							Open Keypad
+						</Button>
+					</Group>
+				}
+			/>
 
-      <Group mb="md" align="flex-end">
-        <TextInput
-          label="Number"
-          placeholder="Caller or destination"
-          value={number}
-          onChange={(e) => resetPage(setNumber)(e.currentTarget.value)}
-        />
-        <Select
-          label="Direction"
-          data={[
-            { value: "", label: "Any" },
-            { value: "inbound", label: "Inbound" },
-            { value: "outbound", label: "Outbound" },
-            { value: "internal", label: "Internal" },
-          ]}
-          value={direction}
-          onChange={(v) => resetPage(setDirection)(v ?? "")}
-          w={140}
-        />
-        <Select
-          label="Answered"
-          data={[
-            { value: "", label: "Any" },
-            { value: "true", label: "Answered" },
-            { value: "false", label: "Missed" },
-          ]}
-          value={answered}
-          onChange={(v) => resetPage(setAnswered)(v ?? "")}
-          w={140}
-        />
-        <TextInput
-          label="From"
-          type="date"
-          value={from}
-          onChange={(e) => resetPage(setFrom)(e.currentTarget.value)}
-        />
-        <TextInput
-          label="To"
-          type="date"
-          value={to}
-          onChange={(e) => resetPage(setTo)(e.currentTarget.value)}
-        />
-        {(number || direction || answered || from || to) && (
-          <Button
-            variant="subtle"
-            onClick={() => {
-              setNumber("");
-              setDirection("");
-              setAnswered("");
-              setFrom("");
-              setTo("");
-              setPage(1);
-            }}
-          >
-            Clear
-          </Button>
-        )}
-      </Group>
+			{/* 3 Display Summary Cards */}
+			<SimpleGrid cols={{ base: 1, sm: 3 }} spacing={20}>
+				<SurfaceCard p={22}>
+					<Stack gap={4}>
+						<Text className="qb-caption" tt="uppercase" fw={700}>
+							Total Records
+						</Text>
+						<div className="qb-display">{cdr.data?.total ?? 0}</div>
+						<Text className="qb-caption">
+							Page {page} of {totalPages}
+						</Text>
+					</Stack>
+				</SurfaceCard>
+				<SurfaceCard p={22}>
+					<Stack gap={4}>
+						<Text className="qb-caption" tt="uppercase" fw={700}>
+							Answered (Current Page)
+						</Text>
+						<div className="qb-display">{answeredCount}</div>
+						<Text className="qb-caption">Connected with RTP audio</Text>
+					</Stack>
+				</SurfaceCard>
+				<SurfaceCard p={22}>
+					<Stack gap={4}>
+						<Text className="qb-caption" tt="uppercase" fw={700}>
+							Missed / No Answer
+						</Text>
+						<div
+							className="qb-display"
+							style={{
+								color:
+									missedCount > 0
+										? "var(--qb-danger)"
+										: "var(--qb-text-primary)",
+							}}
+						>
+							{missedCount}
+						</div>
+						<Text className="qb-caption">Routed to voicemail or busy</Text>
+					</Stack>
+				</SurfaceCard>
+			</SimpleGrid>
 
-      {/* The CDR endpoint returns a page object rather than an array, so only the row list is
-          handed over for the emptiness check. */}
-      <QueryState
-        data={data?.rows}
-        error={error}
-        isPending={isPending}
-        isSuccess={isSuccess}
-        isPaused={isPaused}
-        emptyMessage="No calls match."
-      >
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Started</Table.Th>
-              <Table.Th>Direction</Table.Th>
-              <Table.Th>From</Table.Th>
-              <Table.Th>To</Table.Th>
-              <Table.Th>Extension</Table.Th>
-              <Table.Th>Duration</Table.Th>
-              <Table.Th>Result</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {(data?.rows ?? []).map((r) => (
-              <Table.Tr key={r.id}>
-                <Table.Td>
-                  <Text size="sm">{new Date(r.startedAt).toLocaleString()}</Text>
-                </Table.Td>
-                <Table.Td>
-                  <Badge variant="light" color={directionColour(r.direction)}>
-                    {r.direction}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="sm">{r.callerNumber ?? "—"}</Text>
-                  {r.callerName && r.callerName !== r.callerNumber && (
-                    <Text size="xs" c="dimmed">
-                      {r.callerName}
-                    </Text>
-                  )}
-                </Table.Td>
-                <Table.Td>{r.destinationNumber}</Table.Td>
-                <Table.Td>
-                  <Text size="sm">{r.extensionNumber ?? r.trunkName ?? "—"}</Text>
-                </Table.Td>
-                <Table.Td>
-                  {/* Billable seconds, not wall clock: ring time is not a call. The total is
-                      shown underneath so a long ring is still visible. */}
-                  <Text size="sm">{formatDuration(r.billsecSec)}</Text>
-                  {r.durationSec > r.billsecSec && (
-                    <Text size="xs" c="dimmed">
-                      {formatDuration(r.durationSec)} total
-                    </Text>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  {r.answeredAt ? (
-                    <Badge variant="light" color="green">
-                      answered
-                    </Badge>
-                  ) : (
-                    <Badge variant="light" color="orange">
-                      {r.hangupCause ?? "no answer"}
-                    </Badge>
-                  )}
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+			{/* Segmented Pill Control + Search matching Recents@2x.png */}
+			<Group justify="space-between" align="center" wrap="wrap" gap={12}>
+				<SegmentedTabs
+					value={tab}
+					onChange={(v) => {
+						setTab(v);
+						setPage(1);
+					}}
+					items={[
+						{ value: "all", label: "All" },
+						{
+							value: "missed",
+							label: "Missed",
+							badge: missedCount || undefined,
+						},
+						{ value: "inbound", label: "Inbound" },
+						{ value: "outbound", label: "Outbound" },
+					]}
+				/>
 
-        {pages > 1 && (
-          <Group justify="space-between" mt="md">
-            <Text size="sm" c="dimmed">
-              {data?.total} calls
-            </Text>
-            <Pagination value={page} onChange={setPage} total={pages} />
-          </Group>
-        )}
-      </QueryState>
-    </>
-  );
+				<TextInput
+					placeholder="Search caller or number..."
+					leftSection={<IconSearch size={17} />}
+					value={search}
+					onChange={(e) => {
+						setSearch(e.currentTarget.value);
+						setPage(1);
+					}}
+					w={{ base: "100%", sm: 300 }}
+				/>
+			</Group>
+
+			<QueryState
+				isLoading={cdr.isLoading}
+				isError={cdr.isError}
+				error={cdr.error}
+				isEmpty={rows.length === 0}
+				emptyMessage="No calls match your filter."
+			>
+				<SurfaceCard p={0} style={{ overflow: "hidden" }}>
+					{rows.map((r, idx) => {
+						const isMissed = !r.answeredAt;
+						const peerNumber =
+							r.direction === "inbound"
+								? (r.callerNumber ?? r.destinationNumber)
+								: r.destinationNumber;
+						const peerName = r.callerName || peerNumber;
+						const timeStr = new Date(r.startedAt).toLocaleTimeString([], {
+							hour: "2-digit",
+							minute: "2-digit",
+						});
+						const dateStr = new Date(r.startedAt).toLocaleDateString([], {
+							month: "short",
+							day: "numeric",
+						});
+
+						return (
+							<Group
+								key={r.id}
+								justify="space-between"
+								wrap="nowrap"
+								px={22}
+								py={15}
+								style={{
+									borderTop:
+										idx === 0 ? "none" : "1px solid var(--qb-separator)",
+								}}
+							>
+								<UnstyledButton
+									onClick={() => startCall(peerNumber, peerName)}
+									style={{ flex: 1, minWidth: 0 }}
+								>
+									<Group gap={14} wrap="nowrap">
+										<InitialsAvatar name={peerName} size={46} />
+										<Box style={{ minWidth: 0 }}>
+											<Group gap={8} wrap="nowrap">
+												<Text
+													fw={700}
+													size="md"
+													truncate
+													style={{
+														color: isMissed
+															? "var(--qb-danger)"
+															: "var(--qb-text-primary)",
+													}}
+												>
+													{peerName}
+												</Text>
+												{r.attestation && (
+													<Badge
+														size="xs"
+														radius="xl"
+														variant="outline"
+														color="gray"
+													>
+														Attestation {r.attestation}
+													</Badge>
+												)}
+											</Group>
+											<Group gap={6} mt={2} wrap="nowrap">
+												<span
+													style={{
+														color: isMissed
+															? "var(--qb-danger)"
+															: "var(--qb-text-secondary)",
+														display: "inline-flex",
+													}}
+												>
+													{r.direction === "inbound" ? (
+														<IconArrowDownLeft size={14} />
+													) : (
+														<IconArrowUpRight size={14} />
+													)}
+												</span>
+												<Text className="qb-caption" truncate>
+													{isMissed
+														? `Missed · ${peerNumber}`
+														: `${r.direction === "inbound" ? "Inbound" : r.direction === "outbound" ? "Outbound" : "Internal"} · ${formatDurationMinSec(r.billsecSec)} · ${r.callerNumber ?? "—"} → ${r.destinationNumber}`}
+												</Text>
+											</Group>
+										</Box>
+									</Group>
+								</UnstyledButton>
+
+								<Group gap={12} wrap="nowrap">
+									<Stack align="flex-end" gap={0}>
+										<Text className="qb-caption" fw={600}>
+											{timeStr}
+										</Text>
+										<Text
+											style={{
+												fontSize: 11,
+												color: "var(--qb-text-secondary)",
+											}}
+										>
+											{dateStr}
+										</Text>
+									</Stack>
+									<ActionIcon
+										variant="subtle"
+										radius="xl"
+										size={38}
+										onClick={() => startCall(peerNumber, peerName)}
+										aria-label={`Call ${peerName}`}
+										style={{ color: "var(--qb-accent-text)" }}
+									>
+										<IconPhone size={17} />
+									</ActionIcon>
+									<ActionIcon
+										variant="subtle"
+										radius="xl"
+										size={38}
+										onClick={() => setSelectedCall(r)}
+										aria-label="Call details"
+										style={{ color: "var(--qb-text-secondary)" }}
+									>
+										<IconInfo size={18} />
+									</ActionIcon>
+								</Group>
+							</Group>
+						);
+					})}
+				</SurfaceCard>
+
+				<Group justify="space-between" align="center" mt="md">
+					<Text className="qb-caption">
+						Showing {rows.length} of {cdr.data?.total ?? 0} total call records
+					</Text>
+					<Pagination
+						total={totalPages}
+						value={page}
+						onChange={setPage}
+						radius="xl"
+					/>
+				</Group>
+			</QueryState>
+
+			{/* Call Detail Modal (ⓘ icon) */}
+			<Modal
+				opened={!!selectedCall}
+				onClose={() => setSelectedCall(null)}
+				title="Call Detail Record (CDR)"
+				centered
+			>
+				{selectedCall && (
+					<Stack gap={14}>
+						<SurfaceCard p={18}>
+							<Stack gap={10}>
+								<Group justify="space-between">
+									<Text className="qb-caption">Call UUID</Text>
+									<Text className="qb-mono" size="xs" fw={600}>
+										{selectedCall.callUuid}
+									</Text>
+								</Group>
+								<Group justify="space-between">
+									<Text className="qb-caption">Direction</Text>
+									<Badge radius="xl" variant="light" color="brand">
+										{selectedCall.direction}
+									</Badge>
+								</Group>
+								<Group justify="space-between">
+									<Text className="qb-caption">Caller</Text>
+									<Text className="qb-mono" size="sm" fw={700}>
+										{selectedCall.callerName
+											? `${selectedCall.callerName} (${selectedCall.callerNumber ?? ""})`
+											: (selectedCall.callerNumber ?? "—")}
+									</Text>
+								</Group>
+								<Group justify="space-between">
+									<Text className="qb-caption">Destination Number</Text>
+									<Text className="qb-mono" size="sm" fw={700}>
+										{selectedCall.destinationNumber}
+									</Text>
+								</Group>
+								<Group justify="space-between">
+									<Text className="qb-caption">Start Timestamp</Text>
+									<Text size="sm">
+										{new Date(selectedCall.startedAt).toLocaleString()}
+									</Text>
+								</Group>
+								<Group justify="space-between">
+									<Text className="qb-caption">Duration / Billsec</Text>
+									<Text className="qb-mono" size="sm">
+										{selectedCall.durationSec}s total / {selectedCall.billsecSec}s
+										billed
+									</Text>
+								</Group>
+								<Group justify="space-between">
+									<Text className="qb-caption">Disposition / Hangup Cause</Text>
+									<Badge
+										radius="xl"
+										color={selectedCall.answeredAt ? "brand" : "red"}
+									>
+										{selectedCall.answeredAt ? "ANSWERED" : "MISSED"} (
+										{selectedCall.hangupCause ?? "NORMAL_CLEARING"})
+									</Badge>
+								</Group>
+								<Group justify="space-between">
+									<Text className="qb-caption">Trunk & Extension</Text>
+									<Text className="qb-mono" size="xs">
+										{selectedCall.trunkName ?? "Internal"} · Ext{" "}
+										{selectedCall.extensionNumber ?? "—"}
+									</Text>
+								</Group>
+							</Stack>
+						</SurfaceCard>
+
+						<Group justify="flex-end">
+							<Button
+								variant="default"
+								onClick={() => setSelectedCall(null)}
+							>
+								Close
+							</Button>
+							<Button
+								leftSection={<IconPhone size={16} />}
+								onClick={() => {
+									const num =
+										selectedCall.direction === "inbound"
+											? (selectedCall.callerNumber ??
+												selectedCall.destinationNumber)
+											: selectedCall.destinationNumber;
+									const name = selectedCall.callerName || num;
+									setSelectedCall(null);
+									startCall(num, name);
+								}}
+							>
+								Call Back
+							</Button>
+						</Group>
+					</Stack>
+				)}
+			</Modal>
+		</Stack>
+	);
 }
-
-export const Route = createFileRoute("/_app/calls")({ component: CallsPage });

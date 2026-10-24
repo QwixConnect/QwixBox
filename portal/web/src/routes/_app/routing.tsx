@@ -1,495 +1,484 @@
-import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Alert,
-  Badge,
-  Button,
-  Code,
-  Group,
-  Modal,
-  NumberInput,
-  Select,
-  Stack,
-  Switch,
-  Table,
-  Tabs,
-  Text,
-  TextInput,
+	Alert,
+	Badge,
+	Button,
+	Group,
+	Modal,
+	NumberInput,
+	Select,
+	Stack,
+	Switch,
+	Table,
+	Text,
+	TextInput,
 } from "@mantine/core";
-import { useForm } from "@mantine/form";
-import { endpoints, type InboundRoute, type OutboundRoute } from "../../lib/api";
-import { notifyRemoved, notifySaved } from "../../lib/notify";
-import { DeleteButton, ErrorAlert, PageHeader, QueryState, RoleGate } from "../../components/Resource";
-import { DestinationPicker, type DestinationValue } from "../../components/DestinationPicker";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import {
+	DestinationPicker,
+	type DestinationValue,
+} from "../../components/DestinationPicker";
+import { IconPlus } from "../../components/Icons";
+import {
+	DeleteButton,
+	ErrorAlert,
+	PageHeader,
+	QueryState,
+	RoleGate,
+	SegmentedTabs,
+} from "../../components/Resource";
+import { endpoints } from "../../lib/api";
 
-type InboundFormValues = {
-  didPattern: string;
-  description: string;
-  priority: number | string;
-  destination: DestinationValue;
-};
-
-function InboundModal({
-  route,
-  opened,
-  onClose,
-}: {
-  route: InboundRoute | null;
-  opened: boolean;
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const form = useForm<InboundFormValues>({
-    mode: "controlled",
-    initialValues: {
-      didPattern: route?.didPattern ?? "",
-      description: route?.description ?? "",
-      priority: route?.priority ?? 10,
-      destination: {
-        type: route?.destinationType ?? null,
-        id: route?.destinationId ?? null,
-      },
-    },
-    validate: {
-      didPattern: (v) => (v.trim() ? null : "DID number is required"),
-    },
-  });
-
-  const save = useMutation({
-    mutationFn: (body: Partial<InboundRoute>) =>
-      route
-        ? endpoints.updateInboundRoute(route.id, body)
-        : endpoints.createInboundRoute(body as Omit<InboundRoute, "id" | "enabled">),
-    onSuccess: () => {
-      notifySaved(route ? "Inbound route saved" : "Inbound route created");
-      void qc.invalidateQueries({ queryKey: ["inbound-routes"] });
-      onClose();
-    },
-  });
-
-  return (
-    <Modal
-      opened={opened}
-      onClose={onClose}
-      title={route ? "Edit inbound route" : "New inbound route"}
-      size="lg"
-    >
-      <form
-        onSubmit={form.onSubmit((values) => {
-          if (route) {
-            const body: Partial<InboundRoute> = {};
-            if (form.isDirty("didPattern")) body.didPattern = values.didPattern;
-            if (form.isDirty("description")) body.description = values.description || null;
-            if (form.isDirty("priority")) body.priority = Number(values.priority) || 10;
-            if (form.isDirty("destination")) {
-              body.destinationType = values.destination.type;
-              body.destinationId = values.destination.id;
-            }
-            if (Object.keys(body).length === 0) {
-              onClose();
-              return;
-            }
-            save.mutate(body);
-            return;
-          }
-          save.mutate({
-            didPattern: values.didPattern,
-            description: values.description || null,
-            priority: Number(values.priority) || 10,
-            destinationType: values.destination.type,
-            destinationId: values.destination.id,
-          });
-        })}
-      >
-        <Stack>
-          <ErrorAlert error={save.error} />
-          <TextInput
-            label="DID number"
-            description="Exact carrier number, including a leading + if the carrier sends one"
-            placeholder="+14165551234"
-            required
-            {...form.getInputProps("didPattern")}
-          />
-          <TextInput label="Description" {...form.getInputProps("description")} />
-          <NumberInput
-            label="Priority"
-            description="Display order only; DID matching is exact"
-            min={0}
-            {...form.getInputProps("priority")}
-          />
-          <DestinationPicker
-            label="Send calls to"
-            value={form.values.destination}
-            onChange={(next) => form.setFieldValue("destination", next)}
-          />
-          <Button type="submit" loading={save.isPending} disabled={route ? !form.isDirty() : false}>
-            {route ? "Save" : "Create"}
-          </Button>
-        </Stack>
-      </form>
-    </Modal>
-  );
-}
-
-function InboundTab() {
-  const qc = useQueryClient();
-  const [editing, setEditing] = useState<InboundRoute | null>(null);
-  const [creating, setCreating] = useState(false);
-
-  const { data, error, isPending, isSuccess, isPaused } = useQuery({
-    queryKey: ["inbound-routes"],
-    queryFn: endpoints.inboundRoutes,
-  });
-  const remove = useMutation({
-    mutationFn: (id: string) => endpoints.deleteInboundRoute(id),
-    onSuccess: () => {
-      notifyRemoved("Inbound route removed");
-      void qc.invalidateQueries({ queryKey: ["inbound-routes"] });
-    },
-  });
-
-  return (
-    <>
-      <Group justify="flex-end" mb="sm">
-        <RoleGate resource="route" action="create">
-          <Button size="sm" onClick={() => setCreating(true)}>
-            New inbound route
-          </Button>
-        </RoleGate>
-      </Group>
-      <ErrorAlert error={remove.error} />
-      <QueryState
-        data={data}
-        error={error}
-        isPending={isPending}
-        isSuccess={isSuccess}
-        isPaused={isPaused}
-        emptyMessage="No inbound routes. Calls to your DIDs have nowhere to go."
-      >
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Pattern</Table.Th>
-              <Table.Th>Destination</Table.Th>
-              <Table.Th>Priority</Table.Th>
-              <Table.Th>Enabled</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {(data ?? []).map((r) => (
-              <Table.Tr key={r.id}>
-                <Table.Td>
-                  <Code>{r.didPattern}</Code>
-                  {r.description && (
-                    <Text size="xs" c="dimmed">
-                      {r.description}
-                    </Text>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  <Badge variant="light">{r.destinationType ?? "none"}</Badge>
-                </Table.Td>
-                <Table.Td>{r.priority}</Table.Td>
-                <Table.Td>{r.enabled ? "Yes" : "No"}</Table.Td>
-                <Table.Td>
-                  <Group gap={4} justify="flex-end">
-                    <RoleGate resource="route" action="update" mode="disable">
-                      <Button size="xs" variant="subtle" onClick={() => setEditing(r)}>
-                        Edit
-                      </Button>
-                    </RoleGate>
-                    <RoleGate resource="route" action="delete" mode="disable">
-                      <DeleteButton
-                        what={`inbound route ${r.didPattern}`}
-                        onConfirm={() => remove.mutate(r.id)}
-                      />
-                    </RoleGate>
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      </QueryState>
-      {creating && <InboundModal route={null} opened onClose={() => setCreating(false)} />}
-      {editing && (
-        <InboundModal key={editing.id} route={editing} opened onClose={() => setEditing(null)} />
-      )}
-    </>
-  );
-}
-
-type OutboundFormValues = {
-  name: string;
-  pattern: string;
-  trunkId: string;
-  priority: number | string;
-  stripDigits: number | string;
-  prependDigits: string;
-  isEmergency: boolean;
-};
-
-function OutboundModal({
-  route,
-  opened,
-  onClose,
-}: {
-  route: OutboundRoute | null;
-  opened: boolean;
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const form = useForm<OutboundFormValues>({
-    mode: "controlled",
-    initialValues: {
-      name: route?.name ?? "",
-      pattern: route?.pattern ?? "",
-      trunkId: route?.trunkId ?? "",
-      priority: route?.priority ?? 10,
-      stripDigits: route?.stripDigits ?? 0,
-      prependDigits: route?.prependDigits ?? "",
-      isEmergency: route?.isEmergency ?? false,
-    },
-    validate: {
-      name: (v) => (v.trim() ? null : "Name is required"),
-      pattern: (v) => (v.trim() ? null : "Pattern is required"),
-    },
-  });
-
-  const trunks = useQuery({ queryKey: ["trunks"], queryFn: endpoints.trunks });
-
-  const save = useMutation({
-    mutationFn: (body: Partial<OutboundRoute>) =>
-      route
-        ? endpoints.updateOutboundRoute(route.id, body)
-        : endpoints.createOutboundRoute(body as Omit<OutboundRoute, "id" | "enabled">),
-    onSuccess: () => {
-      notifySaved(route ? "Outbound route saved" : "Outbound route created");
-      void qc.invalidateQueries({ queryKey: ["outbound-routes"] });
-      onClose();
-    },
-  });
-
-  const isEmergency = form.values.isEmergency;
-
-  return (
-    <Modal
-      opened={opened}
-      onClose={onClose}
-      title={route ? "Edit outbound route" : "New outbound route"}
-      size="lg"
-    >
-      <form
-        onSubmit={form.onSubmit((values) => {
-          if (route) {
-            const body: Partial<OutboundRoute> = {};
-            if (form.isDirty("name")) body.name = values.name;
-            if (form.isDirty("pattern")) body.pattern = values.pattern;
-            if (form.isDirty("trunkId")) body.trunkId = values.trunkId || null;
-            if (form.isDirty("priority")) body.priority = Number(values.priority) || 10;
-            if (form.isDirty("stripDigits")) body.stripDigits = Number(values.stripDigits) || 0;
-            if (form.isDirty("prependDigits")) body.prependDigits = values.prependDigits || null;
-            if (form.isDirty("isEmergency")) body.isEmergency = values.isEmergency;
-            if (Object.keys(body).length === 0) {
-              onClose();
-              return;
-            }
-            save.mutate(body);
-            return;
-          }
-          save.mutate({
-            name: values.name,
-            pattern: values.pattern,
-            trunkId: values.trunkId || null,
-            priority: Number(values.priority) || 10,
-            stripDigits: Number(values.stripDigits) || 0,
-            prependDigits: values.prependDigits || null,
-            isEmergency: values.isEmergency,
-          });
-        })}
-      >
-        <Stack>
-          <ErrorAlert error={save.error} />
-          <TextInput label="Name" required {...form.getInputProps("name")} />
-          <TextInput
-            label="Pattern"
-            description="A regular expression. The API rejects one that will not compile — better than discovering it when a call fails."
-            placeholder="^1[0-9]{10}$"
-            required
-            {...form.getInputProps("pattern")}
-          />
-          <Select
-            label="Trunk"
-            data={(trunks.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
-            searchable
-            {...form.getInputProps("trunkId")}
-          />
-          <Group grow>
-            <NumberInput
-              label="Strip digits"
-              description="From the front"
-              min={0}
-              {...form.getInputProps("stripDigits")}
-            />
-            <TextInput label="Prepend" {...form.getInputProps("prependDigits")} />
-            <NumberInput label="Priority" min={0} {...form.getInputProps("priority")} />
-          </Group>
-          <Switch
-            label="Emergency route"
-            {...form.getInputProps("isEmergency", { type: "checkbox" })}
-          />
-          {isEmergency && (
-            <Alert color="orange" title="Emergency routes bypass everything">
-              Matched before fraud limits, time conditions and route permissions, by design. It
-              must have a trunk — a 911 call blocked by your own toll-fraud cap is the worst
-              failure this system can have.
-            </Alert>
-          )}
-          <Button type="submit" loading={save.isPending} disabled={route ? !form.isDirty() : false}>
-            {route ? "Save" : "Create"}
-          </Button>
-        </Stack>
-      </form>
-    </Modal>
-  );
-}
-
-function OutboundTab() {
-  const qc = useQueryClient();
-  const [editing, setEditing] = useState<OutboundRoute | null>(null);
-  const [creating, setCreating] = useState(false);
-
-  const { data, error, isPending, isSuccess, isPaused } = useQuery({
-    queryKey: ["outbound-routes"],
-    queryFn: endpoints.outboundRoutes,
-  });
-  const trunks = useQuery({ queryKey: ["trunks"], queryFn: endpoints.trunks });
-  const remove = useMutation({
-    mutationFn: (id: string) => endpoints.deleteOutboundRoute(id),
-    onSuccess: () => {
-      notifyRemoved("Outbound route removed");
-      void qc.invalidateQueries({ queryKey: ["outbound-routes"] });
-    },
-  });
-
-  const trunkName = (id: string | null) =>
-    id ? ((trunks.data ?? []).find((t) => t.id === id)?.name ?? "unknown") : "—";
-
-  return (
-    <>
-      <Group justify="flex-end" mb="sm">
-        <RoleGate resource="route" action="create">
-          <Button size="sm" onClick={() => setCreating(true)}>
-            New outbound route
-          </Button>
-        </RoleGate>
-      </Group>
-      <ErrorAlert error={remove.error} />
-      <QueryState
-        data={data}
-        error={error}
-        isPending={isPending}
-        isSuccess={isSuccess}
-        isPaused={isPaused}
-        emptyMessage="No outbound routes. Nobody can dial out."
-      >
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Name</Table.Th>
-              <Table.Th>Pattern</Table.Th>
-              <Table.Th>Trunk</Table.Th>
-              <Table.Th>Manipulation</Table.Th>
-              <Table.Th>Priority</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {(data ?? [])
-              .slice()
-              .sort((a, b) =>
-                a.isEmergency === b.isEmergency
-                  ? a.priority - b.priority
-                  : a.isEmergency
-                    ? -1
-                    : 1,
-              )
-              .map((r) => (
-                <Table.Tr key={r.id}>
-                  <Table.Td>
-                    <Group gap={6}>
-                      <Text fw={500}>{r.name}</Text>
-                      {r.isEmergency && (
-                        <Badge color="orange" variant="light" size="sm">
-                          emergency
-                        </Badge>
-                      )}
-                    </Group>
-                  </Table.Td>
-                  <Table.Td>
-                    <Code>{r.pattern}</Code>
-                  </Table.Td>
-                  <Table.Td>{trunkName(r.trunkId)}</Table.Td>
-                  <Table.Td>
-                    <Text size="xs" c="dimmed">
-                      {r.stripDigits ? `strip ${r.stripDigits}` : ""}
-                      {r.stripDigits && r.prependDigits ? ", " : ""}
-                      {r.prependDigits ? `prepend ${r.prependDigits}` : ""}
-                      {!r.stripDigits && !r.prependDigits ? "none" : ""}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>{r.priority}</Table.Td>
-                  <Table.Td>
-                    <Group gap={4} justify="flex-end">
-                      <RoleGate resource="route" action="update" mode="disable">
-                        <Button size="xs" variant="subtle" onClick={() => setEditing(r)}>
-                          Edit
-                        </Button>
-                      </RoleGate>
-                      <RoleGate resource="route" action="delete" mode="disable">
-                        <DeleteButton
-                          what={`outbound route ${r.name}`}
-                          onConfirm={() => remove.mutate(r.id)}
-                        />
-                      </RoleGate>
-                    </Group>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-          </Table.Tbody>
-        </Table>
-      </QueryState>
-      {creating && <OutboundModal route={null} opened onClose={() => setCreating(false)} />}
-      {editing && (
-        <OutboundModal key={editing.id} route={editing} opened onClose={() => setEditing(null)} />
-      )}
-    </>
-  );
-}
+export const Route = createFileRoute("/_app/routing")({
+	component: RoutingPage,
+});
 
 function RoutingPage() {
-  return (
-    <>
-      <PageHeader
-        title="Routing"
-        description="Where inbound calls land, and which trunk outbound calls leave through."
-      />
-      <Tabs defaultValue="inbound">
-        <Tabs.List mb="md">
-          <Tabs.Tab value="inbound">Inbound</Tabs.Tab>
-          <Tabs.Tab value="outbound">Outbound</Tabs.Tab>
-        </Tabs.List>
-        <Tabs.Panel value="inbound">
-          <InboundTab />
-        </Tabs.Panel>
-        <Tabs.Panel value="outbound">
-          <OutboundTab />
-        </Tabs.Panel>
-      </Tabs>
-    </>
-  );
+	const [tab, setTab] = useState<"inbound" | "outbound">("inbound");
+	const inbound = useQuery({
+		queryKey: ["inbound-routes"],
+		queryFn: endpoints.inboundRoutes,
+	});
+	const outbound = useQuery({
+		queryKey: ["outbound-routes"],
+		queryFn: endpoints.outboundRoutes,
+	});
+
+	return (
+		<Stack gap={24}>
+			<PageHeader
+				title="Inbound & Outbound Routing"
+				subtitle="DID number mapping, inbound call destinations, and outbound least-cost carrier dialplan."
+			/>
+
+			<SegmentedTabs
+				value={tab}
+				onChange={setTab}
+				items={[
+					{
+						value: "inbound",
+						label: "Inbound Routes (DIDs)",
+						badge: inbound.data?.length,
+					},
+					{
+						value: "outbound",
+						label: "Outbound Dialplan",
+						badge: outbound.data?.length,
+					},
+				]}
+			/>
+
+			{tab === "inbound" ? <InboundSection /> : <OutboundSection />}
+		</Stack>
+	);
 }
 
-export const Route = createFileRoute("/_app/routing")({ component: RoutingPage });
+function InboundSection() {
+	const qc = useQueryClient();
+	const list = useQuery({
+		queryKey: ["inbound-routes"],
+		queryFn: endpoints.inboundRoutes,
+	});
+	const [open, setOpen] = useState(false);
+	const [description, setDescription] = useState("");
+	const [didPattern, setDidPattern] = useState("");
+	const [priority, setPriority] = useState<number>(100);
+	const [destination, setDestination] = useState<DestinationValue>({
+		type: "extension",
+		id: null,
+	});
+
+	const create = useMutation({
+		mutationFn: () => {
+			if (!destination.type) throw new Error("Choose a destination type");
+			return endpoints.createInboundRoute({
+				didPattern,
+				description: description || null,
+				priority,
+				destinationType: destination.type,
+				destinationId: destination.id,
+				enabled: true,
+			});
+		},
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ["inbound-routes"] });
+			setOpen(false);
+			setDescription("");
+			setDidPattern("");
+		},
+	});
+	const remove = useMutation({
+		mutationFn: (id: string) => endpoints.deleteInboundRoute(id),
+		onSuccess: () => qc.invalidateQueries({ queryKey: ["inbound-routes"] }),
+	});
+	const toggleEnabled = useMutation({
+		mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+			endpoints.updateInboundRoute(id, { enabled }),
+		onSuccess: () => qc.invalidateQueries({ queryKey: ["inbound-routes"] }),
+	});
+
+	return (
+		<Stack gap={16}>
+			<Group justify="space-between">
+				<Text className="qb-caption">
+					Inbound routes match dialed DIDs (E.164 or regex) in ascending
+					priority order.
+				</Text>
+				<RoleGate resource="route" action="create">
+					<Button
+						leftSection={<IconPlus size={16} />}
+						onClick={() => setOpen(true)}
+					>
+						New Inbound Route
+					</Button>
+				</RoleGate>
+			</Group>
+
+			<QueryState
+				isLoading={list.isLoading}
+				isError={list.isError}
+				error={list.error}
+				isEmpty={(list.data ?? []).length === 0}
+			>
+				<div className="qb-table-wrap">
+					<Table highlightOnHover>
+						<Table.Thead>
+							<Table.Tr>
+								<Table.Th>Priority</Table.Th>
+								<Table.Th>DID Pattern</Table.Th>
+								<Table.Th>Description</Table.Th>
+								<Table.Th>Target Destination</Table.Th>
+								<Table.Th>Enabled</Table.Th>
+								<Table.Th />
+							</Table.Tr>
+						</Table.Thead>
+						<Table.Tbody>
+							{list.data?.map((r) => (
+								<Table.Tr key={r.id}>
+									<Table.Td>
+										<Badge radius="xl" variant="light" color="gray">
+											#{r.priority}
+										</Badge>
+									</Table.Td>
+									<Table.Td className="qb-mono" fw={700}>
+										{r.didPattern}
+									</Table.Td>
+									<Table.Td fw={600}>{r.description ?? "—"}</Table.Td>
+									<Table.Td className="qb-mono">
+										<Badge radius="xl" variant="light" color="brand">
+											{r.destinationType}
+											{r.destinationId ? ` → ${r.destinationId}` : ""}
+										</Badge>
+									</Table.Td>
+									<Table.Td>
+										<Switch
+											checked={r.enabled}
+											onChange={(e) =>
+												toggleEnabled.mutate({
+													id: r.id,
+													enabled: e.currentTarget.checked,
+												})
+											}
+										/>
+									</Table.Td>
+									<Table.Td>
+										<RoleGate resource="route" action="delete" mode="disable">
+											<DeleteButton onConfirm={() => remove.mutate(r.id)} />
+										</RoleGate>
+									</Table.Td>
+								</Table.Tr>
+							))}
+						</Table.Tbody>
+					</Table>
+				</div>
+			</QueryState>
+
+			<Modal
+				opened={open}
+				onClose={() => setOpen(false)}
+				title="New Inbound Route"
+				size="lg"
+				centered
+			>
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						create.mutate();
+					}}
+				>
+					<Stack gap={14}>
+						<ErrorAlert error={create.error} />
+						<Group grow>
+							<TextInput
+								label="DID Pattern (E.164 or regex)"
+								placeholder="^14165550100$"
+								required
+								value={didPattern}
+								onChange={(e) => setDidPattern(e.currentTarget.value)}
+							/>
+							<NumberInput
+								label="Evaluation Priority"
+								value={priority}
+								onChange={(v) => setPriority(Number(v) || 100)}
+							/>
+						</Group>
+						<TextInput
+							label="Description"
+							placeholder="Main Reception DID"
+							value={description}
+							onChange={(e) => setDescription(e.currentTarget.value)}
+						/>
+						<DestinationPicker
+							label="Destination"
+							allowNone={false}
+							value={destination}
+							onChange={setDestination}
+						/>
+						<Group justify="flex-end" mt="sm">
+							<Button variant="default" onClick={() => setOpen(false)}>
+								Cancel
+							</Button>
+							<Button type="submit" loading={create.isPending}>
+								Create Inbound Route
+							</Button>
+						</Group>
+					</Stack>
+				</form>
+			</Modal>
+		</Stack>
+	);
+}
+
+function OutboundSection() {
+	const qc = useQueryClient();
+	const list = useQuery({
+		queryKey: ["outbound-routes"],
+		queryFn: endpoints.outboundRoutes,
+	});
+	const trunks = useQuery({
+		queryKey: ["trunks"],
+		queryFn: endpoints.trunks,
+	});
+	const [open, setOpen] = useState(false);
+	const [name, setName] = useState("");
+	const [pattern, setPattern] = useState("^1[0-9]{10}$");
+	const [priority, setPriority] = useState<number>(10);
+	const [stripDigits, setStripDigits] = useState<number>(0);
+	const [prependDigits, setPrependDigits] = useState("");
+	const [trunkId, setTrunkId] = useState<string | null>(null);
+	const [isEmergency, setIsEmergency] = useState(false);
+
+	const trunkMap = new Map((trunks.data ?? []).map((t) => [t.id, t.name]));
+
+	const create = useMutation({
+		mutationFn: () =>
+			endpoints.createOutboundRoute({
+				name,
+				pattern,
+				priority,
+				stripDigits,
+				prependDigits: prependDigits || null,
+				trunkId,
+				isEmergency,
+				enabled: true,
+			}),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ["outbound-routes"] });
+			setOpen(false);
+			setName("");
+		},
+	});
+	const remove = useMutation({
+		mutationFn: (id: string) => endpoints.deleteOutboundRoute(id),
+		onSuccess: () => qc.invalidateQueries({ queryKey: ["outbound-routes"] }),
+	});
+	const toggleEnabled = useMutation({
+		mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+			endpoints.updateOutboundRoute(id, { enabled }),
+		onSuccess: () => qc.invalidateQueries({ queryKey: ["outbound-routes"] }),
+	});
+
+	return (
+		<Stack gap={16}>
+			<Group justify="space-between">
+				<Text className="qb-caption">
+					Outbound dialplan rules match dialed digits and route calls out the
+					selected carrier trunk.
+				</Text>
+				<RoleGate resource="route" action="create">
+					<Button
+						leftSection={<IconPlus size={16} />}
+						onClick={() => setOpen(true)}
+					>
+						New Outbound Route
+					</Button>
+				</RoleGate>
+			</Group>
+
+			<QueryState
+				isLoading={list.isLoading}
+				isError={list.isError}
+				error={list.error}
+				isEmpty={(list.data ?? []).length === 0}
+			>
+				<div className="qb-table-wrap">
+					<Table highlightOnHover>
+						<Table.Thead>
+							<Table.Tr>
+								<Table.Th>Priority</Table.Th>
+								<Table.Th>Rule Name</Table.Th>
+								<Table.Th>Dial Pattern</Table.Th>
+								<Table.Th>Digit Transform</Table.Th>
+								<Table.Th>Carrier Trunk</Table.Th>
+								<Table.Th>Enabled</Table.Th>
+								<Table.Th />
+							</Table.Tr>
+						</Table.Thead>
+						<Table.Tbody>
+							{list.data?.map((r) => (
+								<Table.Tr key={r.id}>
+									<Table.Td>
+										<Badge radius="xl" variant="light" color="gray">
+											#{r.priority}
+										</Badge>
+									</Table.Td>
+									<Table.Td fw={700}>
+										<Group gap={8}>
+											<Text fw={700} size="sm">
+												{r.name}
+											</Text>
+											{r.isEmergency && (
+												<Badge
+													radius="xl"
+													style={{
+														background: "var(--qb-danger)",
+														color: "#FFFFFF",
+													}}
+												>
+													EMERGENCY
+												</Badge>
+											)}
+										</Group>
+									</Table.Td>
+									<Table.Td className="qb-mono">{r.pattern}</Table.Td>
+									<Table.Td className="qb-mono">
+										-{r.stripDigits} / +{r.prependDigits ?? "∅"}
+									</Table.Td>
+									<Table.Td>
+										{r.trunkId ? (
+											<Badge radius="xl" variant="light" color="brand">
+												{trunkMap.get(r.trunkId) ?? r.trunkId}
+											</Badge>
+										) : (
+											"—"
+										)}
+									</Table.Td>
+									<Table.Td>
+										<Switch
+											checked={r.enabled}
+											onChange={(e) =>
+												toggleEnabled.mutate({
+													id: r.id,
+													enabled: e.currentTarget.checked,
+												})
+											}
+										/>
+									</Table.Td>
+									<Table.Td>
+										<RoleGate resource="route" action="delete" mode="disable">
+											<DeleteButton onConfirm={() => remove.mutate(r.id)} />
+										</RoleGate>
+									</Table.Td>
+								</Table.Tr>
+							))}
+						</Table.Tbody>
+					</Table>
+				</div>
+			</QueryState>
+
+			<Modal
+				opened={open}
+				onClose={() => setOpen(false)}
+				title="New Outbound Route"
+				size="lg"
+				centered
+			>
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						create.mutate();
+					}}
+				>
+					<Stack gap={14}>
+						<ErrorAlert error={create.error} />
+						<TextInput
+							label="Route Name"
+							placeholder="NANP 10/11-digit"
+							required
+							value={name}
+							onChange={(e) => setName(e.currentTarget.value)}
+						/>
+						<Group grow>
+							<TextInput
+								label="Dial Pattern (regex)"
+								required
+								value={pattern}
+								onChange={(e) => setPattern(e.currentTarget.value)}
+							/>
+							<NumberInput
+								label="Priority"
+								value={priority}
+								onChange={(v) => setPriority(Number(v) || 10)}
+							/>
+						</Group>
+						<Group grow>
+							<NumberInput
+								label="Strip Leading Digits"
+								min={0}
+								max={15}
+								value={stripDigits}
+								onChange={(v) => setStripDigits(Number(v) || 0)}
+							/>
+							<TextInput
+								label="Prepend Digits"
+								placeholder="1"
+								value={prependDigits}
+								onChange={(e) => setPrependDigits(e.currentTarget.value)}
+							/>
+						</Group>
+						<Select
+							label="Carrier Trunk"
+							searchable
+							data={(trunks.data ?? []).map((t) => ({
+								value: t.id,
+								label: t.name,
+							}))}
+							value={trunkId}
+							onChange={setTrunkId}
+						/>
+						<Switch
+							label="Emergency Route (911 / 933 — bypasses fraud caps)"
+							checked={isEmergency}
+							onChange={(e) => setIsEmergency(e.currentTarget.checked)}
+						/>
+						{isEmergency && (
+							<Alert color="red" radius={12} title="Emergency routes bypass caps">
+								Matched before fraud limits, time conditions, and route
+								permissions by design.
+							</Alert>
+						)}
+						<Group justify="flex-end" mt="sm">
+							<Button variant="default" onClick={() => setOpen(false)}>
+								Cancel
+							</Button>
+							<Button type="submit" loading={create.isPending}>
+								Create Outbound Route
+							</Button>
+						</Group>
+					</Stack>
+				</form>
+			</Modal>
+		</Stack>
+	);
+}

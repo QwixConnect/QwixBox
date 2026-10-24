@@ -7,6 +7,7 @@ import { Notifications } from "@mantine/notifications";
 
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
+import "./index.css";
 import { routeTree } from "./routeTree.gen";
 import { theme } from "./theme";
 

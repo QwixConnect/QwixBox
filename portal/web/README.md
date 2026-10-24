@@ -43,3 +43,43 @@ bun run build
 # From the repository root:
 bun test tests/portal-mock.test.ts
 ```
+
+## Design System & Visual Tokens
+
+The portal implements the QwixBox / iQFone enterprise design tokens (`docs/design/design-tokens.png`):
+
+- **Typography**: `Manrope` (`400`, `500`, `600`, `700`, `800`) + `JetBrains Mono` for extensions, DIDs, SIP URIs, and call timers.
+  - Display: `38px / 600` (`-0.025em`)
+  - Large Title: `34px / 800` (`-0.03em`)
+  - Keypad: `34px / 500`
+  - Headline: `17px / 600`
+  - Body: `15px / 500`
+  - Caption: `13px / 500`
+- **Color Palette**:
+  - **Light Mode**: Background `#FFFFFF`, Surface `#F5F5F7`, Separator `#E5E5EA`, Primary `#111113`, Secondary `#6E6E73`, Accent `#2563EB`, Danger `#D70015`.
+  - **Dark Mode**: Background `#000000`, Surface `#111113`, Raised/Separator `#1C1C1E`, Primary `#F2F2F7`, Secondary `#98989F`, Accent Text `#6AA2FF` (`#2563EB` solid actions), Danger `#FF6961`.
+- **Shape & Ergonomics**:
+  - `12px` radius for inputs and buttons, `20px` radius for borderless surface cards (`#F5F5F7` / `#111113`), `9999px` pill actions and avatars.
+  - `44px+` minimum interactive touch targets, `1px` hairline row dividers, and responsive mobile bottom tab bar (`Recents`, `Contacts`, `Keypad`, `Messages`, `Settings`).
+
+## Live vs. Mock-Backed Portal Screens
+
+| Screen | Route | Live Backend (`apps/api`) | Mock Fallback / Seeded Store |
+| :--- | :--- | :--- | :--- |
+| **Dashboard** | `/` | `/api/health`, `/api/extensions`, `/api/trunks`, `/api/cdr` | `/api/voicemails`, `/api/sms-threads`, `/api/queues` |
+| **Recents & Calls** | `/calls` | `/api/cdr` | Full 86-row CDR fixture in `--mode mock` |
+| **Messages, Voicemail & Recordings** | `/messages` | *Pending — see `docs/roadmap.md`* | `/api/sms-threads`, `/api/voicemails`, `/api/recordings`, `/api/sms-opt-outs` |
+| **Contacts Directory** | `/contacts` | *Pending — see `docs/roadmap.md`* | `/api/contacts` |
+| **Extensions** | `/extensions` | `/api/extensions` (CRUD, call handling, rotate SIP/PIN) | Seeded extensions in `--mode mock` |
+| **Call Flows** | `/call-flows` | `/api/ring-groups`, `/api/ivr-menus`, `/api/time-conditions` | Seeded call flows in `--mode mock` |
+| **Call Queues & Wallboard** | `/queues` | *Pending — see `docs/roadmap.md`* | `/api/queues`, `/api/queue-agents` |
+| **Routing** | `/routing` | `/api/inbound-routes`, `/api/outbound-routes` | Seeded routes in `--mode mock` |
+| **SIP Trunks** | `/trunks` | `/api/trunks` | Seeded trunks in `--mode mock` |
+| **Conferences, Park & MOH** | `/conferences` | *Pending — see `docs/roadmap.md`* | `/api/conferences`, `/api/parking-lots`, `/api/music-on-hold` |
+| **T.38 Faxes** | `/faxes` | `/api/faxes` | Seeded faxes in `--mode mock` |
+| **Emergency (E911)** | `/emergency` | *Pending — see `docs/roadmap.md`* | `/api/emergency-locations` |
+| **Devices & Provisioning** | `/devices` | *Pending — see `docs/roadmap.md`* | `/api/devices` |
+| **Portal Users** | `/users` | `/api/users` | Seeded users in `--mode mock` |
+| **Audit Log** | `/audit` | `/api/audit` | Seeded audit events in `--mode mock` |
+| **Settings** | `/settings` | `/api/settings` | Seeded settings in `--mode mock` |
+

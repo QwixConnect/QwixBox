@@ -1,111 +1,262 @@
-:root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+/* ==========================================================================
+   QwixBox Portal Design Tokens
+   Source: docs/design/design-tokens.png & docs/design/mobile-app/
+   "No gradients, glows or borders on cards. Hierarchy comes from type weight,
+    grey surfaces and hairline separators. 44 pt minimum touch targets."
+   ========================================================================== */
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+:root,
+:root[data-mantine-color-scheme="light"] {
+  --qb-bg: #ffffff;
+  --qb-surface: #f5f5f7;
+  --qb-surface-hover: #ebebef;
+  --qb-raised: #ffffff;
+  --qb-separator: #e5e5ea;
+  --qb-text-primary: #111113;
+  --qb-text-secondary: #6e6e73;
+  --qb-accent: #2563eb;
+  --qb-accent-text: #2563eb;
+  --qb-accent-soft: rgba(37, 99, 235, 0.1);
+  --qb-danger: #d70015;
+  --qb-danger-soft: rgba(215, 0, 21, 0.1);
+  --qb-online: #22c55e;
+  --qb-waveform-idle: #c7c7cc;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
+  --mantine-color-body: var(--qb-bg);
+  --mantine-color-text: var(--qb-text-primary);
+  --mantine-color-dimmed: var(--qb-text-secondary);
+  --mantine-color-default-border: var(--qb-separator);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
+:root[data-mantine-color-scheme="dark"] {
+  --qb-bg: #000000;
+  --qb-surface: #111113;
+  --qb-surface-hover: #1c1c1e;
+  --qb-raised: #1c1c1e;
+  --qb-separator: #1c1c1e;
+  --qb-text-primary: #f2f2f7;
+  --qb-text-secondary: #98989f;
+  --qb-accent: #2563eb;
+  --qb-accent-text: #6aa2ff;
+  --qb-accent-soft: rgba(106, 162, 255, 0.14);
+  --qb-danger: #ff6961;
+  --qb-danger-soft: rgba(255, 105, 97, 0.14);
+  --qb-online: #30d158;
+  --qb-waveform-idle: #3a3a3c;
 
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
+  --mantine-color-body: var(--qb-bg);
+  --mantine-color-text: var(--qb-text-primary);
+  --mantine-color-dimmed: var(--qb-text-secondary);
+  --mantine-color-default-border: var(--qb-separator);
 }
 
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
-}
-
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
-
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
-
-code {
+  padding: 0;
+  background-color: var(--qb-bg);
+  color: var(--qb-text-primary);
+  font-family:
+    "Manrope",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
   font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+  font-weight: 500;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100svh;
+  width: 100%;
+  background-color: var(--qb-bg);
+  color: var(--qb-text-primary);
+}
+
+/* Typography token helpers */
+.qb-display {
+  font-size: clamp(1.85rem, 3vw, 2.375rem); /* 38px */
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--qb-text-primary);
+}
+
+.qb-large-title {
+  font-size: clamp(1.75rem, 2.6vw, 2.125rem); /* 34px */
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  color: var(--qb-text-primary);
+}
+
+.qb-keypad-num {
+  font-size: 2.125rem; /* 34px */
+  font-weight: 500;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--qb-text-primary);
+}
+
+.qb-headline {
+  font-size: 1.0625rem; /* 17px */
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--qb-text-primary);
+}
+
+.qb-body {
+  font-size: 0.9375rem; /* 15px */
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--qb-text-primary);
+}
+
+.qb-caption {
+  font-size: 0.8125rem; /* 13px */
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--qb-text-secondary);
+}
+
+/* Surface cards — 20px radius, zero border/glow/gradient */
+.qb-surface-card {
+  background-color: var(--qb-surface);
+  border-radius: 20px;
+  border: none;
+  box-shadow: none;
+}
+
+.qb-raised-card {
+  background-color: var(--qb-raised);
+  border-radius: 20px;
+  border: none;
+  box-shadow: none;
+}
+
+/* Segmented Control (matches Recents@2x.png & Messages@2x.png) */
+.qb-segmented {
+  display: inline-flex;
+  align-items: center;
+  background-color: var(--qb-surface);
+  border-radius: 12px;
+  padding: 4px;
+  gap: 4px;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.qb-segmented-btn {
+  flex: 1 1 auto;
+  min-height: 38px;
+  padding: 6px 16px;
+  border-radius: 9px;
+  border: none;
+  background: transparent;
+  color: var(--qb-text-secondary);
+  font-family: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.qb-segmented-btn:hover {
+  color: var(--qb-text-primary);
+}
+
+.qb-segmented-btn[data-active="true"] {
+  background-color: var(--qb-raised);
+  color: var(--qb-text-primary);
+}
+
+.qb-segmented-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background-color: var(--qb-accent);
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Grouped list rows with hairline separators */
+.qb-list {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.qb-list-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--qb-separator);
+  transition: background-color 120ms ease;
+}
+
+.qb-list-row:last-child {
+  border-bottom: none;
+}
+
+.qb-list-row[data-interactive="true"] {
+  cursor: pointer;
+}
+
+.qb-list-row[data-interactive="true"]:hover {
+  background-color: var(--qb-surface-hover);
+}
+
+/* Input focus ring inside borderless surface fields */
+.mantine-TextInput-input:focus,
+.mantine-PasswordInput-input:focus-within,
+.mantine-NumberInput-input:focus,
+.mantine-Select-input:focus,
+.mantine-Textarea-input:focus {
+  border-color: var(--qb-accent) !important;
+}
+
+/* Table wrapper inside 20px surface card */
+.qb-table-wrap {
+  background-color: var(--qb-surface);
+  border-radius: 20px;
+  padding: 4px 16px;
+  overflow-x: auto;
+}
+
+.qb-table-wrap tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Responsive bottom navigation spacer on mobile */
+@media (max-width: 767px) {
+  .qb-main-content {
+    padding-bottom: 92px !important;
+  }
 }

@@ -1,3 +1,4 @@
+import { seedData } from "../../mock/data";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
@@ -72,6 +73,20 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
+// Fallback helper for roadmap preview screens when connected to a live backend
+// where those endpoints are not yet implemented (returns 404).
+const fallbackCache = seedData();
+async function getWithFallback<T>(path: string, tableKey: string): Promise<T> {
+  try {
+    return await api.get<T>(path);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return (fallbackCache[tableKey] ?? []) as unknown as T;
+    }
+    throw err;
+  }
+}
+
 export type Extension = {
   id: string;
   organizationId: string;
@@ -109,7 +124,11 @@ export type DestinationType =
   | "hangup";
 
 export const DESTINATION_NEEDS_ROW: DestinationType[] = [
-  "extension", "ring_group", "ivr", "time_condition", "queue",
+  "extension",
+  "ring_group",
+  "ivr",
+  "time_condition",
+  "queue",
 ];
 
 export type Trunk = {
@@ -267,6 +286,9 @@ export type TenantSettings = {
   timezone: string;
   defaultCallerIdName: string | null;
   defaultCallerIdNumber: string | null;
+  faxNotifyEmail?: string | null;
+  emergencyNotifyEmail?: string | null;
+  emergencyNotifySms?: string | null;
   enabled: boolean;
 };
 
@@ -275,6 +297,7 @@ export type TenantUpdate = {
   timezone?: string;
   defaultCallerIdName?: string | null;
   defaultCallerIdNumber?: string | null;
+  faxNotifyEmail?: string | null;
   recordingPolicy?: TenantSettings["recordingPolicy"];
   stirShakenEnabled?: boolean;
   enabled?: boolean;
@@ -338,6 +361,168 @@ export type Health = {
   freeswitch: boolean;
 };
 
+// Roadmap / Mock-backed Feature Types
+export type VoicemailItem = {
+  id: string;
+  callerName: string;
+  callerNumber: string;
+  extensionNumber: string;
+  location?: string;
+  receivedAt: string;
+  timeLabel: string;
+  durationSec: number;
+  durationLabel: string;
+  unread: boolean;
+  transcript: string;
+};
+
+export type CallRecordingItem = {
+  id: string;
+  callUuid: string;
+  callerName: string;
+  callerNumber: string;
+  destinationNumber: string;
+  direction: "inbound" | "outbound" | "internal";
+  extensionNumber: string;
+  durationSec: number;
+  recordedAt: string;
+  policy: string;
+  sizeKb: number;
+  encrypted: boolean;
+  retentionDaysLeft: number;
+};
+
+export type SmsChatBubble = {
+  id: string;
+  direction: "inbound" | "outbound";
+  text: string;
+  time: string;
+  status?: string;
+};
+
+export type SmsThread = {
+  id: string;
+  contactName: string;
+  initials: string;
+  phoneNumber: string;
+  localDid: string;
+  unread: boolean;
+  updatedAtLabel: string;
+  preview: string;
+  messages: SmsChatBubble[];
+};
+
+export type SmsOptOut = {
+  id: string;
+  phoneNumber: string;
+  reason: string;
+  createdAt: string;
+};
+
+export type ContactItem = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  company: string | null;
+  phone: string;
+  extension: string | null;
+  email: string | null;
+  notes: string | null;
+};
+
+export type CallQueueItem = {
+  id: string;
+  number: string;
+  name: string;
+  strategy: string;
+  mohSound: string | null;
+  maxWaitSec: number;
+  timeoutType: DestinationType | null;
+  timeoutId: string | null;
+  waitingCount: number;
+  activeCalls: number;
+  slaPercent: number;
+  avgWaitSec: number;
+  abandonedToday: number;
+  answeredToday: number;
+  enabled: boolean;
+};
+
+export type QueueAgentItem = {
+  id: string;
+  name: string;
+  extensionNumber: string;
+  queueName: string;
+  state: "Available" | "On Call" | "Wrap-up" | "Break";
+  skillLevel: number;
+  tierPosition: number;
+  callsHandled: number;
+  avgTalkSec: number;
+};
+
+export type EmergencyLocationItem = {
+  id: string;
+  label: string;
+  street: string;
+  unit: string | null;
+  city: string;
+  region: string;
+  postalCode: string;
+  country: string;
+  callbackNumber: string | null;
+  validatedAt: string | null;
+  assignedExtensions?: string[];
+};
+
+export type ConferenceRoomItem = {
+  id: string;
+  number: string;
+  name: string;
+  description: string | null;
+  moderatorPin: string | null;
+  participantPin: string | null;
+  recordConference: boolean;
+  activeParticipants: number;
+  enabled: boolean;
+};
+
+export type ParkingLotItem = {
+  id: string;
+  name: string;
+  lotExtension: string;
+  slotStart: string;
+  slotEnd: string;
+  timeoutSeconds: number;
+  timeoutDestinationType: string;
+  timeoutDestinationData: string;
+  musicOnHoldClass: string;
+  parkedCalls: number;
+  enabled: boolean;
+};
+
+export type MusicOnHoldItem = {
+  id: string;
+  name: string;
+  path: string;
+  rate: number;
+  shuffle: boolean;
+  channels: number;
+};
+
+export type DeviceItem = {
+  id: string;
+  deviceLabel: string;
+  deviceType: string;
+  extensionNumber: string;
+  sipUsername: string;
+  macAddress: string | null;
+  transport: string;
+  ipAddress: string;
+  status: "Registered" | "Offline" | "Provisioning";
+  lastSeenAt: string;
+  enabled: boolean;
+};
+
 export const endpoints = {
   health: () => api.get<Health>("/../health"),
   tenant: () => api.get<TenantSettings>("/tenant"),
@@ -358,8 +543,10 @@ export const endpoints = {
   extension: (id: string) => api.get<Extension>(`/extensions/${id}`),
   createExtension: (body: Partial<Extension> & { number: string; displayName: string }) =>
     api.post<Extension>("/extensions", body),
-  updateExtension: (id: string, body: Partial<Extension>) =>
-    api.patch<Extension>(`/extensions/${id}`, body),
+  updateExtension: (
+    id: string,
+    body: Partial<Extension> & { sipPassword?: string; voicemailPin?: string },
+  ) => api.patch<Extension>(`/extensions/${id}`, body),
   deleteExtension: (id: string) => api.delete<void>(`/extensions/${id}`),
 
   trunks: () => api.get<Trunk[]>("/trunks"),
@@ -451,4 +638,70 @@ export const endpoints = {
     const qs = q.toString();
     return `${BASE}/cdr/export${qs ? `?${qs}` : ""}`;
   },
+
+  // Roadmap / Mock-Backed Endpoints (with fallback for unimplemented live API routes)
+  voicemails: () => getWithFallback<VoicemailItem[]>("/voicemails", "voicemails"),
+  deleteVoicemail: (id: string) => api.delete<void>(`/voicemails/${id}`),
+  markVoicemailRead: (id: string) => api.patch<VoicemailItem>(`/voicemails/${id}`, { unread: false }),
+
+  recordings: () => getWithFallback<CallRecordingItem[]>("/recordings", "recordings"),
+  deleteRecording: (id: string) => api.delete<void>(`/recordings/${id}`),
+
+  smsThreads: () => getWithFallback<SmsThread[]>("/sms-threads", "sms-threads"),
+  sendSmsMessage: (threadId: string, text: string) =>
+    api.post<SmsThread>(`/sms-threads/${threadId}/messages`, { text }),
+  createSmsThread: (body: Partial<SmsThread>) => api.post<SmsThread>("/sms-threads", body),
+
+  smsOptOuts: () => getWithFallback<SmsOptOut[]>("/sms-opt-outs", "sms-opt-outs"),
+  createSmsOptOut: (body: { phoneNumber: string; reason: string }) =>
+    api.post<SmsOptOut>("/sms-opt-outs", body),
+  deleteSmsOptOut: (id: string) => api.delete<void>(`/sms-opt-outs/${id}`),
+
+  contacts: () => getWithFallback<ContactItem[]>("/contacts", "contacts"),
+  createContact: (body: Partial<ContactItem>) => api.post<ContactItem>("/contacts", body),
+  updateContact: (id: string, body: Partial<ContactItem>) =>
+    api.patch<ContactItem>(`/contacts/${id}`, body),
+  deleteContact: (id: string) => api.delete<void>(`/contacts/${id}`),
+
+  queues: () => getWithFallback<CallQueueItem[]>("/queues", "queues"),
+  createQueue: (body: Partial<CallQueueItem>) => api.post<CallQueueItem>("/queues", body),
+  updateQueue: (id: string, body: Partial<CallQueueItem>) =>
+    api.patch<CallQueueItem>(`/queues/${id}`, body),
+  deleteQueue: (id: string) => api.delete<void>(`/queues/${id}`),
+
+  queueAgents: () => getWithFallback<QueueAgentItem[]>("/queue-agents", "queue-agents"),
+  updateQueueAgent: (id: string, body: Partial<QueueAgentItem>) =>
+    api.patch<QueueAgentItem>(`/queue-agents/${id}`, body),
+
+  emergencyLocations: () =>
+    getWithFallback<EmergencyLocationItem[]>("/emergency-locations", "emergency-locations"),
+  createEmergencyLocation: (body: Partial<EmergencyLocationItem>) =>
+    api.post<EmergencyLocationItem>("/emergency-locations", body),
+  updateEmergencyLocation: (id: string, body: Partial<EmergencyLocationItem>) =>
+    api.patch<EmergencyLocationItem>(`/emergency-locations/${id}`, body),
+  deleteEmergencyLocation: (id: string) => api.delete<void>(`/emergency-locations/${id}`),
+
+  conferences: () => getWithFallback<ConferenceRoomItem[]>("/conferences", "conferences"),
+  createConference: (body: Partial<ConferenceRoomItem>) =>
+    api.post<ConferenceRoomItem>("/conferences", body),
+  updateConference: (id: string, body: Partial<ConferenceRoomItem>) =>
+    api.patch<ConferenceRoomItem>(`/conferences/${id}`, body),
+  deleteConference: (id: string) => api.delete<void>(`/conferences/${id}`),
+
+  parkingLots: () => getWithFallback<ParkingLotItem[]>("/parking-lots", "parking-lots"),
+  createParkingLot: (body: Partial<ParkingLotItem>) =>
+    api.post<ParkingLotItem>("/parking-lots", body),
+  updateParkingLot: (id: string, body: Partial<ParkingLotItem>) =>
+    api.patch<ParkingLotItem>(`/parking-lots/${id}`, body),
+
+  musicOnHold: () => getWithFallback<MusicOnHoldItem[]>("/music-on-hold", "music-on-hold"),
+  createMusicOnHold: (body: Partial<MusicOnHoldItem>) =>
+    api.post<MusicOnHoldItem>("/music-on-hold", body),
+  deleteMusicOnHold: (id: string) => api.delete<void>(`/music-on-hold/${id}`),
+
+  devices: () => getWithFallback<DeviceItem[]>("/devices", "devices"),
+  createDevice: (body: Partial<DeviceItem>) => api.post<DeviceItem>("/devices", body),
+  updateDevice: (id: string, body: Partial<DeviceItem>) =>
+    api.patch<DeviceItem>(`/devices/${id}`, body),
+  deleteDevice: (id: string) => api.delete<void>(`/devices/${id}`),
 };

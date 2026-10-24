@@ -100,3 +100,42 @@ on this list to close.
 **27 — STIR/SHAKEN.** Worth knowing before planning: the `libstirshaken` source build currently
 fails on Debian 13 with a deprecated OpenSSL API under `-Werror`. The step is off by default, so
 this does not affect installs, but the area is not simply "not enabled".
+
+---
+
+## Portal UI Mock-to-Live (TODO)
+
+The portal (`portal/web`) has UI screens for features the API does not implement yet. These screens
+read their data through `getWithFallback()` in `portal/web/src/lib/api.ts`, which returns seed data
+from `portal/web/mock/data.ts` whenever the API answers `404`. The API answers `404` for every one of
+these paths, so **production installs currently show invented data on these screens**, including
+invented E911 locations. That is Bug 11 in the implementation plan, and it should be fixed before
+anything below.
+
+The per-feature engineering detail lives in one place, so it cannot drift:
+**[comprehensive-implementation-plan.md](comprehensive-implementation-plan.md)**. That plan was
+re-checked against the code on 2026-10-24. Its summary is
+[missing-features-implementation.md](missing-features-implementation.md).
+
+| Portal screen | Route / component | Endpoints on the fallback | Plan section |
+| :--- | :--- | :--- | :--- |
+| Dashboard counters | `src/routes/_app/index.tsx` | `/voicemails`, `/sms-threads`, `/queues` | Follows 2.4, 3.1, 3.5 |
+| Voicemail | `src/routes/_app/messages.tsx` | `/voicemails` | 2.4 |
+| Call recordings | `src/routes/_app/messages.tsx` | `/recordings` | 2.3 |
+| SMS / opt-outs | `src/routes/_app/messages.tsx` | `/sms-threads`, `/sms-opt-outs` | 3.5 |
+| Contacts | `src/routes/_app/contacts.tsx` | `/contacts` | 3.4 |
+| Queues & wallboard | `src/routes/_app/queues.tsx` | `/queues`, `/queue-agents` | 3.1 |
+| Emergency (E911) | `src/routes/_app/emergency.tsx` | `/emergency-locations` | 2.1 |
+| Conferences, parking, MoH | `src/routes/_app/conferences.tsx` | `/conferences`, `/parking-lots`, `/music-on-hold` | 3.2 |
+| Devices & provisioning | `src/routes/_app/devices.tsx` | `/devices` | 3.3 |
+| WebRTC softphone | `src/components/WebphoneDrawer.tsx` | None: a UI timer with no SIP stack | 3.6 |
+
+The plan's design rules (§0, invariants 8–10) record three things that change how several of these
+features have to be built:
+
+- **Inbound carrier calls never reach `xml_handler.lua`.** They are resolved by `fs-xml.ts` and then
+  `destination.lua`.
+- **FreeSWITCH holds no registrations and no subscriptions, and Kamailio has no presence modules.**
+  Voicemail lamps, BLF keys and phone resync have no delivery path yet.
+- **No portal user is linked to an extension.** Anything scoped to "my extension" needs
+  that link first (plan §2.0).

@@ -1,283 +1,412 @@
-import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Badge,
-  Button,
-  Group,
-  Modal,
-  NumberInput,
-  PasswordInput,
-  Select,
-  Stack,
-  Switch,
-  Table,
-  Text,
-  TextInput,
+	ActionIcon,
+	Badge,
+	Box,
+	Button,
+	Group,
+	Modal,
+	NumberInput,
+	PasswordInput,
+	Select,
+	SimpleGrid,
+	Stack,
+	Switch,
+	Table,
+	Text,
+	TextInput,
+	Tooltip,
 } from "@mantine/core";
-import { useForm } from "@mantine/form";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { IconEdit, IconPlus } from "../../components/Icons";
+import {
+	DeleteButton,
+	ErrorAlert,
+	PageHeader,
+	QueryState,
+	RoleGate,
+	SurfaceCard,
+} from "../../components/Resource";
 import { endpoints, type Trunk } from "../../lib/api";
-import { notifyRemoved, notifySaved } from "../../lib/notify";
-import { DeleteButton, ErrorAlert, PageHeader, QueryState, RoleGate } from "../../components/Resource";
 
-type TrunkFormValues = {
-  name: string;
-  host: string;
-  authMode: "ip" | "register";
-  username: string;
-  password: string;
-  port: number | string;
-  priority: number | string;
-};
-
-function TrunkModal({
-  trunk,
-  opened,
-  onClose,
-}: {
-  trunk: Trunk | null;
-  opened: boolean;
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const form = useForm<TrunkFormValues>({
-    mode: "controlled",
-    initialValues: {
-      name: trunk?.name ?? "",
-      host: trunk?.host ?? "",
-      authMode: trunk?.authMode ?? "ip",
-      username: trunk?.username ?? "",
-      password: "",
-      port: trunk?.port ?? 5060,
-      priority: trunk?.priority ?? 10,
-    },
-    validate: {
-      name: (v) => (v.trim() ? null : "Name is required"),
-      host: (v) => (v.trim() ? null : "Host is required"),
-    },
-  });
-
-  const save = useMutation({
-    mutationFn: async (values: TrunkFormValues) => {
-      if (trunk) {
-        const body: Partial<Trunk> = {};
-        if (form.isDirty("name")) body.name = values.name;
-        if (form.isDirty("host")) body.host = values.host;
-        if (form.isDirty("authMode")) body.authMode = values.authMode;
-        if (form.isDirty("username")) body.username = values.username || null;
-        if (form.isDirty("port")) body.port = Number(values.port) || 5060;
-        if (form.isDirty("priority")) body.priority = Number(values.priority) || 10;
-
-        const saved =
-          Object.keys(body).length > 0
-            ? await endpoints.updateTrunk(trunk.id, body)
-            : trunk;
-        if (values.password) await endpoints.setTrunkPassword(saved.id, values.password);
-        return saved;
-      }
-
-      const body = {
-        name: values.name,
-        host: values.host,
-        authMode: values.authMode,
-        username: values.username || null,
-        port: Number(values.port) || 5060,
-        priority: Number(values.priority) || 10,
-      };
-      const saved = await endpoints.createTrunk(body);
-      if (values.password) await endpoints.setTrunkPassword(saved.id, values.password);
-      return saved;
-    },
-    onSuccess: () => {
-      notifySaved(trunk ? "Trunk saved" : "Trunk created");
-      void qc.invalidateQueries({ queryKey: ["trunks"] });
-      onClose();
-    },
-  });
-
-  const authMode = form.values.authMode;
-
-  return (
-    <Modal opened={opened} onClose={onClose} title={trunk ? `Edit ${trunk.name}` : "New trunk"}>
-      <form
-        onSubmit={form.onSubmit((values) => {
-          if (trunk && !form.isDirty() && !values.password) {
-            onClose();
-            return;
-          }
-          save.mutate(values);
-        })}
-      >
-        <Stack>
-          <ErrorAlert error={save.error} />
-          <TextInput
-            label="Name"
-            description="A label for this carrier connection"
-            required
-            {...form.getInputProps("name")}
-          />
-          <TextInput
-            label="Host"
-            placeholder="192.0.2.10"
-            required
-            {...form.getInputProps("host")}
-          />
-          <Group grow>
-            <NumberInput label="Port" min={1} max={65535} {...form.getInputProps("port")} />
-            <NumberInput
-              label="Priority"
-              description="Lower wins"
-              min={0}
-              {...form.getInputProps("priority")}
-            />
-          </Group>
-          <Select
-            label="Authentication"
-            data={[
-              { value: "ip", label: "IP address" },
-              { value: "register", label: "Registration unavailable", disabled: true },
-            ]}
-            allowDeselect={false}
-            {...form.getInputProps("authMode")}
-          />
-          {authMode === "register" && (
-            <>
-              <TextInput label="Username" required {...form.getInputProps("username")} />
-              <PasswordInput
-                label="Password"
-                description={trunk ? "Leave blank to keep the current one" : undefined}
-                {...form.getInputProps("password")}
-              />
-            </>
-          )}
-          {authMode === "ip" && (
-            <Text size="xs" c="dimmed">
-              The carrier's address is written into Kamailio's permissions table, which is also
-              what stops the responsive firewall rate-limiting them.
-            </Text>
-          )}
-          <Button type="submit" loading={save.isPending} disabled={trunk ? !form.isDirty() && !form.values.password : false}>
-            {trunk ? "Save" : "Create"}
-          </Button>
-        </Stack>
-      </form>
-    </Modal>
-  );
-}
+export const Route = createFileRoute("/_app/trunks")({
+	component: TrunksPage,
+});
 
 function TrunksPage() {
-  const qc = useQueryClient();
-  const [editing, setEditing] = useState<Trunk | null>(null);
-  const [creating, setCreating] = useState(false);
+	const qc = useQueryClient();
+	const list = useQuery({
+		queryKey: ["trunks"],
+		queryFn: endpoints.trunks,
+	});
+	const [open, setOpen] = useState(false);
+	const [editingTrunk, setEditingTrunk] = useState<Trunk | null>(null);
 
-  const { data, error, isPending, isSuccess, isPaused } = useQuery({
-    queryKey: ["trunks"],
-    queryFn: endpoints.trunks,
-  });
+	const [name, setName] = useState("");
+	const [host, setHost] = useState("");
+	const [port, setPort] = useState<number>(5060);
+	const [transport, setTransport] = useState("udp");
+	const [authMode, setAuthMode] = useState<"ip" | "register">("ip");
+	const [username, setUsername] = useState("");
+	const [password, setPassword] = useState("");
+	const [fromDomain, setFromDomain] = useState("");
+	const [codecPrefs, setCodecPrefs] = useState("OPUS,G722,PCMU,PCMA");
+	const [priority, setPriority] = useState<number>(10);
+	const [carrierSigns, setCarrierSigns] = useState(true);
+	const [enabled, setEnabled] = useState(true);
 
-  const remove = useMutation({
-    mutationFn: (id: string) => endpoints.deleteTrunk(id),
-    onSuccess: () => {
-      notifyRemoved("Trunk removed");
-      void qc.invalidateQueries({ queryKey: ["trunks"] });
-    },
-  });
-  const toggle = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      endpoints.updateTrunk(id, { enabled }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["trunks"] }),
-  });
+	const openCreate = () => {
+		setEditingTrunk(null);
+		setName("");
+		setHost("");
+		setPort(5060);
+		setTransport("udp");
+		setAuthMode("ip");
+		setUsername("");
+		setPassword("");
+		setFromDomain("");
+		setCodecPrefs("OPUS,G722,PCMU,PCMA");
+		setPriority(10);
+		setCarrierSigns(true);
+		setEnabled(true);
+		setOpen(true);
+	};
 
-  return (
-    <>
-      <PageHeader
-        title="Trunks"
-        description="Carrier connections. Kamailio reaches these, not FreeSWITCH — the media core never talks to a carrier directly."
-        action={
-          <RoleGate resource="trunk" action="create">
-            <Button onClick={() => setCreating(true)}>New trunk</Button>
-          </RoleGate>
-        }
-      />
+	const openEdit = (t: Trunk) => {
+		setEditingTrunk(t);
+		setName(t.name);
+		setHost(t.host);
+		setPort(t.port ?? 5060);
+		setTransport(t.transport ?? "udp");
+		setAuthMode(t.authMode);
+		setUsername(t.username ?? "");
+		setPassword("");
+		setFromDomain(t.fromDomain ?? "");
+		setCodecPrefs(t.codecPrefs ?? "OPUS,G722,PCMU,PCMA");
+		setPriority(t.priority);
+		setCarrierSigns(t.carrierSigns);
+		setEnabled(t.enabled);
+		setOpen(true);
+	};
 
-      <ErrorAlert error={remove.error ?? toggle.error} />
+	const saveMut = useMutation({
+		mutationFn: async () => {
+			const payload: Partial<Trunk> = {
+				name,
+				host,
+				port,
+				transport,
+				authMode,
+				username: username || null,
+				fromDomain: fromDomain || null,
+				codecPrefs: codecPrefs || null,
+				priority,
+				carrierSigns,
+				enabled,
+			};
+			let saved: Trunk;
+			if (editingTrunk) {
+				saved = await endpoints.updateTrunk(editingTrunk.id, payload);
+			} else {
+				saved = await endpoints.createTrunk(payload);
+			}
+			if (password.trim()) {
+				await endpoints.setTrunkPassword(saved.id, password.trim());
+			}
+			return saved;
+		},
+		onSuccess: () => {
+			void qc.invalidateQueries({ queryKey: ["trunks"] });
+			setOpen(false);
+		},
+	});
 
-      <QueryState
-        data={data}
-        error={error}
-        isPending={isPending}
-        isSuccess={isSuccess}
-        isPaused={isPaused}
-        emptyMessage="No trunks yet. Outbound calls need one."
-        emptyAction={
-          <RoleGate resource="trunk" action="create">
-            <Button onClick={() => setCreating(true)}>Add a trunk</Button>
-          </RoleGate>
-        }
-      >
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Name</Table.Th>
-              <Table.Th>Host</Table.Th>
-              <Table.Th>Auth</Table.Th>
-              <Table.Th>Priority</Table.Th>
-              <Table.Th>Enabled</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {(data ?? []).map((t) => (
-              <Table.Tr key={t.id}>
-                <Table.Td>
-                  <Text fw={500}>{t.name}</Text>
-                </Table.Td>
-                <Table.Td>
-                  {t.host}
-                  {t.port && t.port !== 5060 ? `:${t.port}` : ""}
-                </Table.Td>
-                <Table.Td>
-                  <Badge variant="light" color={t.authMode === "ip" ? "blue" : "grape"}>
-                    {t.authMode === "ip" ? "IP" : `register${t.username ? ` (${t.username})` : ""}`}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>{t.priority}</Table.Td>
-                <Table.Td>
-                  <RoleGate resource="trunk" action="update" mode="disable">
-                    <Switch
-                      checked={t.enabled}
-                      onChange={(e) => toggle.mutate({ id: t.id, enabled: e.currentTarget.checked })}
-                    />
-                  </RoleGate>
-                </Table.Td>
-                <Table.Td>
-                  <Group gap={4} justify="flex-end">
-                    <RoleGate resource="trunk" action="update" mode="disable">
-                      <Button size="xs" variant="subtle" onClick={() => setEditing(t)}>
-                        Edit
-                      </Button>
-                    </RoleGate>
-                    <RoleGate resource="trunk" action="delete" mode="disable">
-                      <DeleteButton
-                        what={`trunk ${t.name}`}
-                        onConfirm={() => remove.mutate(t.id)}
-                        loading={remove.isPending}
-                      />
-                    </RoleGate>
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      </QueryState>
+	const remove = useMutation({
+		mutationFn: (id: string) => endpoints.deleteTrunk(id),
+		onSuccess: () => void qc.invalidateQueries({ queryKey: ["trunks"] }),
+	});
 
-      {creating && <TrunkModal trunk={null} opened onClose={() => setCreating(false)} />}
-      {editing && (
-        <TrunkModal key={editing.id} trunk={editing} opened onClose={() => setEditing(null)} />
-      )}
-    </>
-  );
+	const trunks = list.data ?? [];
+
+	return (
+		<Stack gap={24}>
+			<PageHeader
+				title="SIP Trunks"
+				subtitle="External carrier gateways, Sofia SIP registrations, and STIR/SHAKEN signing policies."
+				actions={
+					<RoleGate resource="trunk" action="create">
+						<Button leftSection={<IconPlus size={17} />} onClick={openCreate}>
+							New SIP Trunk
+						</Button>
+					</RoleGate>
+				}
+			/>
+
+			<SimpleGrid cols={{ base: 1, sm: 3 }} spacing={20}>
+				<SurfaceCard p={22}>
+					<Stack gap={4}>
+						<Text className="qb-caption" tt="uppercase" fw={700}>
+							Configured Trunks
+						</Text>
+						<div className="qb-display">{trunks.length}</div>
+						<Text className="qb-caption">
+							{trunks.filter((t) => t.enabled).length} active carrier peers
+						</Text>
+					</Stack>
+				</SurfaceCard>
+				<SurfaceCard p={22}>
+					<Stack gap={4}>
+						<Text className="qb-caption" tt="uppercase" fw={700}>
+							STIR/SHAKEN Signing
+						</Text>
+						<div className="qb-display">
+							{trunks.filter((t) => t.carrierSigns).length} / {trunks.length}
+						</div>
+						<Text className="qb-caption">
+							Carrier-signed outbound attestation
+						</Text>
+					</Stack>
+				</SurfaceCard>
+				<SurfaceCard p={22}>
+					<Stack gap={4}>
+						<Text className="qb-caption" tt="uppercase" fw={700}>
+							Failover Mode
+						</Text>
+						<div className="qb-display" style={{ fontSize: 28 }}>
+							Priority LCR
+						</div>
+						<Text className="qb-caption">
+							Automatic hunting on 5xx carrier response
+						</Text>
+					</Stack>
+				</SurfaceCard>
+			</SimpleGrid>
+
+			<QueryState
+				isLoading={list.isLoading}
+				isError={list.isError}
+				error={list.error}
+				isEmpty={trunks.length === 0}
+			>
+				<div className="qb-table-wrap">
+					<Table highlightOnHover>
+						<Table.Thead>
+							<Table.Tr>
+								<Table.Th>Carrier Gateway</Table.Th>
+								<Table.Th>SIP Endpoint</Table.Th>
+								<Table.Th>Transport</Table.Th>
+								<Table.Th>Auth & Signing</Table.Th>
+								<Table.Th>Priority</Table.Th>
+								<Table.Th>Status</Table.Th>
+								<Table.Th />
+							</Table.Tr>
+						</Table.Thead>
+						<Table.Tbody>
+							{trunks.map((t) => (
+								<Table.Tr key={t.id}>
+									<Table.Td>
+										<Text fw={700} size="sm">
+											{t.name}
+										</Text>
+										{t.fromDomain && (
+											<Text className="qb-caption qb-mono">
+												From: {t.fromDomain}
+											</Text>
+										)}
+									</Table.Td>
+									<Table.Td className="qb-mono" fw={600}>
+										{t.host}:{t.port ?? 5060}
+									</Table.Td>
+									<Table.Td>
+										<Badge radius="xl" variant="light" color="brand">
+											{(t.transport ?? "udp").toUpperCase()}
+										</Badge>
+									</Table.Td>
+									<Table.Td>
+										<Text size="sm">
+											{t.authMode === "register"
+												? `SIP Register (${t.username ?? ""})`
+												: "IP Peer ACL"}
+										</Text>
+										<Text className="qb-caption">
+											{t.carrierSigns
+												? "Carrier signs STIR/SHAKEN"
+												: "Local STI-AS signing"}
+										</Text>
+									</Table.Td>
+									<Table.Td fw={700}>#{t.priority}</Table.Td>
+									<Table.Td>
+										<Box
+											className="qb-online-pill"
+											style={{
+												background: "var(--qb-bg)",
+												color: t.enabled
+													? "var(--qb-text-primary)"
+													: "var(--qb-text-secondary)",
+											}}
+										>
+											<span
+												className="qb-online-dot"
+												style={{
+													background: t.enabled
+														? "var(--qb-accent)"
+														: "var(--qb-text-secondary)",
+												}}
+											/>
+											<span>{t.enabled ? "Enabled" : "Disabled"}</span>
+										</Box>
+									</Table.Td>
+									<Table.Td>
+										<Group gap={6} wrap="nowrap">
+											<RoleGate resource="trunk" action="update">
+												<Tooltip label="Edit Trunk">
+													<ActionIcon
+														variant="subtle"
+														radius="xl"
+														size={36}
+														onClick={() => openEdit(t)}
+														style={{ color: "var(--qb-text-secondary)" }}
+													>
+														<IconEdit size={16} />
+													</ActionIcon>
+												</Tooltip>
+											</RoleGate>
+											<RoleGate resource="trunk" action="delete">
+												<DeleteButton
+													what={`trunk ${t.name}`}
+													onConfirm={() => remove.mutate(t.id)}
+												/>
+											</RoleGate>
+										</Group>
+									</Table.Td>
+								</Table.Tr>
+							))}
+						</Table.Tbody>
+					</Table>
+				</div>
+			</QueryState>
+
+			<Modal
+				opened={open}
+				onClose={() => setOpen(false)}
+				title={
+					editingTrunk ? `Edit Trunk: ${editingTrunk.name}` : "New SIP Trunk"
+				}
+				size="lg"
+				centered
+			>
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						saveMut.mutate();
+					}}
+				>
+					<Stack gap={14}>
+						<ErrorAlert error={saveMut.error} />
+						<TextInput
+							label="Trunk Name"
+							placeholder="Primary Carrier — US East"
+							required
+							value={name}
+							onChange={(e) => setName(e.currentTarget.value)}
+						/>
+						<Group grow>
+							<TextInput
+								label="SIP Host / Proxy"
+								placeholder="192.0.2.10"
+								required
+								value={host}
+								onChange={(e) => setHost(e.currentTarget.value)}
+							/>
+							<NumberInput
+								label="Port"
+								value={port}
+								onChange={(v) => setPort(Number(v) || 5060)}
+								min={1}
+								max={65535}
+							/>
+							<Select
+								label="Transport"
+								value={transport}
+								onChange={(v) => v && setTransport(v)}
+								data={[
+									{ value: "udp", label: "UDP" },
+									{ value: "tcp", label: "TCP" },
+									{ value: "tls", label: "TLS 1.3" },
+								]}
+							/>
+						</Group>
+						<Group grow>
+							<Select
+								label="Authentication Mode"
+								value={authMode}
+								onChange={(v) =>
+									v && setAuthMode(v as "ip" | "register")
+								}
+								data={[
+									{ value: "ip", label: "IP ACL Peer" },
+									{ value: "register", label: "SIP REGISTER Digest" },
+								]}
+							/>
+							<NumberInput
+								label="Failover Priority"
+								value={priority}
+								onChange={(v) => setPriority(Number(v) || 10)}
+								min={1}
+								max={1000}
+							/>
+						</Group>
+						{authMode === "register" && (
+							<Group grow>
+								<TextInput
+									label="Auth Username"
+									value={username}
+									onChange={(e) => setUsername(e.currentTarget.value)}
+								/>
+								<PasswordInput
+									label="Auth Password"
+									placeholder={
+										editingTrunk ? "Leave blank to keep existing" : ""
+									}
+									value={password}
+									onChange={(e) => setPassword(e.currentTarget.value)}
+								/>
+							</Group>
+						)}
+						<Group grow>
+							<TextInput
+								label="From Domain (optional)"
+								value={fromDomain}
+								onChange={(e) => setFromDomain(e.currentTarget.value)}
+							/>
+							<TextInput
+								label="Codec Preferences"
+								value={codecPrefs}
+								onChange={(e) => setCodecPrefs(e.currentTarget.value)}
+							/>
+						</Group>
+						<Switch
+							label="Carrier signs outbound calls with STIR/SHAKEN PASSporT"
+							checked={carrierSigns}
+							onChange={(e) => setCarrierSigns(e.currentTarget.checked)}
+						/>
+						<Switch
+							label="Trunk Enabled"
+							checked={enabled}
+							onChange={(e) => setEnabled(e.currentTarget.checked)}
+						/>
+						<Group justify="flex-end" mt="sm">
+							<Button variant="default" onClick={() => setOpen(false)}>
+								Cancel
+							</Button>
+							<Button type="submit" loading={saveMut.isPending}>
+								{editingTrunk ? "Save Changes" : "Create Trunk"}
+							</Button>
+						</Group>
+					</Stack>
+				</form>
+			</Modal>
+		</Stack>
+	);
 }
-
-export const Route = createFileRoute("/_app/trunks")({ component: TrunksPage });

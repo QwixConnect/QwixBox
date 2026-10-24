@@ -96,3 +96,33 @@ test("roles and failure scenarios stay local and unknown paths do not fall throu
     ).json(),
   ).toBeNull();
 });
+
+test("mock provides unified inbox, contacts, queues, emergency, conferences, and devices collections", async () => {
+  const request = client();
+  for (const name of [
+    "voicemails",
+    "recordings",
+    "sms-threads",
+    "sms-opt-outs",
+    "contacts",
+    "queues",
+    "queue-agents",
+    "emergency-locations",
+    "conferences",
+    "parking-lots",
+    "music-on-hold",
+    "devices",
+  ]) {
+    const res = await request(`/api/${name}`);
+    expect(res.status).toBe(200);
+    expect((await res.json()).length).toBeGreaterThan(0);
+  }
+
+  const reply = await request("/api/sms-threads/thread-1/messages", "POST", {
+    text: "Confirmed for 2 PM!",
+  });
+  expect(reply.status).toBe(201);
+  const updatedThread = await reply.json();
+  expect(updatedThread.preview).toBe("You: Confirmed for 2 PM!");
+});
+

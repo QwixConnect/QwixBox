@@ -375,6 +375,23 @@ export function createMockApi() {
       }
       return json(visible("ivr-options").filter((row) => row.ivrMenuId === id));
     }
+    if (child === "messages" && resource === "sms-threads" && method === "POST") {
+      const thread = tables["sms-threads"].find((row) => row.id === id);
+      if (!thread) return json({ error: "Thread not found" }, 404);
+      const msg = {
+        id: randomUUID(),
+        direction: "outbound",
+        text: String(body.text ?? ""),
+        time: "Just now",
+        status: "Delivered",
+      };
+      const existing = Array.isArray(thread.messages) ? thread.messages : [];
+      thread.messages = [...existing, msg];
+      thread.preview = `You: ${msg.text}`;
+      thread.updatedAtLabel = "Just now";
+      thread.unread = false;
+      return json(thread, 201);
+    }
     if (resource === "trunks" && child === "password")
       return json({ status: "updated" });
     if (method === "POST" && !id) {

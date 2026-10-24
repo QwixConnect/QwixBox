@@ -94,8 +94,11 @@ added as `viewer` is refused a write (403) where the owner passes to validation 
 
 `emergencyLocation` exists in `schema.ts` and **nothing else in the codebase references it**.
 Outbound route resolution marks a matching emergency route with `X-Emergency`;
-Kamailio has an egress bypass. Ingress call-cap handling still precedes that classification,
-so emergency bypass must be tested under saturation. Dispatchable location and notification
+Kamailio has an egress bypass. Ingress call-cap handling still precedes that classification:
+reading `route[INGRESS]` confirms it calls `route(FRAUD)` unconditionally, so a 911 call from an
+account at `MAX_CONCURRENT_CALLS` is refused with `486`. Bug 3 in
+[comprehensive-implementation-plan.md](comprehensive-implementation-plan.md) has the fix, and the
+bypass must then be tested under saturation. Dispatchable location and notification
 are unwired; comments about an ESL listener do not implement them.
 
 This is a legal obligation in the US (RAY BAUM'S Act, Kari's Law) and Canada, not a feature.
@@ -147,9 +150,18 @@ Not blockers for a working phone system, but they will be asked for immediately.
 
 ## Explicitly not MVP
 
-Documented under `docs/design/` so they are cheap to start later, and deliberately not started:
+Documented under `docs/design/` so they are cheap to start later, and deliberately not started on the backend:
 call centre, billing, resellers, SMS, conferences, device provisioning, contacts,
 music-on-hold management, parking lots, AI receptionist.
+
+> **Web Portal UI Note:** The portal (`portal/web`) has UI screens for messages, voicemail and
+> recordings, contacts, queues, E911, conferences/parking/MoH, devices and the webphone, all
+> backed by seed data in `portal/web/mock/data.ts`. **That includes production builds.**
+> `getWithFallback()` serves the seed data whenever the API answers 404, and the API answers 404
+> for every one of these paths. So a live tenant sees invented records, including invented E911
+> addresses, under a banner. Gate the fallback to dev mode before a customer sees the portal. See
+> [roadmap.md](roadmap.md#portal-ui-mock-to-live-todo) and Bug 11 in
+> [comprehensive-implementation-plan.md](comprehensive-implementation-plan.md).
 
 ## A note on how to verify things here
 

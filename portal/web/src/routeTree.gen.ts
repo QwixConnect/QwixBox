@@ -16,8 +16,14 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppCallFlowsRouteImport } from './routes/_app/call-flows'
 import { Route as AppCallsRouteImport } from './routes/_app/calls'
+import { Route as AppConferencesRouteImport } from './routes/_app/conferences'
+import { Route as AppContactsRouteImport } from './routes/_app/contacts'
+import { Route as AppDevicesRouteImport } from './routes/_app/devices'
+import { Route as AppEmergencyRouteImport } from './routes/_app/emergency'
 import { Route as AppExtensionsRouteImport } from './routes/_app/extensions'
 import { Route as AppFaxesRouteImport } from './routes/_app/faxes'
+import { Route as AppMessagesRouteImport } from './routes/_app/messages'
+import { Route as AppQueuesRouteImport } from './routes/_app/queues'
 import { Route as AppRoutingRouteImport } from './routes/_app/routing'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppTrunksRouteImport } from './routes/_app/trunks'
@@ -57,6 +63,26 @@ const AppCallsRoute = AppCallsRouteImport.update({
   path: '/calls',
   getParentRoute: () => AppRoute,
 } as any)
+const AppConferencesRoute = AppConferencesRouteImport.update({
+  id: '/conferences',
+  path: '/conferences',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppContactsRoute = AppContactsRouteImport.update({
+  id: '/contacts',
+  path: '/contacts',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDevicesRoute = AppDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppEmergencyRoute = AppEmergencyRouteImport.update({
+  id: '/emergency',
+  path: '/emergency',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppExtensionsRoute = AppExtensionsRouteImport.update({
   id: '/extensions',
   path: '/extensions',
@@ -65,6 +91,16 @@ const AppExtensionsRoute = AppExtensionsRouteImport.update({
 const AppFaxesRoute = AppFaxesRouteImport.update({
   id: '/faxes',
   path: '/faxes',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMessagesRoute = AppMessagesRouteImport.update({
+  id: '/messages',
+  path: '/messages',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppQueuesRoute = AppQueuesRouteImport.update({
+  id: '/queues',
+  path: '/queues',
   getParentRoute: () => AppRoute,
 } as any)
 const AppRoutingRoute = AppRoutingRouteImport.update({
@@ -95,8 +131,14 @@ export interface FileRoutesByFullPath {
   '/audit': typeof AppAuditRoute
   '/call-flows': typeof AppCallFlowsRoute
   '/calls': typeof AppCallsRoute
+  '/conferences': typeof AppConferencesRoute
+  '/contacts': typeof AppContactsRoute
+  '/devices': typeof AppDevicesRoute
+  '/emergency': typeof AppEmergencyRoute
   '/extensions': typeof AppExtensionsRoute
   '/faxes': typeof AppFaxesRoute
+  '/messages': typeof AppMessagesRoute
+  '/queues': typeof AppQueuesRoute
   '/routing': typeof AppRoutingRoute
   '/settings': typeof AppSettingsRoute
   '/trunks': typeof AppTrunksRoute
@@ -108,8 +150,14 @@ export interface FileRoutesByTo {
   '/audit': typeof AppAuditRoute
   '/call-flows': typeof AppCallFlowsRoute
   '/calls': typeof AppCallsRoute
+  '/conferences': typeof AppConferencesRoute
+  '/contacts': typeof AppContactsRoute
+  '/devices': typeof AppDevicesRoute
+  '/emergency': typeof AppEmergencyRoute
   '/extensions': typeof AppExtensionsRoute
   '/faxes': typeof AppFaxesRoute
+  '/messages': typeof AppMessagesRoute
+  '/queues': typeof AppQueuesRoute
   '/routing': typeof AppRoutingRoute
   '/settings': typeof AppSettingsRoute
   '/trunks': typeof AppTrunksRoute
@@ -124,8 +172,14 @@ export interface FileRoutesById {
   '/_app/audit': typeof AppAuditRoute
   '/_app/call-flows': typeof AppCallFlowsRoute
   '/_app/calls': typeof AppCallsRoute
+  '/_app/conferences': typeof AppConferencesRoute
+  '/_app/contacts': typeof AppContactsRoute
+  '/_app/devices': typeof AppDevicesRoute
+  '/_app/emergency': typeof AppEmergencyRoute
   '/_app/extensions': typeof AppExtensionsRoute
   '/_app/faxes': typeof AppFaxesRoute
+  '/_app/messages': typeof AppMessagesRoute
+  '/_app/queues': typeof AppQueuesRoute
   '/_app/routing': typeof AppRoutingRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/trunks': typeof AppTrunksRoute
@@ -141,8 +195,14 @@ export interface FileRouteTypes {
     | '/audit'
     | '/call-flows'
     | '/calls'
+    | '/conferences'
+    | '/contacts'
+    | '/devices'
+    | '/emergency'
     | '/extensions'
     | '/faxes'
+    | '/messages'
+    | '/queues'
     | '/routing'
     | '/settings'
     | '/trunks'
@@ -154,8 +214,14 @@ export interface FileRouteTypes {
     | '/audit'
     | '/call-flows'
     | '/calls'
+    | '/conferences'
+    | '/contacts'
+    | '/devices'
+    | '/emergency'
     | '/extensions'
     | '/faxes'
+    | '/messages'
+    | '/queues'
     | '/routing'
     | '/settings'
     | '/trunks'
@@ -169,8 +235,14 @@ export interface FileRouteTypes {
     | '/_app/audit'
     | '/_app/call-flows'
     | '/_app/calls'
+    | '/_app/conferences'
+    | '/_app/contacts'
+    | '/_app/devices'
+    | '/_app/emergency'
     | '/_app/extensions'
     | '/_app/faxes'
+    | '/_app/messages'
+    | '/_app/queues'
     | '/_app/routing'
     | '/_app/settings'
     | '/_app/trunks'
@@ -235,6 +307,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCallsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/conferences': {
+      id: '/_app/conferences'
+      path: '/conferences'
+      fullPath: '/conferences'
+      preLoaderRoute: typeof AppConferencesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/contacts': {
+      id: '/_app/contacts'
+      path: '/contacts'
+      fullPath: '/contacts'
+      preLoaderRoute: typeof AppContactsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/devices': {
+      id: '/_app/devices'
+      path: '/devices'
+      fullPath: '/devices'
+      preLoaderRoute: typeof AppDevicesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/emergency': {
+      id: '/_app/emergency'
+      path: '/emergency'
+      fullPath: '/emergency'
+      preLoaderRoute: typeof AppEmergencyRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/extensions': {
       id: '/_app/extensions'
       path: '/extensions'
@@ -247,6 +347,20 @@ declare module '@tanstack/react-router' {
       path: '/faxes'
       fullPath: '/faxes'
       preLoaderRoute: typeof AppFaxesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/messages': {
+      id: '/_app/messages'
+      path: '/messages'
+      fullPath: '/messages'
+      preLoaderRoute: typeof AppMessagesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/queues': {
+      id: '/_app/queues'
+      path: '/queues'
+      fullPath: '/queues'
+      preLoaderRoute: typeof AppQueuesRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/routing': {
@@ -284,8 +398,14 @@ interface AppRouteChildren {
   AppAuditRoute: typeof AppAuditRoute
   AppCallFlowsRoute: typeof AppCallFlowsRoute
   AppCallsRoute: typeof AppCallsRoute
+  AppConferencesRoute: typeof AppConferencesRoute
+  AppContactsRoute: typeof AppContactsRoute
+  AppDevicesRoute: typeof AppDevicesRoute
+  AppEmergencyRoute: typeof AppEmergencyRoute
   AppExtensionsRoute: typeof AppExtensionsRoute
   AppFaxesRoute: typeof AppFaxesRoute
+  AppMessagesRoute: typeof AppMessagesRoute
+  AppQueuesRoute: typeof AppQueuesRoute
   AppRoutingRoute: typeof AppRoutingRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppTrunksRoute: typeof AppTrunksRoute
@@ -297,8 +417,14 @@ const AppRouteChildren: AppRouteChildren = {
   AppAuditRoute: AppAuditRoute,
   AppCallFlowsRoute: AppCallFlowsRoute,
   AppCallsRoute: AppCallsRoute,
+  AppConferencesRoute: AppConferencesRoute,
+  AppContactsRoute: AppContactsRoute,
+  AppDevicesRoute: AppDevicesRoute,
+  AppEmergencyRoute: AppEmergencyRoute,
   AppExtensionsRoute: AppExtensionsRoute,
   AppFaxesRoute: AppFaxesRoute,
+  AppMessagesRoute: AppMessagesRoute,
+  AppQueuesRoute: AppQueuesRoute,
   AppRoutingRoute: AppRoutingRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppTrunksRoute: AppTrunksRoute,

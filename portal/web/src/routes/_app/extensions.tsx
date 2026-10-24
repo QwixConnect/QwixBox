@@ -1,265 +1,569 @@
-import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Alert,
-  Badge,
-  Button,
-  Code,
-  Group,
-  Loader,
-  Modal,
-  Stack,
-  Switch,
-  Table,
-  Text,
-  TextInput,
-  Title,
+	ActionIcon,
+	Badge,
+	Box,
+	Button,
+	Code,
+	CopyButton,
+	Group,
+	Modal,
+	NumberInput,
+	SimpleGrid,
+	Stack,
+	Switch,
+	Table,
+	Text,
+	TextInput,
+	Tooltip,
 } from "@mantine/core";
-import { useForm } from "@mantine/form";
-import { endpoints, type Extension } from "../../lib/api";
-import { notifySaved } from "../../lib/notify";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { CallHandlingModal } from "../../components/CallHandlingModal";
-import { ErrorAlert, RoleGate } from "../../components/Resource";
+import {
+	IconEdit,
+	IconPhone,
+	IconPlus,
+	IconRefresh,
+} from "../../components/Icons";
+import {
+	DeleteButton,
+	ErrorAlert,
+	InitialsAvatar,
+	PageHeader,
+	QueryState,
+	RoleGate,
+	SurfaceCard,
+} from "../../components/Resource";
+import { useWebphone } from "../../components/WebphoneDrawer";
+import { type Extension, endpoints } from "../../lib/api";
 
-function CreateExtensionModal({
-  opened,
-  onClose,
-}: {
-  opened: boolean;
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const [created, setCreated] = useState<Extension | null>(null);
+export const Route = createFileRoute("/_app/extensions")({
+	component: ExtensionsPage,
+});
 
-  const form = useForm({
-    mode: "controlled",
-    initialValues: {
-      number: "",
-      displayName: "",
-      voicemailEnabled: true,
-    },
-    validate: {
-      number: (v) => (v.trim() ? null : "Number is required"),
-      displayName: (v) => (v.trim() ? null : "Display name is required"),
-    },
-  });
+function ExtensionsPage() {
+	const { startCall } = useWebphone();
+	const qc = useQueryClient();
+	const list = useQuery({
+		queryKey: ["extensions"],
+		queryFn: endpoints.extensions,
+	});
+	const [open, setOpen] = useState(false);
+	const [editingExt, setEditingExt] = useState<Extension | null>(null);
+	const [createdSecret, setCreatedSecret] = useState<{
+		title: string;
+		ext: string;
+		secretLabel: string;
+		secretValue: string;
+	} | null>(null);
+	const [callHandlingExt, setCallHandlingExt] = useState<Extension | null>(
+		null,
+	);
 
-  const mutation = useMutation({
-    mutationFn: (values: typeof form.values) =>
-      endpoints.createExtension({
-        number: values.number,
-        displayName: values.displayName,
-        voicemailEnabled: values.voicemailEnabled,
-      }),
-    onSuccess: (ext) => {
-      notifySaved(`Extension ${ext.number} created`);
-      setCreated(ext);
-      void qc.invalidateQueries({ queryKey: ["extensions"] });
-    },
-  });
+	const [number, setNumber] = useState("");
+	const [displayName, setDisplayName] = useState("");
+	const [voicemailEmail, setVoicemailEmail] = useState("");
+	const [callerIdName, setCallerIdName] = useState("");
+	const [callerIdNumber, setCallerIdNumber] = useState("");
+	const [deviceMac, setDeviceMac] = useState("");
+	const [codecPrefs, setCodecPrefs] = useState("OPUS,G722,PCMU,PCMA");
+	const [maxConcurrentCalls, setMaxConcurrentCalls] = useState<number>(4);
+	const [voicemailEnabled, setVoicemailEnabled] = useState(true);
+	const [enabled, setEnabled] = useState(true);
 
-  function reset() {
-    form.reset();
-    setCreated(null);
-    mutation.reset();
-    onClose();
-  }
+	const resetForm = () => {
+		setNumber("");
+		setDisplayName("");
+		setVoicemailEmail("");
+		setCallerIdName("");
+		setCallerIdNumber("");
+		setDeviceMac("");
+		setCodecPrefs("OPUS,G722,PCMU,PCMA");
+		setMaxConcurrentCalls(4);
+		setVoicemailEnabled(true);
+		setEnabled(true);
+	};
 
-  if (created) {
-    return (
-      <Modal opened={opened} onClose={reset} title={`Extension ${created.number} created`}>
-        <Stack>
-          <Alert color="yellow" title="Save these now">
-            Both are stored encrypted and cannot be shown again. The PIN can be reset later; the
-            SIP password cannot be recovered, only replaced.
-          </Alert>
-          <div>
-            <Text size="sm" fw={500}>
-              SIP password — for the handset
-            </Text>
-            <Code block>{created.sipPassword}</Code>
-          </div>
-          <div>
-            <Text size="sm" fw={500}>
-              Voicemail PIN — for the user
-            </Text>
-            <Code block>{created.voicemailPin}</Code>
-            <Text size="xs" c="dimmed" mt={4}>
-              Dial *97 from the extension to listen, *98 from any other phone.
-            </Text>
-          </div>
-          <Button onClick={reset}>Done</Button>
-        </Stack>
-      </Modal>
-    );
-  }
+	const openCreate = () => {
+		setEditingExt(null);
+		resetForm();
+		setOpen(true);
+	};
 
-  return (
-    <Modal opened={opened} onClose={reset} title="New extension">
-      <form onSubmit={form.onSubmit((values) => mutation.mutate(values))}>
-        <Stack>
-          <TextInput label="Number" placeholder="1001" required {...form.getInputProps("number")} />
-          <TextInput
-            label="Display name"
-            placeholder="Reception"
-            required
-            {...form.getInputProps("displayName")}
-          />
-          <Switch
-            label="Voicemail"
-            {...form.getInputProps("voicemailEnabled", { type: "checkbox" })}
-          />
-          <ErrorAlert error={mutation.error} />
-          <Group justify="flex-end">
-            <Button variant="subtle" onClick={reset}>
-              Cancel
-            </Button>
-            <Button type="submit" loading={mutation.isPending}>
-              Create
-            </Button>
-          </Group>
-        </Stack>
-      </form>
-    </Modal>
-  );
+	const openEdit = (ext: Extension) => {
+		setEditingExt(ext);
+		setNumber(ext.number);
+		setDisplayName(ext.displayName);
+		setVoicemailEmail(ext.voicemailEmail ?? "");
+		setCallerIdName(ext.callerIdName ?? "");
+		setCallerIdNumber(ext.callerIdNumber ?? "");
+		setDeviceMac(ext.deviceMac ?? "");
+		setCodecPrefs(ext.codecPrefs ?? "OPUS,G722,PCMU,PCMA");
+		setMaxConcurrentCalls(ext.maxConcurrentCalls ?? 4);
+		setVoicemailEnabled(ext.voicemailEnabled);
+		setEnabled(ext.enabled);
+		setOpen(true);
+	};
+
+	const saveMut = useMutation({
+		mutationFn: async () => {
+			const payload = {
+				number,
+				displayName,
+				voicemailEmail: voicemailEmail || null,
+				callerIdName: callerIdName || null,
+				callerIdNumber: callerIdNumber || null,
+				deviceMac: deviceMac || null,
+				codecPrefs: codecPrefs || null,
+				maxConcurrentCalls,
+				voicemailEnabled,
+				enabled,
+			};
+			if (editingExt) {
+				return endpoints.updateExtension(editingExt.id, payload);
+			}
+			return endpoints.createExtension(payload);
+		},
+		onSuccess: (res) => {
+			void qc.invalidateQueries({ queryKey: ["extensions"] });
+			setOpen(false);
+			if (!editingExt && res.sipPassword) {
+				setCreatedSecret({
+					title: "Save SIP Password",
+					ext: res.number,
+					secretLabel: "SIP Password",
+					secretValue: res.sipPassword,
+				});
+			}
+		},
+	});
+
+	const rotateSipMut = useMutation({
+		mutationFn: async (ext: Extension) => {
+			const newPass = `sip-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36).slice(-4)}`;
+			await endpoints.updateExtension(ext.id, { sipPassword: newPass });
+			return { ext: ext.number, sipPassword: newPass };
+		},
+		onSuccess: ({ ext, sipPassword }) => {
+			setCreatedSecret({
+				title: "Rotated SIP Password",
+				ext,
+				secretLabel: "New SIP Password",
+				secretValue: sipPassword,
+			});
+		},
+	});
+
+	const rotatePinMut = useMutation({
+		mutationFn: async (ext: Extension) => {
+			const newPin = String(Math.floor(100000 + Math.random() * 900000));
+			await endpoints.updateExtension(ext.id, { voicemailPin: newPin });
+			return { ext: ext.number, voicemailPin: newPin };
+		},
+		onSuccess: ({ ext, voicemailPin }) => {
+			setCreatedSecret({
+				title: "Rotated Voicemail PIN",
+				ext,
+				secretLabel: "New Voicemail PIN",
+				secretValue: voicemailPin,
+			});
+		},
+	});
+
+	const deleteMut = useMutation({
+		mutationFn: (id: string) => endpoints.deleteExtension(id),
+		onSuccess: () => void qc.invalidateQueries({ queryKey: ["extensions"] }),
+	});
+
+	const extensions = list.data ?? [];
+
+	return (
+		<Stack gap={24}>
+			<PageHeader
+				title="Extensions"
+				subtitle="Internal SIP seats, WebRTC softphones, caller ID overrides, and per-user call handling rules."
+				actions={
+					<RoleGate resource="extension" action="create">
+						<Button leftSection={<IconPlus size={17} />} onClick={openCreate}>
+							New Extension
+						</Button>
+					</RoleGate>
+				}
+			/>
+
+			<SimpleGrid cols={{ base: 1, sm: 3 }} spacing={20}>
+				<SurfaceCard p={22}>
+					<Stack gap={4}>
+						<Text className="qb-caption" tt="uppercase" fw={700}>
+							Provisioned Seats
+						</Text>
+						<div className="qb-display">{extensions.length}</div>
+						<Text className="qb-caption">
+							{extensions.filter((e) => e.enabled).length} active on switch
+						</Text>
+					</Stack>
+				</SurfaceCard>
+				<SurfaceCard p={22}>
+					<Stack gap={4}>
+						<Text className="qb-caption" tt="uppercase" fw={700}>
+							Hardware Provisioned
+						</Text>
+						<div className="qb-display">
+							{extensions.filter((e) => Boolean(e.deviceMac)).length}
+						</div>
+						<Text className="qb-caption">Desk phones + WebRTC softphones</Text>
+					</Stack>
+				</SurfaceCard>
+				<SurfaceCard p={22}>
+					<Stack gap={4}>
+						<Text className="qb-caption" tt="uppercase" fw={700}>
+							Do Not Disturb / Forwarded
+						</Text>
+						<div className="qb-display">
+							{
+								extensions.filter(
+									(e) =>
+										e.dnd ||
+										e.forwardAllTo ||
+										e.forwardBusyTo ||
+										e.forwardNoAnswerTo,
+								).length
+							}
+						</div>
+						<Text className="qb-caption">Active custom call handling</Text>
+					</Stack>
+				</SurfaceCard>
+			</SimpleGrid>
+
+			<QueryState
+				isLoading={list.isLoading}
+				isError={list.isError}
+				error={list.error}
+				isEmpty={extensions.length === 0}
+			>
+				<div className="qb-table-wrap">
+					<Table highlightOnHover>
+						<Table.Thead>
+							<Table.Tr>
+								<Table.Th>Extension & User</Table.Th>
+								<Table.Th>Outbound Caller ID</Table.Th>
+								<Table.Th>Call Handling & Capabilities</Table.Th>
+								<Table.Th>Status</Table.Th>
+								<Table.Th>Actions & Credentials</Table.Th>
+							</Table.Tr>
+						</Table.Thead>
+						<Table.Tbody>
+							{extensions.map((ext) => (
+								<Table.Tr key={ext.id}>
+									<Table.Td>
+										<Group gap={12} wrap="nowrap">
+											<InitialsAvatar name={ext.displayName} size={42} />
+											<Box>
+												<Group gap={8}>
+													<Text fw={800} size="sm" className="qb-mono">
+														{ext.number}
+													</Text>
+													<Text fw={700} size="sm">
+														{ext.displayName}
+													</Text>
+												</Group>
+												<Text className="qb-caption">
+													{ext.voicemailEmail || "No email assigned"}
+												</Text>
+											</Box>
+										</Group>
+									</Table.Td>
+									<Table.Td>
+										{ext.callerIdNumber ? (
+											<Box>
+												<Text size="sm" fw={600}>
+													{ext.callerIdName || ext.displayName}
+												</Text>
+												<Text className="qb-caption qb-mono">
+													{ext.callerIdNumber}
+												</Text>
+											</Box>
+										) : (
+											<Text className="qb-caption">Tenant Default DID</Text>
+										)}
+									</Table.Td>
+									<Table.Td>
+										<Group gap={6}>
+											{ext.dnd && (
+												<Badge radius="xl" color="red">
+													DND
+												</Badge>
+											)}
+											{ext.forwardAllTo && (
+												<Badge radius="xl" variant="light" color="brand">
+													Fwd → {ext.forwardAllTo}
+												</Badge>
+											)}
+											<Badge
+												radius="xl"
+												variant="light"
+												color={ext.voicemailEnabled ? "brand" : "gray"}
+											>
+												{ext.voicemailEnabled ? "Voicemail" : "No VM"}
+											</Badge>
+											{ext.deviceMac && (
+												<Badge radius="xl" variant="outline" color="gray">
+													{ext.deviceMac}
+												</Badge>
+											)}
+										</Group>
+									</Table.Td>
+									<Table.Td>
+										<Box
+											className="qb-online-pill"
+											style={{
+												background: "var(--qb-bg)",
+												color: ext.enabled
+													? "var(--qb-text-primary)"
+													: "var(--qb-text-secondary)",
+											}}
+										>
+											<span
+												className="qb-online-dot"
+												style={{
+													background: ext.enabled
+														? "var(--qb-accent)"
+														: "var(--qb-text-secondary)",
+												}}
+											/>
+											<span>{ext.enabled ? "Enabled" : "Disabled"}</span>
+										</Box>
+									</Table.Td>
+									<Table.Td>
+										<Group gap={8} wrap="nowrap">
+											<Tooltip label={`Dial Ext ${ext.number}`}>
+												<ActionIcon
+													variant="subtle"
+													radius="xl"
+													size={36}
+													onClick={() =>
+														startCall(ext.number, ext.displayName)
+													}
+													style={{ color: "var(--qb-accent-text)" }}
+												>
+													<IconPhone size={16} />
+												</ActionIcon>
+											</Tooltip>
+											<RoleGate resource="extension" action="update">
+												<Group gap={6} wrap="nowrap">
+													<Button
+														size="compact-sm"
+														variant="default"
+														radius="xl"
+														onClick={() => setCallHandlingExt(ext)}
+														styles={{
+															root: {
+																minHeight: 34,
+																height: 34,
+																fontSize: 12,
+																background: "var(--qb-bg)",
+																border: "1px solid var(--qb-separator)",
+															},
+														}}
+													>
+														Call Handling
+													</Button>
+													<Tooltip label="Edit Extension">
+														<ActionIcon
+															variant="subtle"
+															radius="xl"
+															size={36}
+															onClick={() => openEdit(ext)}
+															style={{ color: "var(--qb-text-secondary)" }}
+														>
+															<IconEdit size={16} />
+														</ActionIcon>
+													</Tooltip>
+													<Tooltip label="Rotate SIP Password">
+														<ActionIcon
+															variant="subtle"
+															radius="xl"
+															size={36}
+															onClick={() => rotateSipMut.mutate(ext)}
+															style={{ color: "var(--qb-text-secondary)" }}
+														>
+															<IconRefresh size={16} />
+														</ActionIcon>
+													</Tooltip>
+													<Button
+														size="compact-sm"
+														variant="subtle"
+														color="gray"
+														onClick={() => rotatePinMut.mutate(ext)}
+														styles={{
+															root: {
+																minHeight: 34,
+																height: 34,
+																fontSize: 12,
+															},
+														}}
+													>
+														Reset PIN
+													</Button>
+												</Group>
+											</RoleGate>
+											<RoleGate resource="extension" action="delete">
+												<DeleteButton
+													what={`extension ${ext.number}`}
+													onConfirm={() => deleteMut.mutate(ext.id)}
+												/>
+											</RoleGate>
+										</Group>
+									</Table.Td>
+								</Table.Tr>
+							))}
+						</Table.Tbody>
+					</Table>
+				</div>
+			</QueryState>
+
+			{callHandlingExt && (
+				<CallHandlingModal
+					extension={callHandlingExt}
+					onClose={() => setCallHandlingExt(null)}
+				/>
+			)}
+
+			<Modal
+				opened={open}
+				onClose={() => setOpen(false)}
+				title={
+					editingExt ? `Edit Extension ${editingExt.number}` : "New Extension"
+				}
+				centered
+				size="lg"
+			>
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						saveMut.mutate();
+					}}
+				>
+					<Stack gap={14}>
+						<ErrorAlert error={saveMut.error} />
+						<Group grow>
+							<TextInput
+								label="Extension Number"
+								placeholder="1001"
+								required
+								value={number}
+								onChange={(e) => setNumber(e.currentTarget.value)}
+							/>
+							<TextInput
+								label="Display Name"
+								placeholder="Alex Morgan"
+								required
+								value={displayName}
+								onChange={(e) => setDisplayName(e.currentTarget.value)}
+							/>
+						</Group>
+						<TextInput
+							label="Voicemail Email (Voicemail-to-Email Notifications)"
+							placeholder="alex@company.com"
+							value={voicemailEmail}
+							onChange={(e) => setVoicemailEmail(e.currentTarget.value)}
+						/>
+						<Group grow>
+							<TextInput
+								label="Outbound Caller ID Name"
+								placeholder="Northstar Sales"
+								value={callerIdName}
+								onChange={(e) => setCallerIdName(e.currentTarget.value)}
+							/>
+							<TextInput
+								label="Outbound Caller ID Number (E.164)"
+								placeholder="+14165550101"
+								value={callerIdNumber}
+								onChange={(e) => setCallerIdNumber(e.currentTarget.value)}
+							/>
+						</Group>
+						<Group grow>
+							<TextInput
+								label="Hardware Desk Phone MAC (optional)"
+								placeholder="00:15:65:8A:4C:01"
+								value={deviceMac}
+								onChange={(e) => setDeviceMac(e.currentTarget.value)}
+							/>
+							<TextInput
+								label="Codec Preferences"
+								placeholder="OPUS,G722,PCMU,PCMA"
+								value={codecPrefs}
+								onChange={(e) => setCodecPrefs(e.currentTarget.value)}
+							/>
+							<NumberInput
+								label="Max Concurrent Calls"
+								value={maxConcurrentCalls}
+								onChange={(v) => setMaxConcurrentCalls(Number(v) || 4)}
+								min={1}
+								max={32}
+							/>
+						</Group>
+						<Switch
+							label="Enable Voicemail Box"
+							checked={voicemailEnabled}
+							onChange={(e) => setVoicemailEnabled(e.currentTarget.checked)}
+						/>
+						<Switch
+							label="Extension Enabled on Switch"
+							checked={enabled}
+							onChange={(e) => setEnabled(e.currentTarget.checked)}
+						/>
+						<Group justify="flex-end" mt="sm">
+							<Button variant="default" onClick={() => setOpen(false)}>
+								Cancel
+							</Button>
+							<Button type="submit" loading={saveMut.isPending}>
+								{editingExt ? "Save Changes" : "Create Extension"}
+							</Button>
+						</Group>
+					</Stack>
+				</form>
+			</Modal>
+
+			<Modal
+				opened={!!createdSecret}
+				onClose={() => setCreatedSecret(null)}
+				title={createdSecret?.title ?? "Credential Generated"}
+				centered
+			>
+				{createdSecret && (
+					<Stack gap={16}>
+						<Text size="sm" c="dimmed">
+							Copy this credential for extension{" "}
+							<strong>{createdSecret.ext}</strong> now — for security, the raw
+							secret is only displayed once:
+						</Text>
+						<SurfaceCard p={16}>
+							<Group justify="space-between">
+								<Box>
+									<Text className="qb-caption">
+										{createdSecret.secretLabel}
+									</Text>
+									<Code
+										className="qb-mono"
+										style={{ fontSize: 16, fontWeight: 700 }}
+									>
+										{createdSecret.secretValue}
+									</Code>
+								</Box>
+								<CopyButton value={createdSecret.secretValue}>
+									{({ copied, copy }) => (
+										<Button size="sm" onClick={copy}>
+											{copied ? "Copied" : "Copy"}
+										</Button>
+									)}
+								</CopyButton>
+							</Group>
+						</SurfaceCard>
+					</Stack>
+				)}
+			</Modal>
+		</Stack>
+	);
 }
-
-function Extensions() {
-  const qc = useQueryClient();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [callHandling, setCallHandling] = useState<Extension | null>(null);
-
-  const { data, isLoading, error } = useQuery<Extension[]>({
-    queryKey: ["extensions"],
-    queryFn: () => endpoints.extensions(),
-  });
-
-  const toggle = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      endpoints.updateExtension(id, { enabled }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["extensions"] }),
-  });
-
-  if (isLoading) {
-    return (
-      <Group justify="center" p="xl">
-        <Loader />
-      </Group>
-    );
-  }
-
-  if (error) {
-    return (
-      <Alert color="red" title="Could not load extensions">
-        {(error as Error).message}
-      </Alert>
-    );
-  }
-
-  const rows = data ?? [];
-
-  return (
-    <Stack>
-      <Group justify="space-between">
-        <Title order={3}>Extensions</Title>
-        <RoleGate resource="extension" action="create">
-          <Button onClick={() => setModalOpen(true)}>New extension</Button>
-        </RoleGate>
-      </Group>
-
-      <ErrorAlert error={toggle.error} />
-      {rows.length === 0 ? (
-        <Alert color="blue" title="No extensions yet">
-          Create one to give someone a phone. It becomes registrable as soon as Kamailio has
-          the credential — the portal projects it automatically.
-        </Alert>
-      ) : (
-        <Table>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Number</Table.Th>
-              <Table.Th>Name</Table.Th>
-              <Table.Th>Voicemail</Table.Th>
-              <Table.Th>Call handling</Table.Th>
-              <Table.Th>Status</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {rows.map((ext) => (
-              <Table.Tr key={ext.id}>
-                <Table.Td>
-                  <Text ff="monospace">{ext.number}</Text>
-                </Table.Td>
-                <Table.Td>{ext.displayName}</Table.Td>
-                <Table.Td>
-                  {ext.voicemailEnabled ? (
-                    <Badge variant="light">on</Badge>
-                  ) : (
-                    <Text c="dimmed" size="sm">
-                      off
-                    </Text>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  <Group gap={4}>
-                    {/* Only the states that change what happens to a call are badged. A row
-                        with nothing here behaves the ordinary way, which is most of them. */}
-                    {ext.dnd && (
-                      <Badge color="orange" variant="light" size="sm">
-                        DND
-                      </Badge>
-                    )}
-                    {ext.forwardAllTo && (
-                      <Badge color="grape" variant="light" size="sm">
-                        → {ext.forwardAllTo}
-                      </Badge>
-                    )}
-                    {!ext.callWaitingEnabled && (
-                      <Badge color="gray" variant="light" size="sm">
-                        no waiting
-                      </Badge>
-                    )}
-                    <RoleGate resource="extension" action="update" mode="disable">
-                      <Button size="compact-xs" variant="subtle" onClick={() => setCallHandling(ext)}>
-                        Edit
-                      </Button>
-                    </RoleGate>
-                  </Group>
-                </Table.Td>
-                <Table.Td>
-                  <Badge color={ext.enabled ? "green" : "gray"} variant="light">
-                    {ext.enabled ? "enabled" : "disabled"}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <RoleGate resource="extension" action="update" mode="disable">
-                    <Switch
-                      checked={ext.enabled}
-                      onChange={(e) =>
-                        toggle.mutate({ id: ext.id, enabled: e.currentTarget.checked })
-                      }
-                      aria-label={`Toggle extension ${ext.number}`}
-                    />
-                  </RoleGate>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      )}
-
-      <CreateExtensionModal opened={modalOpen} onClose={() => setModalOpen(false)} />
-      {callHandling && (
-        <CallHandlingModal
-          key={callHandling.id}
-          extension={callHandling}
-          onClose={() => setCallHandling(null)}
-        />
-      )}
-    </Stack>
-  );
-}
-
-export const Route = createFileRoute("/_app/extensions")({ component: Extensions });
