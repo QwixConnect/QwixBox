@@ -63,12 +63,21 @@ Goal: make every later milestone measurable. Size: **M**.
    typecheck/lint/build, site tests/build and `tests/docs-links.py`. Then add disposable
    PostgreSQL and Kamailio service containers for `security.test.ts` and `tests/sip-auth.py`.
    Production databases must never be reachable from CI.
+   **Offline part written 2026-10-26** (YYZ-14): `.github/workflows/ci.yml` calls `tests/ci.sh
+   shell|api|web|site`. It passes and fails as expected locally, but has not yet run on GitHub.
+   The installer harnesses run in it as well.
+   **Service-container jobs written 2026-10-26** (YYZ-15): `integration` (Postgres + Redis:
+   security and cache-publication suites) and `sip` (Debian Kamailio + Postgres: `sip-auth.py`).
+   Both pass against fresh containers locally and fail on an injected regression; not yet run on
+   GitHub.
 5. **Evidence template.** Add an "Acceptance runs" section to [status](status.md): one row per
    run, with revision, host, architecture, component versions, procedure link and result. Every
-   later closure writes there.
+   later closure writes there. **Done 2026-10-26 (YYZ-16):** the section exists; no run is
+   recorded yet.
 6. **Acceptance procedures.** [Hardware testing](testing-on-real-hardware.md) covers gates 1 and 6
    only. Write the procedures for gates 2–5 and 7 as they become testable, in the same document
-   or a sibling. Each must name its pass condition before it is run.
+   or a sibling. Each must name its pass condition before it is run. **Done 2026-10-26
+   (YYZ-17):** [acceptance procedures](acceptance.md).
 
 Exit: CI green on `main`, the amd64 host reproducible, and a gate 1 smoke result recorded,
 pass or fail.
@@ -113,7 +122,8 @@ control the backend ignores. Size: **M**.
    still refused through nginx.
 5. **Remove the unused `@better-auth/api-key` dependency (I16). Done 2026-10-25;** the `apikey`
    table goes with it and is dropped on upgrade (verified non-interactive). Generator drift in
-   `auth-schema.ts` recorded as I24.
+   `auth-schema.ts` recorded as I24, **fixed 2026-10-26 (YYZ-35)**: the file is the generator's
+   output and CI checks it.
 
 Exit: gate 8 closure checks pass on a deployed portal, with the "missing API cannot invent an
 emergency location" case recorded.
@@ -206,6 +216,8 @@ means deleting its entry in the same change; the portal re-enables its input fro
    `user/` legs directly, skipping DND and call waiting. Apply member policy when building the
    dial string, and project member state. Test each strategy with a DND member, a busy member and
    failover. Treat the sequential-timeout behavior as a hypothesis until a live test settles it.
+   **Done 2026-10-26 (YYZ-20):** the hypothesis was a real bug, fixed with `leg_timeout`; member
+   state is read at call time from the existing call profile rather than projected separately.
 6. **Registration trunks stay unavailable (I08).** No MVP work beyond keeping them refused.
    Alternate-carrier retry is outside the MVP unless D3's carrier requires it.
 
@@ -226,7 +238,10 @@ and callback number, and notifies the tenant. Size: **L**, and it depends on D2.
    tenant's emergency route patterns into Kamailio through the M2 outbox. For an **authenticated
    subscriber** whose dialled number matches, skip the capacity refusal on ingress. Unauthenticated
    or peer traffic gets no bypass. Use the same pattern source as FreeSWITCH so the two cannot
-   disagree.
+   disagree. **Done 2026-10-26** (YYZ-23): `eligibleOutboundRoutes()` is that source,
+   `emergency_pattern` is the projection, and `tests/emergency-ingress.py` is the live check. The
+   test carrier is fake; the approved destination still waits for D2. Restricting which patterns
+   a tenant may mark as emergency is I31.
 3. **Locations and callback.** Implement emergency location CRUD and extension assignment as in
    [design §2.1](design/implementation-plan.md#21-emergency-calling-e911--karis-law--ray-baums-act),
    with a tenant default. Set the callback/ELIN number in both tiers on emergency routes.
@@ -244,19 +259,24 @@ when something fails. Size: **M**.
 
 1. **Postflight drift (I10).** Align the SSH check with step 10's root key-recovery policy, scope
    port and Postgres checks to the installed roles, and replace the `kamctl add`/write-a-dialplan
-   advice with portal/CLI provisioning.
+   advice with portal/CLI provisioning. **Done 2026-10-26 (YYZ-27)**, plus a SIGPIPE false
+   failure in the port probe.
 2. **DNS (I11).** Resolve the DNS mode once per step, guard `dns_publish` so the manual fallback
    actually runs, and stop step 42 overwriting DNS-01 renewal settings. Dry-run renewal for both
-   HTTP-01 and DNS-01.
+   HTTP-01 and DNS-01. **Code done 2026-10-26 (YYZ-28)**; the live dry-runs are owed.
 3. **Mail and firewall (I12).** Refuse the template `SMTP_FROM` on unattended runs, document or
    add implicit-TLS relay, and split IPv4/IPv6 admin CIDR sets. Deliver a signed message through
-   the production relay and check the DKIM result.
+   the production relay and check the DKIM result. **Code done 2026-10-26 (YYZ-29)**; the
+   production relay delivery is owed.
 4. **Upgrade safety (I14).** Before each `db:push --force`, run a diff review step and keep a
    pre-push dump. Write the rollback procedure. Suppress statement logging around role-password
-   SQL in steps 20/22 and verify the logs.
+   SQL in steps 20/22 and verify the logs. **Done 2026-10-26** (YYZ-30): pre-upgrade dump,
+   push rehearsed on a copy with a data-loss gate, [rollback procedure](rollback.md) drilled end to
+   end, role passwords kept out of the Postgres log. An upgrade on the gate 6 host is still owed.
 5. **Health and alerting (I17).** `/health` reports FreeSWITCH, Kamailio and the outbox backlog,
    not only the database and Redis. Configure an alert receiver and prove receipt by stopping a
-   service and letting a certificate near expiry.
+   service and letting a certificate near expiry. **Done 2026-10-26** (YYZ-31), except receipt by a person
+   through the production relay/webhook, which belongs on the gate 6 host.
 6. **Split roles (I20).** Only if D1 includes them; otherwise preflight refuses split-role
    configurations explicitly.
 7. **STIR/SHAKEN (D4).** If platform signing is chosen, reproduce the OpenSSL build failure first.
@@ -274,10 +294,14 @@ Depends on M5 for the install path it restores onto.
 
 1. Write the restore runbook, then a restore command if the runbook has more than a few manual
    steps. It must restore both databases and their roles, `config.env` with its encryption key,
-   runtime config, service credentials and file ownership.
+   runtime config, service credentials and file ownership. **Done 2026-10-26** (YYZ-36):
+   [runbook](restore.md) and `restore.sh`, rehearsed onto a fresh arm64 container. The key check
+   for item 4 is built and break-checked; the amd64 host run in item 2 is still owed.
 2. Restore onto a fresh amd64 host. Decrypt an existing SIP secret, register an endpoint with its
    old password, place a call, and sign in to the portal.
 3. Inject backup and offsite-copy failures and confirm retention keeps the last good snapshots.
+   **Done 2026-10-26** (YYZ-38): both kept the old snapshot, and `qwixbox-healthcheck` now alerts
+   on a failed run and on no complete snapshot within 26h.
 4. Restore with the wrong encryption key and confirm the failure is loud and early.
 
 Exit: gate 5 recorded, with the runbook linked from the [README](../README.md).

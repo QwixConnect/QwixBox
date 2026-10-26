@@ -15,9 +15,11 @@ import {
   removeSubscriber,
   removeTrunkAddress,
   syncDomain,
+  syncEmergencyPatterns,
   syncSubscriber,
   syncTrunkAddress,
 } from "./kamailio-sync";
+import { emergencyPatterns } from "./outbound-routes";
 
 /**
  * The durable outbox for everything a database write has to publish to Redis and Kamailio (R06).
@@ -45,6 +47,9 @@ export type Projection =
     }
   | { kind: "trunk"; target: string }
   | { kind: "domain" }
+  // Kamailio's copy of the emergency route patterns (I02). Trunk and domain jobs refresh it
+  // too, because a trunk decides whether its routes are eligible and the domain keys them.
+  | { kind: "emergency" }
   | { kind: "cache"; target: CacheSection };
 
 type Executor = Pick<typeof db, "execute">;
@@ -143,9 +148,22 @@ export async function withTenantLock<T>(
   }
 }
 
-async function requireReload(): Promise<void> {
-  if (!(await reloadKamailio()))
+async function requireReload(
+  only?: Parameters<typeof reloadKamailio>[0],
+): Promise<void> {
+  if (!(await reloadKamailio(only)))
     throw new Error("Kamailio reload failed; the change is not live yet");
+}
+
+async function projectEmergency(
+  organizationId: string,
+  sipDomain: string | undefined,
+): Promise<void> {
+  await syncEmergencyPatterns(
+    organizationId,
+    sipDomain ?? null,
+    sipDomain ? await emergencyPatterns(organizationId) : [],
+  );
 }
 
 async function apply(job: JobRow): Promise<void> {
@@ -182,6 +200,7 @@ async function apply(job: JobRow): Promise<void> {
       });
       if (row) await syncTrunkAddress(row);
       else await removeTrunkAddress(job.target);
+      await projectEmergency(organizationId, tenant?.sipDomain);
       await requireReload();
       if (tenant) await cacheRouteTable(organizationId);
       return;
@@ -189,7 +208,13 @@ async function apply(job: JobRow): Promise<void> {
     case "domain": {
       if (!tenant) return;
       await syncDomain(tenant.sipDomain);
+      await projectEmergency(organizationId, tenant.sipDomain);
       await requireReload();
+      return;
+    }
+    case "emergency": {
+      await projectEmergency(organizationId, tenant?.sipDomain);
+      await requireReload(["emergency"]);
       return;
     }
     case "cache": {

@@ -1,9 +1,9 @@
 # Testing on real hardware
 
-Reviewed 2026-10-25. This procedure covers remote two-way audio and a full current amd64
-installation. Other release gates remain in [mvp.md](mvp.md), especially emergency behavior,
-carrier forwarding and restore. Record revision, OS, architecture and observed results in
-[status.md](status.md); a passing signalling fixture does not close these gates.
+Reviewed 2026-10-26. This procedure covers remote two-way audio (gate 1) and a full current amd64
+installation (gate 6). Gates 2, 3, 4, 5 and 7 are in [acceptance procedures](acceptance.md). Record
+every run under [Acceptance runs](status.md#acceptance-runs); a passing signalling fixture does
+not close these gates.
 
 ---
 
@@ -76,8 +76,8 @@ already known to work.
 5. **Outbound to a real number.** Confirm the carrier sees the translated digits and there is
    two-way audio.
 6. **`*72<number>` then call 1001 internally and through its carrier DID.** Both should forward
-   through the authorized outbound route. The carrier-originated path is a known open R11 gap;
-   capture a failure as evidence. `*73` cancels.
+   through the authorized outbound route. The carrier-originated path (R11) is fixed and passes
+   against a fake carrier; this is its real-carrier check. `*73` cancels.
 7. **Ring group and IVR**, if configured — the group rings all members; the IVR plays its greeting
    and responds to a DTMF keypress.
 
@@ -147,8 +147,8 @@ sudo -u freeswitch grep -cE '\[(ERR|CRIT)\]' /usr/local/freeswitch/log/freeswitc
 ```
 
 Before deleting the instance, complete media and restore checks if it has the required public
-FQDN/certificate. A current postflight check incorrectly rejects intentional root-key SSH policy
-(I10); record that failure explicitly instead of treating exit 1 as acceptance.
+FQDN/certificate. `sudo ./install.sh --only 99-postflight.sh --force` must exit 0. It accepts
+step 10's root key-only policy (I10, fixed), so any failure it reports is real.
 
 ```bash
 gcloud compute instances delete qwix-amd64-test --zone=us-east1-b
@@ -158,7 +158,7 @@ gcloud compute instances delete qwix-amd64-test --zone=us-east1-b
 
 ## After both pass
 
-The backup restore (item 5 in [mvp.md](mvp.md)) is the next one, and it is worth doing on the
+The backup restore ([gate 5](acceptance.md#gate-5-restore)) is the next one, and it is worth doing on the
 instance from step 2 before deleting it — validate both database/configuration recovery and the restored services. Note the ordering trap: `/etc/qwixbox/config.env` must be
 restored *with* the database, or `ENCRYPTION_KEY` no longer matches and every stored SIP secret
 and voicemail PIN is undecryptable.

@@ -1,5 +1,174 @@
 # Change log
 
+## 2026-10-26 — I24 auth-schema.ts is the generator's output
+
+- `portal/api/src/db/auth-schema.ts` is replaced by `auth@1.6.25 generate` output. On upgrade,
+  `push --force` renames five indexes, drops the `created_at` defaults on `organization` and
+  `member`, and adds `invitation.created_at` and `invitation_email_idx`. No data-losing
+  statement is involved.
+- `provisioning.ts` and `membership.ts` set `createdAt`. They relied on the dropped default, and
+  without the change every tenant create failed.
+- `portal/api/scripts/auth-schema.sh` (`bun run auth:generate` / `auth:check`) runs the `auth`
+  package at the installed better-auth version. It replaces the unpinned `@better-auth/cli`.
+  `tests/ci.sh api` runs the check.
+
+## 2026-10-26 — Acceptance procedures and the evidence table (YYZ-16, YYZ-17)
+
+- Added `docs/acceptance.md`: pass conditions and steps for gates 2, 3, 4, 5 and 7, separating
+  container-harness evidence from host evidence. Published on the site and linked from mvp.md.
+- `docs/status.md` has an "Acceptance runs" table, which every gate run writes to.
+- `testing-on-real-hardware.md` no longer describes R11 and the postflight SSH check as open.
+
+## 2026-10-26 — CI service-container jobs (YYZ-15)
+
+- `tests/ci.sh integration` pushes the schema to a disposable Postgres, then runs the API
+  security and cache-publication suites. `tests/ci.sh sip` loads the SIP fixture and runs
+  `sip-auth.py` against Debian's Kamailio. Both refuse a URL that does not name a `*_test`
+  database.
+- `.github/workflows/ci.yml` runs both against service containers created for the job.
+
+## 2026-10-26 — I12 implicit-TLS relay, sender validation and IPv6 admin access
+
+- Step 15 honours `SMTP_STARTTLS="off"` with `smtp_tls_wrappermode = yes`; before, nothing read it
+  and a 465 relay deferred every message. It refuses 465 with STARTTLS, an unknown mode, and an
+  example.com/.net/.org `SMTP_FROM`. The wizard sets the mode from the port it asks for.
+- `config.env.example` leaves `SMTP_FROM` empty, so it defaults to `pbx@<PBX_FQDN>` instead of
+  the placeholder.
+- Step 11 validates `ADMIN_ALLOW_CIDR` and writes separate `ip saddr` and `ip6 saddr` SSH rules.
+  An IPv6 prefix used to make nft reject the whole ruleset.
+- `tests/installer-safety.py` covers the rule split and the mail checks.
+
+## 2026-10-26 — I11 DNS mode, publication failures and DNS-01 renewal
+
+- `lib/dns.sh`: `dns_resolve_mode` sets the mode in the step's own shell. `dns_mode` ran inside
+  `$( )`, so its cache died with each subshell and `auto` re-ran discovery on every call (4 times
+  in step 02's sequence).
+- `dns_publish` never fails the step. A record Cloudflare refuses is queued, and `dns_commit`
+  prints it and returns 1, so the manual fallback the steps promise appears. Before, a failure
+  aborted the step under `set -e` before anything was printed.
+- Step 42 writes its webroot `/etc/letsencrypt/cli.ini` only when `ACME_CHALLENGE=http`, and
+  removes its own copy otherwise. certbot applies `cli.ini` over each certificate's renewal
+  config, so a DNS-01 certificate was renewing over HTTP-01.
+- `tests/installer-safety.py` covers all three.
+
+## 2026-10-26 — I10 postflight matches the installer
+
+- `99-postflight.sh` accepts step 10's root key-only login and warns, rather than fails, when
+  password authentication was left on for lack of a key. Port, telephony, Kamailio, WSS, STIR,
+  Redis and Postgres checks run only on the role that installs them; the Postgres loopback check
+  only on an all-in-one host.
+- The port probe no longer pipes `ss` into `grep -q` under pipefail, which failed a listening port
+  about one run in three.
+- The closing advice points at the portal and `provision-tenant.ts`, not `kamctl add`.
+- `tests/installer-safety.py` guards the SSH policy, the probe and the advice.
+
+## 2026-10-26 — I05 ring groups apply member DND and call waiting
+
+- `ring_group.lua` skips a member on DND, and a member already on a call with call waiting off.
+  It reads the same call profile and `limit_usage` counter that `extension.lua` uses. An answered
+  member leg counts against that member through `execute_on_answer=limit`.
+- Sequential and random groups ring each member for `ringTimeoutSec` (`leg_timeout`). Before,
+  `call_timeout` bounded the whole bridge, so only the first member ever rang.
+- A group with no available member goes straight to its failover.
+- Added `tests/ring-group-policy.py`.
+
+## 2026-10-26 — I28 Kamailio trusts FreeSWITCH by port, not by address
+
+- `kamailio.cfg`: `route[FROMFS]` trusts only UDP from `FS_HOST`/loopback on FreeSWITCH's
+  internal and external profile ports. `route[AUTH]`, `route[REQINIT]` and `route[EGRESS]` use it
+  instead of `$si == "127.0.0.1"`. Step 34 passes `FS_EGRESS_SIP_PORT`.
+- Both FreeSWITCH SIP profiles bind `transport=udp`.
+- Added `tests/loopback-trust.py`.
+
+## 2026-10-26 — Backup failures reach the alerter (YYZ-38)
+
+- `qwixbox-healthcheck` alerts when no complete snapshot is newer than 26h, and when the last
+  `qwixbox-backup` run failed. A failed offsite copy leaves a complete local snapshot behind, so
+  only the second check catches it. Step 52 passes `BACKUP_DIR` to the template.
+- `tests/installer-safety.py` covers a missing snapshot, a stale snapshot, a failed run and
+  recovery.
+
+## 2026-10-26 — I13 restore command and runbook
+
+- Added `restore.sh`. It restores a `qwixbox-backup` snapshot onto a fresh host or in place:
+  secrets first, then the install, then a key check, then both databases, grants, reconcile and
+  health. `RESTORE_STEPS` limits the install for test containers.
+- Added `src/cli/check-encryption.ts`, which fails when any stored secret does not decrypt under
+  `ENCRYPTION_KEY`.
+- Added `docs/restore.md` (also published on the site), linked from the README.
+- Added `tests/restore-check.py`, which proves a restored host carries calls with pre-backup
+  credentials. CI's shell job now lints `restore.sh`.
+
+## 2026-10-26 — I14 upgrade safety and role passwords out of the Postgres log
+
+- `lib/common.sh`: `psql_secret` runs secret-bearing SQL on stdin with statement logging off for
+  the session; `sql_literal` quotes a value. Steps 20 and 22 set every role password through it.
+  Step 20 redacts role passwords that earlier releases left in `/var/log/postgresql/`.
+- Step 41, when Postgres is local:
+  - dumps `qwixbox` to `/var/backups/qwixbox/pre-upgrade/` (last five kept) before changing it;
+  - rehearses `db:push --force` on a copy, logging the statements to
+    `/var/log/qwixbox/schema-preflight-*.log`;
+  - refuses data-losing statements unless `SCHEMA_ACCEPT_DESTRUCTIVE=1` is set for that run.
+- `src/cli/reconcile-kamailio.ts` and `pruneKamailio()` bring Kamailio and Redis back in line
+  after a database restore.
+- Added `docs/rollback.md` (also published on the site) and `tests/rollback-drill.py`.
+  `tests/installer-safety.py` checks that role passwords never reach psql's argv.
+
+## 2026-10-26 — I17 health alerts that reach someone
+
+- `/health` is degraded when FreeSWITCH or Kamailio is down, and reports `kamailio`
+  (`kamailioResponds()`, `kamcmd core.uptime`). The portal's status pill requires it.
+- `qwixbox-healthcheck` fixes:
+  - It now detects units with `systemctl cat`. The old pipeline (`list-unit-files | grep -q`
+    under `pipefail`) never checked a service.
+  - The other `grep -q` pipelines and a doubled registration count are fixed.
+- `qwixbox-healthcheck` additions:
+  - It reads the API's `/health`, including failing projection jobs.
+  - It counts Kamailio's auth backend errors.
+  - It is the alerter: it alerts by email and/or webhook when the set of failing checks changes
+    and on recovery, repeats a reminder every 6h, and retries a failed delivery.
+  - Paths can be overridden for tests.
+- `config.env.example`: `ALERT_EMAIL`, `ALERT_WEBHOOK`. They fall back to `INSTALL_NOTIFY_*`
+  and `ADMIN_EMAIL`. Step 52 writes them to `/etc/qwixbox/alerts.env` (0600).
+- `tests/installer-safety.py` exercises the alerting against stubbed services. CI's shell job
+  installs `jq`.
+
+## 2026-10-26 — I16 offline CI
+
+- Added `.github/workflows/ci.yml`: four jobs on every push and pull request, each running
+  `tests/ci.sh <job>` (`shell` in a `debian:13` container, `api`, `web`, `site`). The script holds
+  the commands, so a local run and CI cannot drift.
+
+## 2026-10-26 — I02 emergency calls exempt from the ingress capacity check
+
+- `services/outbound-routes.ts`: `eligibleOutboundRoutes()` is the one definition of a routable
+  outbound route, now used by the Redis route table, `fs-xml.ts`, and `emergencyPatterns()`.
+- New projection kind `emergency`: writes each tenant's eligible, compilable emergency patterns
+  to Kamailio's `emergency_pattern`. Queued by outbound route changes and re-run by trunk and
+  domain jobs. `src/cli/project-emergency.ts` queues it for every tenant, run by step 41.
+  `check-route-patterns --accept-pcre` queues it for the route it accepts.
+- `reloadKamailio()` takes the copies to reload (`RELOADS`); the emergency job reloads only its
+  htable.
+- Step 34 creates `emergency_pattern` (htable layout plus `organization_id`) outside the schema
+  guard. `kamailio.cfg` loads it as `emergency=><domain>[i]`, adds `route[EMERGENCY]` (`regex`
+  module, `pcre_match`), and skips `route(FRAUD)` on ingress for an authenticated subscriber
+  dialling a match.
+- Added `tests/emergency-ingress.py` and a security test. Recorded I31.
+
+## 2026-10-26 — I29 authentication failure accounting
+
+- `kamailio.cfg`: both authorize calls keep their result in `$var(auth)` and go through the new
+  `route[AUTHRESULT]`. A database error (-1) answers 503 with `Retry-After: 30` and is not
+  counted. Only a wrong password (-2) or unknown user (-3) reaches `route[AUTHFAIL]`. Before, a
+  database outage banned every address that retried, until Kamailio was restarted.
+- `authfail` and `concurrent` counters use `$shtinc`/`$shtdec` with `initval=0`. The old
+  `$sht(...) + 1` concatenated (1, 11, 111): a ban came at the second failure, and an account's
+  third simultaneous call was refused.
+- `tests/sip-auth.py` copies the authorize lines, both routes, the htables and
+  `MAX_AUTH_FAILURES` from the deployed config. New cases: the ban threshold, and a database
+  outage (the fixture table renamed) answered 503 with no ban. A static check refuses `$sht`
+  arithmetic. It prints Kamailio's log when a case fails.
+
 ## 2026-10-25 — R11 authorized forwarding; I30 refused Kamailio reloads
 
 - R11: `qwixbox.go` (`resources/lua/qwixbox.lua`) takes the forwarding extension as a new

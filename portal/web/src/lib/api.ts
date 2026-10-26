@@ -374,6 +374,7 @@ export type Health = {
   database: boolean;
   redis: boolean;
   freeswitch: boolean;
+  kamailio: boolean;
   projections?: { pending: number; failing: number } | null;
 };
 

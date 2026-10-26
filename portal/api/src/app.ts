@@ -25,6 +25,7 @@ import { ping as redisPing } from "./services/redis";
 import { esl } from "./services/esl";
 import { pool } from "./db";
 import { projectionStatus } from "./services/projections";
+import { kamailioResponds } from "./services/kamailio-sync";
 
 export const app = new Hono();
 
@@ -38,22 +39,28 @@ function probe(p: Promise<boolean>, ms = 750): Promise<boolean> {
 }
 
 app.get("/health", async (c) => {
-  const [dbOk, redisOk, eslOk] = await Promise.all([
+  const [dbOk, redisOk, eslOk, kamailioOk] = await Promise.all([
     probe(pool.query("SELECT 1").then(() => true)),
     probe(redisPing()),
     probe(esl.status(750).then((r) => r.ok)),
+    probe(kamailioResponds()),
   ]);
 
   // Counts only: this endpoint is public. A failing job is a change that is committed but not
-  // live - possibly a revocation - so it degrades health rather than hiding in a log.
+  // live - possibly a revocation - so it degrades health rather than hiding in a log. FreeSWITCH
+  // and Kamailio count too: with either down no call completes, and this answered "ok" (I17).
+  // Lua's D5 check reads `database`, not this status, so a call-path outage does not also
+  // refuse forwards for an API that is itself fine.
   const projections = dbOk ? await projectionStatus().catch(() => null) : null;
-  const healthy = dbOk && redisOk && (projections?.failing ?? 0) === 0;
+  const healthy =
+    dbOk && redisOk && eslOk && kamailioOk && (projections?.failing ?? 0) === 0;
   return c.json(
     {
       status: healthy ? "ok" : "degraded",
       database: dbOk,
       redis: redisOk,
       freeswitch: eslOk,
+      kamailio: kamailioOk,
       projections: projections && {
         pending: projections.pending,
         failing: projections.failing,

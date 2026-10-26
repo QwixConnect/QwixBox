@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, pool } from "../db";
 import { outboundRoute } from "../db/schema";
 import { validatePcre } from "../lib/dialplan-safe";
+import { enqueue } from "../services/projections";
 
 // Upgrades must stop for operator review. No automatic Lua -> PCRE translation.
 const accept = process.argv.indexOf("--accept-pcre");
@@ -15,6 +16,12 @@ for (const route of await db.query.outboundRoute.findMany()) {
       .update(outboundRoute)
       .set({ patternSyntax: "pcre" })
       .where(eq(outboundRoute.id, route.id));
+    // Now eligible, so it must reach the route cache and, if an emergency route, Kamailio.
+    if (route.organizationId)
+      await enqueue(db, route.organizationId, [
+        { kind: "cache", target: "routes" },
+        { kind: "emergency" },
+      ]);
     continue;
   }
   if (problem || route.patternSyntax !== "pcre") {

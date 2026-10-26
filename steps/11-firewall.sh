@@ -11,13 +11,21 @@ TPL="$REPO_DIR/resources/conf/firewall"
 
 apt_install nftables
 
-admin_set=""
+reason="$(valid_cidr_list "${ADMIN_ALLOW_CIDR:-}")" || die "ADMIN_ALLOW_CIDR in $CONFIG_FILE: $reason"
+admin4="" admin6=""
 for cidr in $ADMIN_ALLOW_CIDR; do
-  admin_set="${admin_set}${admin_set:+, }${cidr}"
+  case "$cidr" in
+    *:*) admin6="${admin6}${admin6:+, }${cidr}" ;;
+    *)   admin4="${admin4}${admin4:+, }${cidr}" ;;
+  esac
 done
-[ -n "$admin_set" ] || die "ADMIN_ALLOW_CIDR is empty in $CONFIG_FILE."
-if [ "$ADMIN_ALLOW_CIDR" = "0.0.0.0/0" ]; then
-  warn "ADMIN_ALLOW_CIDR is 0.0.0.0/0 - SSH is exposed to the whole internet."
+# shellcheck disable=SC2034  # read by name from the template
+ADMIN_SSH_RULES="$(
+  [ -z "$admin4" ] || printf '        ip saddr { %s } tcp dport 22 accept\n' "$admin4"
+  [ -z "$admin6" ] || printf '        ip6 saddr { %s } tcp dport 22 accept\n' "$admin6"
+)"
+if [[ " $ADMIN_ALLOW_CIDR " == *" 0.0.0.0/0 "* || " $ADMIN_ALLOW_CIDR " == *" ::/0 "* ]]; then
+  warn "ADMIN_ALLOW_CIDR includes the whole internet ($ADMIN_ALLOW_CIDR) - SSH is exposed to it."
   warn "Narrow this to your office/VPN range in $CONFIG_FILE."
 fi
 

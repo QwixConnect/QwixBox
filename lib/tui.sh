@@ -70,7 +70,8 @@ valid_email() {
     *) echo "That does not look like an email address."; return 1 ;;
   esac
   case "$1" in
-    *@example.com) echo "That is the placeholder domain. Use an address you can receive at."; return 1 ;;
+    *@example.com|*@example.net|*@example.org)
+      echo "That is a reserved placeholder domain. Use an address at a domain you control."; return 1 ;;
     *" "*) echo "An email address cannot contain a space."; return 1 ;;
   esac
   return 0

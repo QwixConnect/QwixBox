@@ -1,5 +1,5 @@
 import { callState, destinationNumber, extensionCallState } from "./call-state";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "../db";
 import {
   extension,
@@ -11,11 +11,11 @@ import {
   ringGroupMember,
   tenantSettings,
   timeCondition,
-  trunk,
 } from "../db/schema";
 import { decrypt } from "../lib/crypto";
 import { esl } from "./esl";
 import { keys, publishGeneration } from "./redis";
+import { eligibleOutboundRoutes } from "./outbound-routes";
 
 export function renderDirectoryUser(
   ext: typeof extension.$inferSelect,
@@ -154,56 +154,39 @@ export type CachedRoute = {
 };
 
 async function buildRouteTable(gen: Generation, tenant: Tenant): Promise<void> {
-  const rows = await db
-    .select({
-      route: outboundRoute,
-      trunkRow: trunk,
-    })
+  const legacy = await db
+    .select({ id: outboundRoute.id })
     .from(outboundRoute)
-    .leftJoin(trunk, eq(outboundRoute.trunkId, trunk.id))
     .where(
       and(
         eq(outboundRoute.organizationId, tenant.organizationId),
         eq(outboundRoute.enabled, true),
+        ne(outboundRoute.patternSyntax, "pcre"),
       ),
     );
-
-  const legacy = rows.filter(({ route }) => route.patternSyntax !== "pcre");
   if (legacy.length)
     console.warn(
       `[cache] quarantined ${legacy.length} legacy outbound route(s) for tenant ${tenant.organizationId}; explicit PCRE review required`,
     );
-  const routes: CachedRoute[] = rows
-    .filter(({ route }) => route.patternSyntax === "pcre")
-    .filter(
-      ({ trunkRow }) =>
-        trunkRow?.enabled &&
-        trunkRow.authMode === "ip" &&
-        trunkRow.organizationId === tenant.organizationId,
-    )
-    .map(({ route, trunkRow }) => ({
-      id: route.id,
-      pattern: route.pattern,
-      patternSyntax: route.patternSyntax,
-      priority: route.priority,
-      isEmergency: route.isEmergency,
-      stripDigits: route.stripDigits,
-      prependDigits: route.prependDigits,
-      callerIdOverride: route.callerIdOverride,
-      trunk: trunkRow
-        ? {
-            id: trunkRow.id,
-            name: trunkRow.name,
-            host: trunkRow.host,
-            port: trunkRow.port,
-            transport: trunkRow.transport,
-          }
-        : null,
-    }))
-    .sort((a, b) => {
-      if (a.isEmergency !== b.isEmergency) return a.isEmergency ? -1 : 1;
-      return a.priority - b.priority;
-    });
+  const routes: CachedRoute[] = (
+    await eligibleOutboundRoutes(tenant.organizationId)
+  ).map(({ route, carrier }) => ({
+    id: route.id,
+    pattern: route.pattern,
+    patternSyntax: route.patternSyntax,
+    priority: route.priority,
+    isEmergency: route.isEmergency,
+    stripDigits: route.stripDigits,
+    prependDigits: route.prependDigits,
+    callerIdOverride: route.callerIdOverride,
+    trunk: {
+      id: carrier.id,
+      name: carrier.name,
+      host: carrier.host,
+      port: carrier.port,
+      transport: carrier.transport,
+    },
+  }));
 
   gen.set(keys.routes(tenant.sipDomain), JSON.stringify(routes));
 }

@@ -56,8 +56,28 @@ else
 fi
 
 config_ensure_secret PG_SUPERUSER_PASSWORD 32
-su - postgres -c "psql -v ON_ERROR_STOP=1 -c \"ALTER ROLE postgres WITH PASSWORD '${PG_SUPERUSER_PASSWORD}'\"" >/dev/null
+printf 'ALTER ROLE postgres WITH PASSWORD %s;\n' "$(sql_literal "$PG_SUPERUSER_PASSWORD")" | psql_secret
 ok "Superuser password set (for TCP admin tools such as kamdbctl)"
+
+# Earlier releases set role passwords with `psql -c` under log_statement = 'ddl', which wrote them
+# into this log in plain text (I14). Redact what is left, rewriting in place: the postmaster
+# appends to the open file, and replacing the inode (sed -i) would leave it logging into a deleted
+# one. dd with nocreat, because the directory is sticky and fs.protected_regular refuses even root
+# an O_CREAT open (which `>` is) of a file postgres owns there.
+for pg_log in /var/log/postgresql/postgresql-*.log*; do
+  [ -f "$pg_log" ] || continue
+  case "$pg_log" in
+    *.gz) reader=(zcat) finder=(zgrep) ;;
+    *) reader=(cat) finder=(grep) ;;
+  esac
+  "${finder[@]}" -qE "PASSWORD '[^[]" "$pg_log" || continue
+  redacted=$(mktemp)
+  "${reader[@]}" "$pg_log" | sed -E "s/(PASSWORD )'([^']|'')*'/\1'[redacted]'/g" >"$redacted"
+  if [ "${reader[0]}" = zcat ]; then gzip -c "$redacted"; else cat "$redacted"; fi |
+    dd of="$pg_log" conv=nocreat status=none
+  rm -f "$redacted"
+  warn "Redacted role passwords logged by an earlier release from $pg_log"
+done
 
 su - postgres -c "psql -tAc 'SELECT version()'" | sed 's/^/  /'
 ok "PostgreSQL ${PG_VERSION} ready (listening on ${pg_listen}, shared_buffers=${shared_buffers}MB)"

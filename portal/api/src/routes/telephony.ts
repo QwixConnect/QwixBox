@@ -275,7 +275,7 @@ export const outboundRoutes = crudRoutes({
     }
     return null;
   },
-  project: () => [{ kind: "cache", target: "routes" }],
+  project: () => [{ kind: "cache", target: "routes" }, { kind: "emergency" }],
 });
 
 export const ringGroups = crudRoutes({

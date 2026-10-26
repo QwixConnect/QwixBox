@@ -9,7 +9,8 @@ load_config
 
 apt_install curl jq dnsutils
 
-MODE="$(dns_mode)"
+dns_resolve_mode
+MODE="$_DNS_MODE"
 info "DNS mode: $MODE"
 
 if ! PUBLIC_IP="$(detect_public_ip)"; then

@@ -1,54 +1,69 @@
 #!/usr/bin/env bash
 # Managed by the QwixBox installer.
-# Exit 0 = healthy, 1 = degraded. Suitable for a monitoring agent or cron alert.
+# Exit 0 = healthy, 1 = degraded. Run every 5 minutes by qwixbox-healthcheck.timer, which also
+# makes it the alerter (I17): when the set of problems changes it emails and/or posts to the
+# targets in /etc/qwixbox/alerts.env, and repeats a reminder while it stays degraded.
 set -uo pipefail
 
-PREFIX=/usr/local/freeswitch
+# The overrides exist for tests/installer-safety.py, which runs this against stubbed services.
+PREFIX="${HEALTH_FS_PREFIX:-/usr/local/freeswitch}"
+ALERTS="${HEALTH_ALERTS_FILE:-/etc/qwixbox/alerts.env}"
+STATE="${HEALTH_STATE_FILE:-/var/lib/qwixbox/health.state}"
+SENDMAIL="${HEALTH_SENDMAIL:-/usr/sbin/sendmail}"
+REMIND_SECONDS=21600
 problems=0
+issues=() names=()
 report() { printf '%-22s %s\n' "$1" "$2"; }
+# The name is what an alert keys on; the detail (a count, days left) changes between runs and
+# would otherwise re-alert every five minutes.
+problem() { report "$1" "$2"; issues+=("$1: $2"); names+=("$1"); problems=$((problems+1)); }
+# Not "systemctl list-unit-files | grep -q": under pipefail grep's early exit kills systemctl with
+# SIGPIPE, the pipeline fails, and every unit read as not installed - so no service was ever
+# checked (I17).
+installed() { systemctl cat "$1.service" >/dev/null 2>&1; }
 
 ### Services that must be running.
 for unit in postgresql redis-server freeswitch kamailio rtpengine nginx qwixbox-api; do
-  if systemctl list-unit-files 2>/dev/null | grep -q "^${unit}"; then
+  if installed "$unit"; then
     if systemctl is-active --quiet "$unit"; then
       report "$unit" "active"
     else
-      report "$unit" "DOWN"; problems=$((problems+1))
+      problem "$unit" "DOWN"
     fi
   fi
 done
 
 ### FreeSWITCH answering on ESL means it is genuinely up, not merely a live process.
 if [ -x "$PREFIX/bin/fs_cli" ]; then
-  if "$PREFIX/bin/fs_cli" -x status 2>/dev/null | grep -q '^UP'; then
+  if grep -q '^UP' <<<"$("$PREFIX/bin/fs_cli" -x status 2>/dev/null)"; then
     calls="$("$PREFIX/bin/fs_cli" -x 'show calls count' 2>/dev/null | head -1)"
     report "freeswitch esl" "responding (${calls:-0 calls})"
   else
-    report "freeswitch esl" "NOT RESPONDING"; problems=$((problems+1))
+    problem "freeswitch esl" "NOT RESPONDING"
   fi
 fi
 
 ### Kamailio holding registrations. Zero is normal on a fresh install but worth surfacing -
 ### on a live system it means every endpoint has silently dropped off.
 if command -v kamctl >/dev/null 2>&1; then
-  regs="$(kamctl ul show 2>/dev/null | grep -c 'AOR' || echo 0)"
+  regs="$(kamctl ul show 2>/dev/null | grep -c 'AOR')"
   report "registrations" "$regs"
 fi
 
 ### SIP port actually bound.
-if ss -lun 2>/dev/null | grep -q ":@SIP_PORT@\b" || ss -ltn 2>/dev/null | grep -q ":@SIP_PORT@\b"; then
+if grep -q ":@SIP_PORT@\b" <<<"$(ss -lunt 2>/dev/null)"; then
   report "sip :@SIP_PORT@" "listening"
 else
-  report "sip :@SIP_PORT@" "NOT LISTENING"; problems=$((problems+1))
+  problem "sip :@SIP_PORT@" "NOT LISTENING"
 fi
 
 ### Certificate expiry - the classic silent 90-day outage.
-CERT=/etc/qwixbox/tls/fullchain.pem
+CERT="${HEALTH_CERT:-/etc/qwixbox/tls/fullchain.pem}"
 if [ -f "$CERT" ]; then
   end="$(openssl x509 -enddate -noout -in "$CERT" 2>/dev/null | cut -d= -f2)"
   days=$(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 ))
   if [ "$days" -lt 14 ]; then
-    report "tls certificate" "EXPIRES IN ${days}d"; problems=$((problems+1))
+    problem "tls certificate" "EXPIRES IN ${days}d"
   else
     report "tls certificate" "${days}d remaining"
   fi
@@ -57,7 +72,7 @@ fi
 ### Disk. A full disk on a PBX drops calls.
 use="$(df --output=pcent / | tail -1 | tr -dc '0-9')"
 if [ "$use" -gt 85 ]; then
-  report "disk /" "${use}% FULL"; problems=$((problems+1))
+  problem "disk /" "${use}% FULL"
 else
   report "disk /" "${use}% used"
 fi
@@ -66,6 +81,115 @@ fi
 if command -v fail2ban-client >/dev/null 2>&1; then
   banned="$(fail2ban-client banned 2>/dev/null | grep -o "'" | wc -l)"
   report "fail2ban" "$(( banned / 2 )) banned"
+fi
+
+### The API's own view: database, Redis, FreeSWITCH, Kamailio and the projection outbox. A
+### failing projection job is a committed change that is not live - possibly a revocation.
+if installed qwixbox-api; then
+  health="$(curl -s -m 5 http://127.0.0.1:@API_PORT@/health 2>/dev/null)"
+  if ! jq -e . >/dev/null 2>&1 <<<"$health"; then
+    problem "api /health" "NO ANSWER"
+  else
+    down="$(jq -r '[to_entries[] | select(.value == false) | .key] | join(", ")' <<<"$health")"
+    failing="$(jq -r '.projections.failing // 0' <<<"$health")"
+    pending="$(jq -r '.projections.pending // 0' <<<"$health")"
+    if [ -n "$down" ]; then problem "api /health" "DOWN: $down"; else report "api /health" "ok"; fi
+    if [ "$failing" -gt 0 ]; then
+      problem "projections" "${failing} FAILING, ${pending} pending"
+    else
+      report "projections" "${pending} pending"
+    fi
+  fi
+fi
+
+### Backups. A failed run never prunes (qwixbox-backup keeps every snapshot until one succeeds),
+### so a failure loses nothing - but until this check nobody was told. Two separate questions:
+### is there a recent complete snapshot, and did the last run fail? A failed offsite copy leaves a
+### complete local snapshot behind, so only the second catches it.
+BACKUPS="${HEALTH_BACKUP_DIR:-@BACKUP_DIR@}"
+if installed qwixbox-backup; then
+  newest=0
+  for marker in "$BACKUPS"/20*/COMPLETE; do
+    [ -e "$marker" ] || continue
+    stamp="$(stat -c %Y "$marker")"
+    [ "$stamp" -gt "$newest" ] && newest="$stamp"
+  done
+  if [ "$newest" -eq 0 ]; then
+    problem "backup" "NO COMPLETE SNAPSHOT"
+  elif [ $(( $(date +%s) - newest )) -gt 93600 ]; then
+    problem "backup" "NEWEST COMPLETE IS $(( ($(date +%s) - newest) / 3600 ))h OLD"
+  else
+    report "backup" "newest complete $(( ($(date +%s) - newest) / 3600 ))h ago"
+  fi
+  result="$(systemctl show qwixbox-backup.service -p Result --value 2>/dev/null)"
+  if [ -n "$result" ] && [ "$result" != success ]; then
+    problem "backup run" "LAST RUN FAILED ($result) - see journalctl -u qwixbox-backup"
+  fi
+fi
+
+### Kamailio up but unable to authenticate: it answers 503 and logs this while its database is
+### unreachable (I29). systemctl and the SIP port both look healthy throughout.
+if systemctl is-active --quiet kamailio 2>/dev/null; then
+  backend="$(journalctl -u kamailio --since -6min --no-pager -q 2>/dev/null | grep -c 'authentication backend error')"
+  if [ "${backend:-0}" -gt 0 ]; then
+    problem "sip authentication" "${backend} DATABASE ERRORS in 6min"
+  else
+    report "sip authentication" "no backend errors"
+  fi
+fi
+
+# Alert on change: degraded, a different set of problems, or recovered. Then a reminder every
+# REMIND_SECONDS while still degraded. A delivery that fails leaves the state alone, so the next
+# run tries again.
+alert() {
+  local subject="$1" body="$2" sent=0 targets=0
+  ALERT_EMAIL="" ALERT_WEBHOOK=""
+  # shellcheck source=/dev/null
+  [ -r "$ALERTS" ] && . "$ALERTS"
+  if [ -n "$ALERT_EMAIL" ]; then
+    targets=$((targets+1))
+    printf 'To: %s\nSubject: %s\n\n%s\n' "$ALERT_EMAIL" "$subject" "$body" \
+      | "$SENDMAIL" -t >/dev/null 2>&1 && sent=$((sent+1))
+  fi
+  if [ -n "$ALERT_WEBHOOK" ]; then
+    targets=$((targets+1))
+    jq -cn --arg subject "$subject" --arg body "$body" --arg host "$(hostname -f 2>/dev/null || hostname)" \
+      '{subject: $subject, host: $host, detail: $body}' \
+      | curl -fsS -m 10 -X POST -H 'Content-Type: application/json' --data @- "$ALERT_WEBHOOK" \
+        >/dev/null 2>&1 && sent=$((sent+1))
+  fi
+  if [ "$targets" -eq 0 ]; then
+    echo "No alert target configured (ALERT_EMAIL / ALERT_WEBHOOK) - nobody was told."
+    return 0
+  fi
+  echo "Alert \"$subject\": delivered to ${sent} of ${targets} target(s)"
+  [ "$sent" -gt 0 ]
+}
+
+host="$(hostname -f 2>/dev/null || hostname)"
+now="$(date +%s)"
+if [ "$problems" -gt 0 ]; then current="$(printf '%s\n' "${names[@]}" | sort -u)"; else current="ok"; fi
+previous="ok" last_alert=0
+if [ -r "$STATE" ]; then
+  last_alert="$(head -1 "$STATE")"
+  previous="$(tail -n +2 "$STATE")"
+fi
+subject=""
+if [ "$current" != "$previous" ]; then
+  if [ "$current" = "ok" ]; then subject="QwixBox RECOVERED on $host"; else subject="QwixBox DEGRADED on $host"; fi
+elif [ "$current" != "ok" ] && [ $((now - ${last_alert:-0})) -ge "$REMIND_SECONDS" ]; then
+  subject="QwixBox STILL DEGRADED on $host"
+fi
+if [ -n "$subject" ]; then
+  if [ "$current" = "ok" ]; then
+    body="All checks pass again. Previously failing:"$'\n'"$previous"
+  else
+    body="$(printf '%s\n' "${issues[@]}")"
+  fi
+  if alert "$subject" "$body"; then
+    mkdir -p "$(dirname "$STATE")"
+    printf '%s\n%s\n' "$now" "$current" > "$STATE"
+  fi
 fi
 
 if [ "$problems" -gt 0 ]; then

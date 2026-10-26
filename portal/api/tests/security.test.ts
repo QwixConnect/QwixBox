@@ -86,19 +86,25 @@ async function request(
 beforeEach(async () => {
   await pool.query('TRUNCATE "organization", "user" CASCADE');
   await pool.query(
-    "CREATE TABLE IF NOT EXISTS subscriber (username text, domain text, password text, ha1 text, ha1b text, UNIQUE(username,domain)); CREATE TABLE IF NOT EXISTS location (username text, domain text); TRUNCATE subscriber, location",
+    "CREATE TABLE IF NOT EXISTS subscriber (username text, domain text, password text, ha1 text, ha1b text, UNIQUE(username,domain)); CREATE TABLE IF NOT EXISTS location (username text, domain text); CREATE TABLE IF NOT EXISTS emergency_pattern (id serial PRIMARY KEY, key_name text, key_type int, value_type int, key_value text, expires int DEFAULT 0, organization_id text); TRUNCATE subscriber, location, emergency_pattern",
   );
   memory.clear();
   for (const id of ["a", "b"])
-    await db.insert(schema.organization).values({ id, name: id, slug: id });
+    await db
+      .insert(schema.organization)
+      .values({ id, name: id, slug: id, createdAt: new Date() });
   for (const id of ["owner", "admin", "viewer", "other"])
     await db
       .insert(schema.user)
       .values({ id, name: id, email: `${id}@test.invalid` });
   for (const role of ["owner", "admin", "viewer"])
-    await db
-      .insert(schema.member)
-      .values({ id: role, userId: role, organizationId: "a", role });
+    await db.insert(schema.member).values({
+      id: role,
+      userId: role,
+      organizationId: "a",
+      role,
+      createdAt: new Date(),
+    });
   await db
     .insert(schema.tenantSettings)
     .values({ organizationId: "a", sipDomain: "a.test" });
@@ -301,6 +307,7 @@ test("concurrent owner demotions leave an owner", async () => {
     userId: "other",
     organizationId: "a",
     role: "owner",
+    createdAt: new Date(),
   });
   const replies = await Promise.all([
     request("/tenant/members/owner", { role: "viewer" }, "owner", "PATCH"),
@@ -437,6 +444,7 @@ test("concurrent DID claims from two tenants yield one success and a conflict", 
     userId: "other",
     organizationId: "b",
     role: "owner",
+    createdAt: new Date(),
   });
   const body = { didPattern: "+14165551234", destinationType: "hangup" };
   const replies = await Promise.all([
@@ -1298,4 +1306,196 @@ test("a kamcmd RPC error on stdout is a failed reload, so the projection retries
     ),
   ).toBe(true);
   expect(kamcmdFailed(1, "", "")).toBe(true);
+});
+
+test("Kamailio's emergency exemption is projected from exactly the routes FreeSWITCH treats as emergency (I02)", async () => {
+  const { handleDialplan } = await import("../src/routes/fs-xml");
+  const sync = await import("../src/services/kamailio-sync");
+  const reload = spyOn(sync, "reloadKamailio").mockResolvedValue(true);
+  await pool.query(
+    "CREATE TABLE IF NOT EXISTS address (grp int, ip_addr text, mask int, port int, tag text); TRUNCATE address",
+  );
+  // Another tenant's row: a projection for "a" must leave it alone.
+  await pool.query(
+    "INSERT INTO emergency_pattern (key_name, key_type, value_type, key_value, organization_id) VALUES ('b.test', 1, 0, '^999$', 'b')",
+  );
+  const patterns = async () =>
+    (
+      await pool.query(
+        "SELECT key_name, key_type, value_type, key_value, organization_id FROM emergency_pattern ORDER BY organization_id, key_value",
+      )
+    ).rows;
+  await db.insert(schema.trunk).values([
+    { id: "live", organizationId: "a", name: "Live", host: "192.0.2.1" },
+    {
+      id: "off",
+      organizationId: "a",
+      name: "Off",
+      host: "192.0.2.2",
+      enabled: false,
+    },
+  ]);
+  const route = (body: object) =>
+    request("/outbound-routes", { patternSyntax: "pcre", ...body });
+  expect(
+    (
+      await route({
+        name: "911",
+        pattern: "^(911|933)$",
+        trunkId: "live",
+        isEmergency: true,
+      })
+    ).status,
+  ).toBe(201);
+  // Not emergency, or not routable: FreeSWITCH would not route these as an emergency.
+  expect(
+    (await route({ name: "NANP", pattern: "^1[0-9]{10}$", trunkId: "live" }))
+      .status,
+  ).toBe(201);
+  expect(
+    (
+      await route({
+        name: "112",
+        pattern: "^112$",
+        trunkId: "off",
+        isEmergency: true,
+      })
+    ).status,
+  ).toBe(201);
+  expect(await patterns()).toEqual([
+    {
+      key_name: "a.test",
+      key_type: 1,
+      value_type: 0,
+      key_value: "^(911|933)$",
+      organization_id: "a",
+    },
+    {
+      key_name: "b.test",
+      key_type: 1,
+      value_type: 0,
+      key_value: "^999$",
+      organization_id: "b",
+    },
+  ]);
+  // The cold tier agrees: 933 is an emergency call, 112 (disabled trunk) is not.
+  const dial = (number: string) =>
+    handleDialplan({
+      "Hunt-Context": "tenant_a",
+      "variable_sip_h_X-Tenant-Domain": "a.test",
+      "variable_sip_h_X-Auth-User": "101",
+      "Caller-Destination-Number": number,
+    });
+  expect(await dial("933")).toContain("sip_h_X-Emergency=true");
+  expect(await dial("112")).not.toContain("sip_h_X-Emergency=true");
+
+  // A trunk decides eligibility, so changing it refreshes the patterns.
+  expect(
+    (await request("/trunks/off", { enabled: true }, "owner", "PATCH")).status,
+  ).toBe(200);
+  expect((await patterns()).map((row) => row.key_value)).toEqual([
+    "^(911|933)$",
+    "^112$",
+    "^999$",
+  ]);
+  expect(
+    (await request("/trunks/live", { enabled: false }, "owner", "PATCH"))
+      .status,
+  ).toBe(200);
+  expect((await patterns()).map((row) => row.key_value)).toEqual([
+    "^112$",
+    "^999$",
+  ]);
+  // A viewer cannot add an emergency route, so cannot widen the exemption either.
+  expect(
+    (
+      await request(
+        "/outbound-routes",
+        {
+          name: "all",
+          pattern: ".*",
+          patternSyntax: "pcre",
+          trunkId: "off",
+          isEmergency: true,
+        },
+        "viewer",
+      )
+    ).status,
+  ).toBe(403);
+  // A route change reloads only the emergency htable: permissions and dispatcher refuse a reload
+  // within five seconds of the last, so reloading them here delayed a change after a trunk edit.
+  expect(reload).toHaveBeenCalledWith(["emergency"]);
+  reload.mockRestore();
+});
+
+test("/health is degraded when FreeSWITCH or Kamailio is down, not only the database (I17)", async () => {
+  const sync = await import("../src/services/kamailio-sync");
+  const redisModule = await import("../src/services/redis");
+  const ping = spyOn(redisModule, "ping").mockResolvedValue(true);
+  const fs = spyOn(esl, "status").mockResolvedValue({ ok: true } as any);
+  const kam = spyOn(sync, "kamailioResponds").mockResolvedValue(true);
+  const health = async () => {
+    const res = await app.request("/health");
+    return { code: res.status, body: (await res.json()) as any };
+  };
+  try {
+    expect((await health()).code).toBe(200);
+    kam.mockResolvedValue(false);
+    expect(await health()).toMatchObject({
+      code: 503,
+      body: { status: "degraded", kamailio: false, database: true },
+    });
+    kam.mockResolvedValue(true);
+    fs.mockResolvedValue({ ok: false } as any);
+    expect(await health()).toMatchObject({
+      code: 503,
+      body: { status: "degraded", freeswitch: false, database: true },
+    });
+  } finally {
+    ping.mockRestore();
+    fs.mockRestore();
+    kam.mockRestore();
+  }
+});
+
+test("after a restore, Kamailio keeps only what the database knows (I14)", async () => {
+  const { pruneKamailio } = await import("../src/services/kamailio-sync");
+  await pool.query(
+    "CREATE TABLE IF NOT EXISTS address (grp int, ip_addr text, mask int, port int, tag text); CREATE TABLE IF NOT EXISTS domain (domain text UNIQUE, did text); TRUNCATE address, domain",
+  );
+  await pool.query(`
+    INSERT INTO subscriber (username, domain, ha1) VALUES ('101', 'a.test', 'x'), ('102', 'a.test', 'x'), ('101', 'gone.test', 'x');
+    INSERT INTO location (username, domain) VALUES ('101', 'a.test'), ('102', 'a.test'), ('101', 'gone.test');
+    INSERT INTO address (grp, ip_addr, mask, port, tag) VALUES (1, '192.0.2.1', 32, 5060, 'kept'), (1, '192.0.2.2', 32, 5060, 'deleted'), (1, '192.0.2.3', 32, 5060, NULL);
+    INSERT INTO domain (domain, did) VALUES ('a.test', 'a.test'), ('gone.test', 'gone.test');
+    INSERT INTO emergency_pattern (key_name, key_type, value_type, key_value, organization_id) VALUES ('a.test', 1, 0, '^911$', 'a'), ('gone.test', 1, 0, '^911$', 'gone');`);
+  const removed = await pruneKamailio({
+    subscribers: [{ username: "101", domain: "a.test" }],
+    trunkIds: ["kept"],
+    domains: ["a.test"],
+    organizationIds: ["a"],
+  });
+  expect(removed).toEqual({
+    subscriber: 2,
+    location: 2,
+    address: 1,
+    domain: 1,
+    emergency_pattern: 1,
+  });
+  const rows = async (query: string) =>
+    (await pool.query(query)).rows.map((r) => Object.values(r).join("@"));
+  expect(await rows("SELECT username, domain FROM subscriber")).toEqual([
+    "101@a.test",
+  ]);
+  expect(await rows("SELECT username, domain FROM location")).toEqual([
+    "101@a.test",
+  ]);
+  // An untagged address was not written by the projection, so it is not ours to remove.
+  expect(
+    await rows("SELECT coalesce(tag, 'untagged') FROM address ORDER BY 1"),
+  ).toEqual(["kept", "untagged"]);
+  expect(await rows("SELECT domain FROM domain")).toEqual(["a.test"]);
+  expect(await rows("SELECT organization_id FROM emergency_pattern")).toEqual([
+    "a",
+  ]);
 });

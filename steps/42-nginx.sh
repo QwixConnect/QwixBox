@@ -26,7 +26,16 @@ fi
 usermod -aG ssl-cert www-data 2>/dev/null || true
 
 install -d -m 0755 /var/www/acme
-deploy_template "$TPL/letsencrypt-cli.ini" /etc/letsencrypt/cli.ini || true
+# Step 13 issues an HTTP-01 certificate standalone, before nginx holds :80, so renewal is moved to
+# nginx's webroot through the global cli.ini. certbot applies cli.ini over every lineage's own
+# renewal config, so on a DNS-01 host the same file turned renewal into HTTP-01 (verified with
+# certbot 4.0) - and failed it on a host that chose DNS-01 because :80 is unreachable (I11).
+if [ "${ACME_CHALLENGE:-http}" = "http" ]; then
+  deploy_template "$TPL/letsencrypt-cli.ini" /etc/letsencrypt/cli.ini || true
+elif [ -f /etc/letsencrypt/cli.ini ] && head -1 /etc/letsencrypt/cli.ini | grep -qx '# Managed by the QwixBox installer.'; then
+  rm -f /etc/letsencrypt/cli.ini
+  info "Removed the webroot cli.ini: renewal uses DNS-01"
+fi
 
 rm -f /etc/nginx/sites-enabled/default
 

@@ -715,7 +715,11 @@ function HealthBadge({ data, isError }: { data?: Health; isError: boolean }) {
 		);
 	}
 	const ok =
-		data.status === "ok" && data.database && data.redis && data.freeswitch;
+		data.status === "ok" &&
+		data.database &&
+		data.redis &&
+		data.freeswitch &&
+		data.kamailio;
 	return (
 		<Box
 			visibleFrom="sm"

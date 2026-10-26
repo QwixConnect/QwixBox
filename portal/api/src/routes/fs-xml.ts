@@ -1,4 +1,5 @@
 import { renderDirectoryUser } from "../services/cache";
+import { eligibleOutboundRoutes } from "../services/outbound-routes";
 import { destinationNumber, outboundCallerId } from "../services/call-state";
 import { diallable, validatePcre } from "../lib/dialplan-safe";
 import { safeEqual } from "../lib/crypto";
@@ -9,8 +10,6 @@ import {
   extension,
   inboundRoute,
   tenantSettings,
-  outboundRoute,
-  trunk,
   ringGroup,
   ivrMenu,
 } from "../db/schema";
@@ -210,24 +209,8 @@ export async function handleDialplan(
   if (peer && !forwarded)
     return did ? dispatch(did.destinationType, did.destinationId) : NOT_FOUND;
 
-  const routes = await db
-    .select({ route: outboundRoute, carrier: trunk })
-    .from(outboundRoute)
-    .innerJoin(trunk, eq(outboundRoute.trunkId, trunk.id))
-    .where(
-      and(
-        eq(outboundRoute.organizationId, org),
-        eq(outboundRoute.enabled, true),
-        eq(trunk.organizationId, org),
-        eq(trunk.enabled, true),
-        eq(trunk.authMode, "ip"),
-      ),
-    );
-  routes.sort(
-    (a, b) =>
-      Number(b.route.isEmergency) - Number(a.route.isEmergency) ||
-      a.route.priority - b.route.priority,
-  );
+  // Shared with the Redis tier and Kamailio's emergency exemption (I02).
+  const routes = await eligibleOutboundRoutes(org);
   const outbound = async (emergency: boolean): Promise<string | null> => {
     if (!authenticated && !forwarded) return null;
     const placedBy = forwarded ? forwardFrom : caller;

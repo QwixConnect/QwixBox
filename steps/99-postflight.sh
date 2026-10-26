@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Verify services, listening ports, TLS validity; print summary. The [ERR]/[CRIT] count is
-# scoped to the current FreeSWITCH run - the log appends across restarts.
+# scoped to the current FreeSWITCH run - the log appends across restarts. Each check runs only on
+# the role that installs what it checks (install.sh's STEPS), so a split-role host is not failed
+# for a port or service another host provides (I10).
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
@@ -23,8 +25,10 @@ check() {
 }
 
 # shellcheck disable=SC2329 # invoked indirectly via check()
+# Not "ss | grep -q": this runs in the script's shell, under pipefail, so grep's early exit killed
+# ss with SIGPIPE and a listening port failed about one run in three (I10).
 port_listening() {
-  ss -ltnu 2>/dev/null | grep -qE "[:.]$1\b"
+  grep -qE "[:.]$1\b" <<<"$(ss -ltnu 2>/dev/null)"
 }
 
 UNIT_FILES="$(systemctl list-unit-files --no-legend 2>/dev/null || true)"
@@ -39,14 +43,15 @@ for unit in postgresql redis-server freeswitch kamailio rtpengine-daemon nginx q
 done
 
 printf '\n--- Listening ports ---\n'
-check "SIP ${SIP_PORT}"            port_listening "$SIP_PORT"
-check "FreeSWITCH ${FS_INTERNAL_SIP_PORT} (loopback)" port_listening "$FS_INTERNAL_SIP_PORT"
-check "API ${API_PORT} (loopback)" port_listening "$API_PORT"
-check "HTTPS 443"                  port_listening 443
-check "Postgres 5432"              port_listening 5432
+has_role sip    && check "SIP ${SIP_PORT}" port_listening "$SIP_PORT"
+has_role media  && check "FreeSWITCH ${FS_INTERNAL_SIP_PORT} (loopback)" port_listening "$FS_INTERNAL_SIP_PORT"
+# Step 41 deploys the API on the portal and media roles; nginx (443) is portal only.
+{ has_role portal || has_role media; } && check "API ${API_PORT} (loopback)" port_listening "$API_PORT"
+has_role portal && check "HTTPS 443" port_listening 443
+has_role db     && check "Postgres ${DB_PORT:-5432}" port_listening "${DB_PORT:-5432}"
 
 printf '\n--- Telephony ---\n'
-if [ -x "$PREFIX/bin/fs_cli" ]; then
+if has_role media && [ -x "$PREFIX/bin/fs_cli" ]; then
   check "FreeSWITCH responds on ESL" bash -c "$PREFIX/bin/fs_cli -p $FS_ESL_PASSWORD -x status | grep -q '^UP'"
   check "Opus codec loaded"          bash -c "$PREFIX/bin/fs_cli -p $FS_ESL_PASSWORD -x 'show codec' | grep -qi opus"
   check "SIP profile up"             bash -c "$PREFIX/bin/fs_cli -p $FS_ESL_PASSWORD -x 'sofia status' | grep -qi RUNNING"
@@ -80,16 +85,19 @@ if [ -x "$PREFIX/bin/fs_cli" ]; then
   fi
 fi
 
-check "Kamailio config valid" kamailio -c -f /etc/kamailio/kamailio.cfg
-check "rtpengine control socket" bash -c "ss -lun | grep -q ':${RTPENGINE_NG_PORT}'"
+if has_role sip; then
+  check "Kamailio config valid" kamailio -c -f /etc/kamailio/kamailio.cfg
+  check "rtpengine control socket" bash -c "ss -lun | grep -q ':${RTPENGINE_NG_PORT}'"
+fi
 
-if [ "${ENABLE_WEBRTC:-1}" = "1" ]; then
+# Kamailio terminates WSS (step 34).
+if has_role sip && [ "${ENABLE_WEBRTC:-1}" = "1" ]; then
   check "WSS ${WSS_PORT} listening" port_listening "${WSS_PORT}"
   check "WSS presents a valid certificate" \
     bash -c "echo | openssl s_client -connect 127.0.0.1:${WSS_PORT} -servername ${PBX_FQDN} 2>/dev/null | grep -q 'Verify return code: 0'"
 fi
 
-if [ "${ENABLE_STIR_SHAKEN:-0}" = "1" ]; then
+if has_role sip && [ "${ENABLE_STIR_SHAKEN:-0}" = "1" ]; then
   mp="$(dirname "$(find /usr/lib -name 'tm.so' -path '*kamailio*' 2>/dev/null | head -1)")"
   check "stirshaken module built" test -f "$mp/stirshaken.so"
   check "STIR signing key present" test -f "${STIR_SHAKEN_KEY:-/etc/qwixbox/stir/signing.key}"
@@ -98,10 +106,29 @@ fi
 
 printf '\n--- Security ---\n'
 check "Firewall active"          bash -c "nft list ruleset | grep -q 'hook input'"
-check "SSH root login disabled"  bash -c "sshd -T 2>/dev/null | grep -q '^permitrootlogin no'"
+# The policy step 10 writes: root keeps key-only access when it has keys (cloud recovery), and
+# is refused otherwise; neither allows a root password. Requiring "no" failed every host that
+# step 10 had configured as intended (I10).
+if command -v sshd >/dev/null 2>&1; then
+  sshd_policy="$(sshd -T 2>/dev/null || true)"
+  check "SSH root login key-only or off" \
+    grep -qE '^permitrootlogin (no|prohibit-password|without-password)$' <<<"$sshd_policy"
+  # Step 10 leaves passwords on rather than lock out a host with no authorised key: true, but
+  # not a failure of this install.
+  if grep -q '^passwordauthentication no$' <<<"$sshd_policy"; then
+    ok "SSH password authentication off"
+  else
+    warn "SSH password authentication is on: add a key, then: sudo ./install.sh --only 10-ssh-hardening.sh --force"
+  fi
+fi
 check "fail2ban jails loaded"    bash -c "fail2ban-client status | grep -q 'Jail list'"
-check "Redis needs a password"   bash -c "! redis-cli ping 2>/dev/null | grep -q PONG"
-check "Postgres is loopback-only" bash -c "! ss -ltn | grep ':5432' | grep -qv '127.0.0.1\|::1'"
+if has_role db; then
+  check "Redis needs a password" bash -c "! redis-cli ping 2>/dev/null | grep -q PONG"
+  # A split db host must listen where the other roles can reach it.
+  if is_all_in_one; then
+    check "Postgres is loopback-only" bash -c "! ss -ltn | grep ':${DB_PORT:-5432}' | grep -qv '127.0.0.1\|::1'"
+  fi
+fi
 
 if [ -x /usr/sbin/sendmail ]; then
   printf '\n--- Mail ---\n'
@@ -171,8 +198,8 @@ if [ "$problems" -eq 0 ]; then
   printf '\n'
 
   warn "Still to do before taking real traffic:"
-  warn "  - Create SIP subscribers (kamctl add <user>@${PBX_SIP_DOMAIN} <password>)"
-  warn "  - Write the dialplan and outbound trunk routing"
+  warn "  - Add extensions, trunks, outbound routes and inbound numbers in the portal"
+  warn "    (another tenant: cd ${API_DIR:-/opt/qwixbox-api} && sudo -u ${API_USER:-qwixbox} bun run src/cli/provision-tenant.ts)"
   warn "  - Narrow ADMIN_ALLOW_CIDR if it is still 0.0.0.0/0"
   warn "  - Set OFFSITE_RSYNC_TARGET so backups leave this host"
   warn "  - Place a test call and confirm two-way audio"

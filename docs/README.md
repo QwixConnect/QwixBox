@@ -11,7 +11,10 @@ against commit `eca43d7` and this documentation cleanup. No production deploymen
 | [MVP gates](mvp.md) | Acceptance work required before customer traffic |
 | [MVP delivery plan](mvp-plan.md) | Milestones, owner decisions and ordering that close the gates |
 | [Roadmap](roadmap.md) | Feature inventory and live versus preview portal coverage |
-| [Hardware testing](testing-on-real-hardware.md) | Manual media and target-host checks |
+| [Hardware testing](testing-on-real-hardware.md) | Manual media and target-host checks (gates 1 and 6) |
+| [Acceptance procedures](acceptance.md) | Pass conditions and steps for gates 2, 3, 4, 5 and 7 |
+| [Restoring from a backup](restore.md) | Snapshot contents, `restore.sh`, new-host and in-place restore |
+| [Upgrades and rollback](rollback.md) | Pre-upgrade dump, schema rehearsal, data-loss gate, rollback procedure |
 | [Regression instructions](../tests/README.md) | Automated checks and disposable fixture boundaries |
 | [2026-10-24 review](reviews/2026-10-24.md) | Historical R01–R20 findings and remediation evidence |
 | [Dependency audit](reviews/dependencies-2026-10-25.json) | Raw advisory-service results for the three lockfiles |

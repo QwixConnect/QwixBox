@@ -346,6 +346,8 @@ _wizard_write() {
   if [ -n "$_WZ_SMTP_HOST" ]; then
     config_set SMTP_HOST     "$_WZ_SMTP_HOST"
     config_set SMTP_PORT     "$_WZ_SMTP_PORT"
+    # The port the wizard offers is what decides the mode; step 15 refuses 465 with STARTTLS.
+    if [ "$_WZ_SMTP_PORT" = 465 ]; then config_set SMTP_STARTTLS off; else config_set SMTP_STARTTLS on; fi
     config_set SMTP_USER     "$_WZ_SMTP_USER"
     config_set SMTP_PASSWORD "$_WZ_SMTP_PASS"
     config_set SMTP_FROM     "$_WZ_SMTP_FROM"

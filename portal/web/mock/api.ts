@@ -240,6 +240,7 @@ export function createMockApi() {
         database: scenario !== "error",
         redis: scenario !== "error",
         freeswitch: scenario !== "error",
+        kamailio: scenario !== "error",
       });
     if (signedOut) return json({ error: "Sign in to the mock portal" }, 401);
     if (path === "/api/auth/organization/get-active-member-role")

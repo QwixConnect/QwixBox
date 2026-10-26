@@ -51,7 +51,13 @@ export async function provisionTenant(input: {
     if (!org)
       [org] = await tx
         .insert(organization)
-        .values({ id: orgId, name: input.name, slug: input.slug })
+        // better-auth's schema has no column default; it sets createdAt itself (I24).
+        .values({
+          id: orgId,
+          name: input.name,
+          slug: input.slug,
+          createdAt: new Date(),
+        })
         .returning();
     if (!existing)
       await tx.insert(tenantSettings).values({
@@ -70,6 +76,7 @@ export async function provisionTenant(input: {
         organizationId: orgId,
         userId: owner.id,
         role: "owner",
+        createdAt: new Date(),
       });
     // Recorded with the tenant itself (R06): a provisioned tenant cannot exist without its
     // domain and cache publication being queued. Repeats re-publish, which is how a rerun

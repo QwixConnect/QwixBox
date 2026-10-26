@@ -18,10 +18,11 @@ create_role() {
   if pg_role_exists "$role"; then
     ok "Role already exists: $role"
   else
-    su - postgres -c "psql -v ON_ERROR_STOP=1 -c \"CREATE ROLE \\\"${role}\\\" LOGIN PASSWORD '${password}'\"" >/dev/null
+    printf 'CREATE ROLE "%s" LOGIN PASSWORD %s;\n' "$role" "$(sql_literal "$password")" | psql_secret
     info "Created role: $role"
   fi
-  su - postgres -c "psql -v ON_ERROR_STOP=1 -c \"ALTER ROLE \\\"${role}\\\" WITH LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE\"" >/dev/null
+  printf 'ALTER ROLE "%s" WITH LOGIN PASSWORD %s NOSUPERUSER NOCREATEDB NOCREATEROLE;\n' \
+    "$role" "$(sql_literal "$password")" | psql_secret
 }
 
 create_db() {

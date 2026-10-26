@@ -15,7 +15,21 @@ SMTP_PORT="${SMTP_PORT:-587}"
 SMTP_USER="${SMTP_USER:-}"
 SMTP_PASSWORD="${SMTP_PASSWORD:-}"
 SMTP_FROM="${SMTP_FROM:-pbx@${PBX_FQDN}}"
+SMTP_STARTTLS="${SMTP_STARTTLS:-on}"
 DKIM_SELECTOR="${DKIM_SELECTOR:-qwixbox}"
+
+# Settings an unattended install takes straight from config.env, without the wizard's checks
+# (I12). Mail sent as the template's pbx@example.com fails DMARC everywhere, and its DKIM key and
+# DNS records were generated for a domain nobody here owns.
+reason="$(valid_email "$SMTP_FROM")" || die "SMTP_FROM=\"$SMTP_FROM\" in $CONFIG_FILE: $reason"
+case "$SMTP_STARTTLS" in
+  on|off) ;;
+  *) die "SMTP_STARTTLS must be \"on\" (STARTTLS, usually 587) or \"off\" (implicit TLS, usually 465)." ;;
+esac
+if [ -n "$SMTP_HOST" ] && [ "$SMTP_PORT" = 465 ] && [ "$SMTP_STARTTLS" = on ]; then
+  die "SMTP_PORT=465 is implicit TLS: set SMTP_STARTTLS=\"off\". With STARTTLS, Postfix waits for a
+    plaintext greeting the relay never sends, and every message is deferred."
+fi
 
 MAIL_DOMAIN="${MAIL_DOMAIN:-}"
 if [ -z "$MAIL_DOMAIN" ]; then
@@ -77,6 +91,12 @@ smtp_tls_security_level = encrypt"
   else
     RELAY_BLOCK="smtp_sasl_auth_enable = no
 smtp_tls_security_level = encrypt"
+  fi
+  # Implicit TLS (465): TLS before the greeting. Only for the relay - the direct path speaks
+  # STARTTLS to MX hosts on 25, so this must never apply without SMTP_HOST.
+  if [ "$SMTP_STARTTLS" = off ]; then
+    RELAY_BLOCK="$RELAY_BLOCK
+smtp_tls_wrappermode = yes"
   fi
 else
   RELAYHOST=""
@@ -143,7 +163,7 @@ if [ -z "$SPF_VALUE" ]; then
 fi
 
 if [ -n "$SMTP_HOST" ]; then
-  ok "Mail configured: relaying through ${SMTP_HOST}:${SMTP_PORT} as ${SMTP_FROM}"
+  ok "Mail configured: relaying through ${SMTP_HOST}:${SMTP_PORT} ($([ "$SMTP_STARTTLS" = off ] && echo "implicit TLS" || echo STARTTLS)) as ${SMTP_FROM}"
 else
   ok "Mail configured: direct delivery as ${SMTP_FROM}"
 fi

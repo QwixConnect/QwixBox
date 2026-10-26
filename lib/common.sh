@@ -348,6 +348,21 @@ bun_as() {
 
 psql_super() { su - postgres -c "psql -v ON_ERROR_STOP=1 $*"; }
 
+# Run SQL that carries a secret (a role password) as the superuser (I14). The SQL travels on stdin,
+# never in argv where `ps` shows it, and the session turns statement logging off first: the
+# shipped `log_statement = 'ddl'` otherwise writes every ALTER ROLE ... PASSWORD into the server
+# log in plain text. log_min_error_statement covers the failure path, which logs the statement too.
+psql_secret() {
+  {
+    printf '%s\n' "SET log_statement = 'none';" "SET log_min_error_statement = 'panic';" \
+      "SET log_min_duration_statement = -1;"
+    cat
+  } | su - postgres -c "psql -q -v ON_ERROR_STOP=1" >/dev/null
+}
+
+# Single-quote a value as an SQL string literal.
+sql_literal() { printf "'%s'" "${1//\'/\'\'}"; }
+
 pg_role_exists() {
   su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='$1'\"" | grep -q 1
 }

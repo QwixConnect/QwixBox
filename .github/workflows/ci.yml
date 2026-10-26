@@ -1,0 +1,109 @@
+# The checks on every push and pull request (I16). Each job runs `tests/ci.sh <job>`, so a
+# failure here reproduces locally with the same command. integration and sip use service
+# containers created for the job and nothing else: ci.sh refuses a URL that does not name a
+# *_test database, and no secret or production address is available to this workflow.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    name: Installer, Lua, nginx and docs
+    runs-on: ubuntu-latest
+    # The installer targets Debian 13, and the nginx check binds loopback 80/443 as root.
+    container: debian:13
+    steps:
+      - name: Install tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates shellcheck lua5.4 python3 nginx openssl jq
+      - uses: actions/checkout@v4
+      - run: tests/ci.sh shell
+
+  api:
+    name: API typecheck, format and validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: tests/ci.sh api
+
+  web:
+    name: Portal typecheck, lint, build and client tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: tests/ci.sh web
+
+  site:
+    name: Site tests, build and links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: tests/ci.sh site
+
+  integration:
+    name: API security and cache publication (Postgres, Redis)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: qwixbox_ci_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://postgres:ci@127.0.0.1:5432/qwixbox_ci_test
+      TEST_REDIS_URL: redis://127.0.0.1:6379
+    steps:
+      # Outbound-route patterns are validated with pcre2grep, as step 41 installs it.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pcre2-utils
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: tests/ci.sh integration
+
+  sip:
+    name: SIP authentication against real Kamailio and Postgres
+    runs-on: ubuntu-latest
+    container: debian:13
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: qwixbox_sip_test
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      SIP_TEST_DATABASE_URL: postgres://postgres:ci@postgres:5432/qwixbox_sip_test
+    steps:
+      - name: Install tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates kamailio kamailio-postgres-modules postgresql-client python3
+      - uses: actions/checkout@v4
+      - run: tests/ci.sh sip

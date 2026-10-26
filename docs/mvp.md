@@ -21,12 +21,16 @@ INVITE or a listening rtpengine control socket does not establish working media.
 
 ## Acceptance gates
 
+Procedures: gates 1 and 6 in [hardware testing](testing-on-real-hardware.md), gates 2, 3, 4, 5
+and 7 in [acceptance procedures](acceptance.md). Record each run under
+[Acceptance runs](status.md#acceptance-runs).
+
 | Gate | Work and evidence required |
 |---|---|
 | 1. Remote two-way audio | Register two real endpoints, call between them, listen in both directions and repeat across internet/NAT. Inspect rtpengine sessions and codec negotiation. Follow [hardware testing](testing-on-real-hardware.md). |
 | 2. Call features | Record and retrieve voicemail, deliver its email, choose IVR digits including `#`, test DND/forwarding/call waiting and every ring-group strategy. I04–I06 remain source gaps. Receive a fax and verify its delivered attachment. |
 | 3. Carrier paths and identity | Verify inbound DID, outbound caller ID/translation, trusted-peer direct-dial denial, and inbound DID → external/extension forwarding. R11 and I03 are fixed and owe a real-carrier check. Enabled registration trunks stay unavailable until registration/challenge handling exists. |
-| 4. Emergency behavior | Classify authorized emergency calls before ingress capacity checks; wire dispatchable location/callback/notification behavior. Test saturation against a provider-approved test destination. Do not dial live emergency services for routine tests. Current E911 UI records are synthetic. Deployment obligations need separate jurisdiction/provider review. |
+| 4. Emergency behavior | Emergency calls are classified before the ingress capacity check (I02, live against a fake carrier); restrict tenant-defined emergency patterns (I31); wire dispatchable location/callback/notification behavior. Test saturation against a provider-approved test destination. Do not dial live emergency services for routine tests. Current E911 UI records are synthetic. Deployment obligations need separate jurisdiction/provider review. |
 | 5. Restore | Restore databases, roles, matching `config.env` encryption key, runtime config and service credentials onto a fresh host. Decrypt an existing SIP secret, register and place a call. Prove failed/offsite-failed backups preserve good history. Backup creation alone does not pass. |
 | 6. Current target-host install | Full Debian 13 amd64 install, idempotent rerun, interrupted-step recovery and service rebuild/SSH/TLS checks. Historical arm64 safety tests or amd64 FreeSWITCH-only builds are insufficient. Record component versions, including PostgreSQL 18 target versus PostgreSQL 17 regression fixture. |
 | 7. Consistent published state | Close durable projection/revocation (R06), configured capacity (R08), authorized forwarding (R11) and atomic cache publication (R13). Inject dependency failures and restart services to prove convergence. |
@@ -38,12 +42,15 @@ INVITE or a listening rtpengine control socket does not establish working media.
   the current build was not rerun. Reproduce and repair it if platform signing is required, or
   verify the selected carrier's signing path. A `carrierSigns` field alone is not proof.
 - **DNS/certificates/mail:** live Cloudflare publication and Domain Connect provider approval
-  remain unaccepted. DNS failure/mode handling, HTTP/DNS renewal and supported SMTP modes need
-  checks; see I11/I12. Password-reset/email fixture results do not prove your relay works.
+  remain unaccepted. DNS mode/failure handling and the SMTP modes are fixed and checked in containers
+  (I11/I12); live HTTP/DNS renewal dry-runs and production-relay delivery are still owed. Password-reset/email fixture results do not prove your relay works.
 - **Monitoring:** send service/backup/certificate failures to a human and verify receipt.
 - **Upgrade safety:** review schema changes and rollback/data handling before `db:push --force`.
+  Step 41 now keeps a pre-upgrade dump, rehearses the push on a copy and refuses data loss unless
+  accepted; the [rollback procedure](rollback.md) is drilled in a container, not yet on a real host.
   Resolve duplicate exact DIDs with their owners before adding uniqueness on an older install.
-- **Postflight:** align SSH/role checks and provisioning guidance with the installer (I10).
+- **Postflight:** SSH and role checks and the provisioning advice match the installer (I10, fixed
+  2026-10-26); a clean postflight on the amd64 host is part of gate 6.
 
 ## Outside the core MVP
 

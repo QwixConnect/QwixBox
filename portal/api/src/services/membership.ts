@@ -88,6 +88,8 @@ export async function changeMembership(input: {
         organizationId,
         userId: account!.id,
         role,
+        // better-auth's schema has no column default; it sets createdAt itself (I24).
+        createdAt: new Date(),
       })
       .returning();
     return { before: undefined, after, status: "created" };

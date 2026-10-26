@@ -337,7 +337,7 @@ At minimum set:
 PBX_FQDN="pbx.example.com"          # must already resolve to this server
 PBX_SIP_DOMAIN="pbx.example.com"    # what endpoints put after the @
 LETSENCRYPT_EMAIL="you@example.com"
-ADMIN_ALLOW_CIDR="203.0.113.10/32"  # your address, not 0.0.0.0/0
+ADMIN_ALLOW_CIDR="203.0.113.10/32"  # your address(es), IPv4 and/or IPv6, not 0.0.0.0/0
 TIMEZONE="America/Toronto"
 ```
 
@@ -347,7 +347,8 @@ Worth setting now rather than later:
 SMTP_HOST="smtp.provider.example"   # voicemail-to-email and fax-to-email need a relay
 SMTP_USER="..."
 SMTP_PASSWORD="..."
-SMTP_FROM="pbx@example.com"         # a domain you control, with SPF and DKIM
+SMTP_PORT="587"                     # 465 needs SMTP_STARTTLS="off" (implicit TLS)
+SMTP_FROM="pbx@yourdomain.com"      # a domain you control, with SPF and DKIM; example.com is refused
 MAX_CONCURRENT_CALLS=10             # configured value; dynamic tenant-limit enforcement is pending
 ```
 
@@ -678,7 +679,7 @@ one field in a softphone would let anyone forward someone else's phone or read t
 ## Operations
 
 ```bash
-sudo qwixbox-healthcheck             # service, port, certificate and disk checks
+sudo qwixbox-healthcheck             # services, API/outbox, SIP auth, certificate, disk; alerts on change
 sudo qwixbox-backup                  # run a backup now
 fs_cli                            # FreeSWITCH console
 kamctl ul show                    # current registrations
@@ -733,7 +734,11 @@ review with `src/cli/check-route-patterns.ts`. Enabled registration trunks are u
 
 Backup success requires the encryption configuration in the archive. Keep `config.env` with database
 dumps, retain the corresponding key, and test a restore. Failed snapshots or offsite copies do not
-prune previous local backups. Regression-test instructions are in `tests/README.md`.
+prune previous local backups. To restore a snapshot onto a new host or in place, run
+`sudo ./restore.sh /var/backups/qwixbox/<stamp>` from a checkout of the same release: see
+[docs/restore.md](docs/restore.md). Voicemail, recordings and fax files are not in the backup. Each
+upgrade also keeps a pre-upgrade dump and can be rolled back: see [docs/rollback.md](docs/rollback.md).
+Regression-test instructions are in `tests/README.md`.
 
 The site publishes an immutable installer ref. Commit the tested runtime changes before
 `npm run deploy` in `site`; its predeploy check refuses a dirty installer/runtime tree. Local

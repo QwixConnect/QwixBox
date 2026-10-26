@@ -21,6 +21,9 @@
   <settings>
     <param name="sip-ip" value="127.0.0.1"/>
     <param name="sip-port" value="@FS_EGRESS_SIP_PORT@"/>
+    <!-- UDP only: Kamailio trusts FreeSWITCH by this source port (I28), and a TCP connection would
+         leave from an ephemeral one. Loopback's MTU is 64K, so TCP buys nothing here. -->
+    <param name="bind-params" value="transport=udp"/>
     <param name="rtp-ip" value="$${local_ip_v4}"/>
     <param name="context" value="egress"/>
     <param name="dialplan" value="XML"/>

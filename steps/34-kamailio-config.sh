@@ -69,6 +69,29 @@ else
   die "Failed adding the acc db_extra columns - accounting would fail on every call."
 fi
 
+# Emergency route patterns, written by the API and loaded by htable as `emergency=><domain>[i]`
+# (I02). Outside the schema guard so an existing install gets it. htable's column layout, plus
+# the organization that owns each row; the version row is what htable checks before loading.
+emergency_sql="CREATE TABLE IF NOT EXISTS emergency_pattern (
+    id SERIAL PRIMARY KEY NOT NULL,
+    key_name VARCHAR(256) DEFAULT '' NOT NULL,
+    key_type INTEGER DEFAULT 1 NOT NULL,
+    value_type INTEGER DEFAULT 0 NOT NULL,
+    key_value VARCHAR(512) DEFAULT '' NOT NULL,
+    expires INTEGER DEFAULT 0 NOT NULL,
+    organization_id TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS emergency_pattern_org_idx ON emergency_pattern (organization_id);
+  INSERT INTO version (table_name, table_version) SELECT 'emergency_pattern', 2
+    WHERE NOT EXISTS (SELECT 1 FROM version WHERE table_name = 'emergency_pattern');
+  GRANT ALL ON emergency_pattern TO kamailio;
+  GRANT ALL ON SEQUENCE emergency_pattern_id_seq TO kamailio;
+  GRANT SELECT ON emergency_pattern TO kamailioro;"
+if su - postgres -c "psql -v ON_ERROR_STOP=1 -q -d kamailio" <<<"$emergency_sql" >/dev/null 2>&1; then
+  ok "Emergency pattern table present"
+else
+  die "Failed creating emergency_pattern - Kamailio cannot load its emergency exemption."
+fi
+
 TLS_READY=0
 if [ -f /etc/qwixbox/tls/fullchain.pem ]; then
   usermod -aG ssl-cert kamailio 2>/dev/null || true
@@ -102,6 +125,10 @@ fi
 local_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')"
 public_ip="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo "")"
 
+# FreeSWITCH's external profile sits one above its internal one (31-freeswitch-config.sh); the
+# two are the only source ports Kamailio trusts as FreeSWITCH (I28).
+# shellcheck disable=SC2034  # read by name from the template
+FS_EGRESS_SIP_PORT="$((FS_INTERNAL_SIP_PORT + 1))"
 # shellcheck disable=SC2034
 ADV_SIP=""
 # shellcheck disable=SC2034

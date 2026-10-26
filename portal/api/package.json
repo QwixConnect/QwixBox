@@ -7,7 +7,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "auth:generate": "bunx @better-auth/cli generate --output src/db/auth-schema.ts",
+    "auth:generate": "scripts/auth-schema.sh generate",
+    "auth:check": "scripts/auth-schema.sh check",
     "format": "bunx prettier --write '**/*.{js,ts}'",
     "format:check": "bunx prettier --check '**/*.{js,ts}'"
   },
