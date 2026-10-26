@@ -54,6 +54,32 @@ deploy_template "{repo}/resources/conf/freeswitch/runtime.env" "{runtime}" 0600 
     assert result.returncode != 0, "Unrelated local user read the gateway secret"
     print("PASS runtime secret permissions deny an unrelated local user")
 
+    kam = root / "kamailio"
+    kam.mkdir()
+    def signing():
+        result = run(f'. "{repo}/lib/common.sh"; KAMAILIO_ETC="{kam}" stir_signing_ready')
+        assert result.returncode == 0, result.stderr
+        return result.stdout
+    assert signing() == "0", "No Kamailio config must not report signing"
+    (kam / "kamailio.cfg").write_text("#!define WITH_STIRSHAKEN\n")
+    (kam / "stirshaken.cfg").write_text('modparam("stirshaken", "vs_verify_x509_cert_path", 1)\n')
+    assert signing() == "0", "Verification-only STIR must not report signing"
+    (kam / "stirshaken.cfg").write_text('modparam("stirshaken", "as_default_key", "/k")\n')
+    assert signing() == "1"
+    (kam / "kamailio.cfg").write_text("\n")
+    assert signing() == "0", "A key without the module define must not report signing"
+    api_env = root / "api.env"
+    result = run(f'''. "{repo}/lib/common.sh"
+API_PORT=3000 API_USER=qwixbox API_DB_PASSWORD=x DB_HOST=h DB_PORT=5432 KAMAILIO_DB_PASSWORD=x REDIS_PASSWORD=x
+REDIS_HOST=h REDIS_PORT=6379 FS_ESL_HOST=h FS_ESL_PORT=8021 FS_ESL_PASSWORD=x FS_XML_GATEWAY_SECRET=x
+ENCRYPTION_KEY=x AUTH_SECRET=x PBX_FQDN=f PBX_SIP_DOMAIN=d FS_HOST=h KAM_EGRESS_PORT=5070
+SMTP_FROM=a@b MAIL_FROM_NAME=n MAIL_REPLY_TO=r STIR_SIGNING="$(KAMAILIO_ETC="{kam}" stir_signing_ready)"
+deploy_template "{repo}/resources/conf/api/env" "{api_env}" 0600 root:root || true
+''')
+    assert result.returncode == 0, result.stderr
+    assert "STIR_SIGNING=0\n" in api_env.read_text()
+    print("PASS STIR signing readiness reaches the API environment")
+
     etc = root / "etc"
     etc.mkdir()
     home = root / "root"
@@ -137,3 +163,24 @@ bun_as() {{
     result = run(f'exec 3>"{root}/console"\n' + source)
     assert result.returncode == 0 and first_login.read_text() == credential, result.stderr
     print("PASS first-login survives provisioning failure and resume")
+
+# Every database URL a template renders must parse back to the configured host and password.
+# Kamailio's two URLs once wrote `@PASSWORD@@DB_HOST@` - two placeholders with no literal `@`
+# between them - so the password ran into the host and Kamailio could not start on a fresh install.
+import re
+import urllib.parse
+templates = sorted(path for path in (repo / "resources/conf").rglob("*") if path.is_file())
+env = dict(os.environ)
+for path in templates:
+    for name in re.findall(r"@([A-Za-z_][A-Za-z0-9_]*)@", path.read_text(errors="ignore")):
+        env[name] = "h0st" if name.endswith("_HOST") else "5432" if name.endswith("_PORT") else f"v{name.lower()}"
+checked = 0
+for path in templates:
+    result = run(f'. "{repo}/lib/common.sh"; render_template "{path}"', env)
+    assert result.returncode == 0, f"{path}: {result.stderr}"
+    for url in re.findall(r"postgres(?:ql)?://[^\s\"']+", result.stdout):
+        parts = urllib.parse.urlsplit(url)
+        assert parts.hostname == "h0st" and parts.port == 5432 and parts.password, f"{path.name}: malformed {url}"
+        checked += 1
+assert checked >= 3, f"only {checked} database URLs found"
+print(f"PASS rendered database URLs parse ({checked} across {len(templates)} templates)")

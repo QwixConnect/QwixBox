@@ -23,7 +23,7 @@ import {
 	useLocation,
 	useNavigate,
 } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { lazy, type ReactNode, Suspense } from "react";
 import {
 	IconBrandMark,
 	IconCallFlows,
@@ -48,8 +48,9 @@ import {
 	IconTrunks,
 	IconUsers,
 } from "../components/Icons";
+import { ProjectionBanner } from "../components/ProjectionBanner";
 import { InitialsAvatar } from "../components/Resource";
-import { useWebphone, WebphoneProvider } from "../components/WebphoneDrawer";
+import { useWebphone } from "../components/webphone-context";
 import { endpoints, type Health } from "../lib/api";
 import { authClient, ensureActiveOrganization } from "../lib/auth-client";
 import {
@@ -152,7 +153,11 @@ const navGroups: Array<{ group: string; items: NavItem[] }> = [
 
 function NoTenant({ email }: { email: string }) {
 	return (
-		<Alert color="yellow" title="No tenant assigned to this account" radius={16}>
+		<Alert
+			color="yellow"
+			title="No tenant assigned to this account"
+			radius={16}
+		>
 			<Stack gap="sm">
 				<Text size="sm">
 					<Code>{email}</Code> can sign in but is not a member of any
@@ -171,11 +176,25 @@ function NoTenant({ email }: { email: string }) {
 	);
 }
 
+// The browser phone is a simulation with no SIP client (I23), so it exists only in the local mock.
+// Loaded lazily so a production bundle does not contain it at all.
+const WebphoneProvider =
+	import.meta.env.DEV && import.meta.env.MODE === "mock"
+		? lazy(() =>
+				import("../components/WebphoneDrawer").then((m) => ({
+					default: m.WebphoneProvider,
+				})),
+			)
+		: null;
+
 function AppLayoutWrapper() {
+	if (!WebphoneProvider) return <AppLayout />;
 	return (
-		<WebphoneProvider>
-			<AppLayout />
-		</WebphoneProvider>
+		<Suspense fallback={null}>
+			<WebphoneProvider>
+				<AppLayout />
+			</WebphoneProvider>
+		</Suspense>
 	);
 }
 
@@ -184,7 +203,8 @@ function AppLayout() {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const { colorScheme, toggleColorScheme } = useMantineColorScheme();
-	const { openKeypad, inCall } = useWebphone();
+	const phone = useWebphone();
+	const inCall = phone?.inCall ?? false;
 
 	const { data: session } = authClient.useSession();
 	const { can, role } = useRole();
@@ -310,29 +330,33 @@ function AppLayout() {
 					<Group gap={10} wrap="nowrap">
 						<HealthBadge data={health.data} isError={health.isError} />
 
-						<Button
-							variant={inCall ? "filled" : "default"}
-							color={inCall ? "brand" : undefined}
-							radius="xl"
-							leftSection={
-								inCall ? <IconPhone size={16} /> : <IconKeypad size={16} />
-							}
-							onClick={() => openKeypad()}
-							styles={{
-								root: {
-									minHeight: 40,
-									height: 40,
-									paddingInline: 16,
-									background: inCall ? "var(--qb-accent)" : "var(--qb-surface)",
-									border: "none",
-									color: inCall ? "#FFFFFF" : "var(--qb-text-primary)",
-									fontWeight: 600,
-									fontSize: 14,
-								},
-							}}
-						>
-							{inCall ? "Active Call · 04:27" : "Keypad"}
-						</Button>
+						{phone && (
+							<Button
+								variant={inCall ? "filled" : "default"}
+								color={inCall ? "brand" : undefined}
+								radius="xl"
+								leftSection={
+									inCall ? <IconPhone size={16} /> : <IconKeypad size={16} />
+								}
+								onClick={() => phone.openKeypad()}
+								styles={{
+									root: {
+										minHeight: 40,
+										height: 40,
+										paddingInline: 16,
+										background: inCall
+											? "var(--qb-accent)"
+											: "var(--qb-surface)",
+										border: "none",
+										color: inCall ? "#FFFFFF" : "var(--qb-text-primary)",
+										fontWeight: 600,
+										fontSize: 14,
+									},
+								}}
+							>
+								{inCall ? "Active Call · 04:27" : "Keypad"}
+							</Button>
+						)}
 
 						<Tooltip
 							label={
@@ -418,12 +442,7 @@ function AppLayout() {
 					>
 						<Group justify="space-between" wrap="nowrap">
 							<Group gap={12} wrap="nowrap" style={{ minWidth: 0 }}>
-								<InitialsAvatar
-									name={displayName}
-									initials="DU"
-									size={44}
-									accent
-								/>
+								<InitialsAvatar name={displayName} size={44} accent />
 								<Box style={{ minWidth: 0 }}>
 									<Text
 										fw={700}
@@ -433,30 +452,11 @@ function AppLayout() {
 									>
 										{displayName}
 									</Text>
+									{/* Portal accounts have no extension or presence yet (I09); this card used to
+									    show an invented number, extension and "Online" status. */}
 									<Text size="xs" c="dimmed" truncate fw={500}>
-										+1 416 555 0100 · ext. 1001
+										{session?.user?.email}
 									</Text>
-									<Group gap={6} mt={4}>
-										<span
-											style={{
-												width: 7,
-												height: 7,
-												borderRadius: 9999,
-												background: "var(--qb-accent)",
-												display: "inline-block",
-											}}
-										/>
-										<Text
-											size="xs"
-											fw={600}
-											style={{
-												fontSize: 12,
-												color: "var(--qb-accent-text)",
-											}}
-										>
-											Online
-										</Text>
-									</Group>
 								</Box>
 							</Group>
 						</Group>
@@ -557,7 +557,14 @@ function AppLayout() {
 					) : org.isSuccess && org.data === false ? (
 						<NoTenant email={session?.user.email ?? ""} />
 					) : org.isSuccess || !session?.user ? (
-						<Outlet />
+						<>
+							<ProjectionBanner
+								enabled={
+									org.isSuccess && (role === "owner" || role === "admin")
+								}
+							/>
+							<Outlet />
+						</>
 					) : (
 						<Text c="dimmed" size="sm">
 							Loading organization…
@@ -572,7 +579,7 @@ function AppLayout() {
 }
 
 function MobileBottomBar({ currentPath }: { currentPath: string }) {
-	const { openKeypad } = useWebphone();
+	const phone = useWebphone();
 	const tabs = [
 		{
 			to: "/calls",
@@ -586,13 +593,17 @@ function MobileBottomBar({ currentPath }: { currentPath: string }) {
 			icon: <IconContacts size={22} />,
 			active: currentPath.startsWith("/contacts"),
 		},
-		{
-			to: "#keypad",
-			label: "Keypad",
-			icon: <IconKeypad size={22} />,
-			active: false,
-			onClick: () => openKeypad(),
-		},
+		...(phone
+			? [
+					{
+						to: "#keypad",
+						label: "Keypad",
+						icon: <IconKeypad size={22} />,
+						active: false,
+						onClick: () => phone.openKeypad(),
+					},
+				]
+			: []),
 		{
 			to: "/messages",
 			label: "Messages",
@@ -674,13 +685,7 @@ function MobileBottomBar({ currentPath }: { currentPath: string }) {
 	);
 }
 
-function HealthBadge({
-	data,
-	isError,
-}: {
-	data?: Health;
-	isError: boolean;
-}) {
+function HealthBadge({ data, isError }: { data?: Health; isError: boolean }) {
 	if (isError || !data) {
 		return (
 			<Box

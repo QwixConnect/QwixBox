@@ -4,7 +4,6 @@ import {
 	Box,
 	Button,
 	Group,
-	Modal,
 	NumberInput,
 	Select,
 	Stack,
@@ -16,9 +15,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import {
-	IconBellOff,
-	IconChevronRight,
-	IconDevices,
 	IconEmergency,
 	IconFaxes,
 	IconLogout,
@@ -26,7 +22,6 @@ import {
 	IconRefresh,
 	IconSettings,
 	IconShield,
-	IconVoicemail,
 } from "../../components/Icons";
 import {
 	ErrorAlert,
@@ -40,6 +35,7 @@ import {
 import { endpoints, type TenantUpdate } from "../../lib/api";
 import { authClient } from "../../lib/auth-client";
 import { notifySaved } from "../../lib/notify";
+import { useUnenforced } from "../../lib/use-unenforced";
 
 export const Route = createFileRoute("/_app/settings")({
 	component: SettingsPage,
@@ -54,17 +50,7 @@ function SettingsPage() {
 		queryFn: endpoints.tenant,
 	});
 
-	const [dnd, setDnd] = useState(false);
-	const [vmGreetingMode, setVmGreetingMode] = useState(
-		"Custom · 0:18 · Transcription on",
-	);
-	const [forwardingSummary, setForwardingSummary] = useState(
-		"After 20s → +1 416 555 0199",
-	);
-	const [ringDevicesSummary, setRingDevicesSummary] = useState(
-		"Mobile app + Desk phone",
-	);
-	const [greetingModalOpen, setGreetingModalOpen] = useState(false);
+	const unenforced = useUnenforced("tenant_settings");
 
 	const [overrides, setForm] = useState<TenantUpdate>({});
 	const [saved, setSaved] = useState(false);
@@ -84,11 +70,11 @@ function SettingsPage() {
 		recordingPolicy:
 			overrides.recordingPolicy ?? tenant.data?.recordingPolicy ?? "none",
 		stirShakenEnabled:
-			overrides.stirShakenEnabled ?? tenant.data?.stirShakenEnabled ?? true,
+			overrides.stirShakenEnabled ?? tenant.data?.stirShakenEnabled ?? false,
 	};
 
 	const save = useMutation({
-		mutationFn: () => endpoints.updateTenant(form),
+		mutationFn: () => endpoints.updateTenant(unenforced.omit(form)),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: ["tenant"] });
 			setSaved(true);
@@ -145,75 +131,22 @@ function SettingsPage() {
 								{displayName}
 							</Text>
 							<Text className="qb-caption">
-								{tenant.data?.defaultCallerIdNumber || "+1 416 555 0100"} · ext.
-								101 · {tenant.data?.sipDomain ?? "acme.pbx.example.test"}
+								{session?.user?.email}
+								{tenant.data?.sipDomain ? ` · ${tenant.data.sipDomain}` : ""}
 							</Text>
-							<Group gap={6} mt={4}>
-								<span
-									style={{
-										width: 8,
-										height: 8,
-										borderRadius: 9999,
-										background: dnd
-											? "var(--qb-danger)"
-											: "var(--qb-accent)",
-										display: "inline-block",
-									}}
-								/>
-								<Text
-									size="xs"
-									fw={700}
-									style={{
-										color: dnd
-											? "var(--qb-danger)"
-											: "var(--qb-accent-text)",
-									}}
-								>
-									{dnd ? "Do Not Disturb" : "Online"}
-								</Text>
-							</Group>
 						</Box>
 					</Group>
-					<span style={{ color: "var(--qb-text-secondary)" }}>
-						<IconChevronRight size={18} />
-					</span>
 				</Group>
 			</SurfaceCard>
 
-			{/* Personal Call Handling Group matching Settings@2x.png */}
+			{/* Personal call handling needs a portal account linked to an extension, which does not
+			    exist yet (I09). These rows used to be local state and invented summaries. */}
 			<SurfaceCard p={0} style={{ overflow: "hidden" }}>
 				<SettingRow
-					icon={<IconBellOff size={18} />}
-					title="Do Not Disturb"
-					subtitle="Send calls straight to voicemail"
-					rightSection={
-						<Switch
-							checked={dnd}
-							onChange={(e) => setDnd(e.currentTarget.checked)}
-							aria-label="Toggle Do Not Disturb"
-						/>
-					}
-				/>
-				<SettingRow
-					icon={<IconVoicemail size={18} />}
-					title="Voicemail greeting"
-					subtitle={vmGreetingMode}
-					onClick={() => setGreetingModalOpen(true)}
-					withSeparator
-				/>
-				<SettingRow
 					icon={<IconPhoneForwarded size={18} />}
-					title="Call forwarding"
-					subtitle={forwardingSummary}
+					title="Call handling"
+					subtitle="Do Not Disturb, forwarding and voicemail are set per extension. Portal accounts are not linked to an extension yet."
 					onClick={() => navigate({ to: "/extensions" })}
-					withSeparator
-				/>
-				<SettingRow
-					icon={<IconDevices size={18} />}
-					title="Ring devices"
-					subtitle={ringDevicesSummary}
-					onClick={() => navigate({ to: "/devices" })}
-					withSeparator
 				/>
 			</SurfaceCard>
 
@@ -221,10 +154,18 @@ function SettingsPage() {
 			<SurfaceCard p={0} style={{ overflow: "hidden" }}>
 				<SettingRow
 					icon={<IconShield size={18} />}
-					title="STIR/SHAKEN & RTP Encryption"
-					subtitle={`${form.stirShakenEnabled ? "Attestation A (Full)" : "Disabled"} · TLS 1.3 + SRTP enforced`}
+					title="STIR/SHAKEN signing"
+					subtitle={
+						!unenforced.stirSigning
+							? "Not available: this server was not installed with STIR/SHAKEN signing"
+							: form.stirShakenEnabled
+								? "Outbound calls from this tenant are signed by this server"
+								: "Outbound calls from this tenant are not signed by this server"
+					}
 					rightSection={
 						<Switch
+							aria-label="Sign outbound calls"
+							disabled={unenforced.isUnenforced("stirShakenEnabled")}
 							checked={Boolean(form.stirShakenEnabled)}
 							onChange={(e) =>
 								setForm({
@@ -238,7 +179,7 @@ function SettingsPage() {
 				<SettingRow
 					icon={<IconEmergency size={18} />}
 					title="E911 Emergency Dispatch Locations"
-					subtitle="Kari’s Law & RAY BAUM’S Act PIDF-LO civic locations"
+					subtitle="Preview: emergency location management is not built yet"
 					onClick={() => navigate({ to: "/emergency" })}
 					withSeparator
 				/>
@@ -313,6 +254,7 @@ function SettingsPage() {
 											maxConcurrentCalls: Number(v) || 10,
 										})
 									}
+									{...unenforced.props("maxConcurrentCalls")}
 								/>
 								<TextInput
 									label="Default IANA Timezone"
@@ -338,6 +280,7 @@ function SettingsPage() {
 											defaultCallerIdName: e.currentTarget.value || null,
 										})
 									}
+									{...unenforced.props("defaultCallerIdName")}
 								/>
 								<TextInput
 									label="Default Outbound Caller ID Number (E.164)"
@@ -349,6 +292,7 @@ function SettingsPage() {
 											defaultCallerIdNumber: e.currentTarget.value || null,
 										})
 									}
+									{...unenforced.props("defaultCallerIdNumber")}
 								/>
 							</Group>
 
@@ -358,7 +302,10 @@ function SettingsPage() {
 									{ value: "none", label: "None (on-demand only)" },
 									{ value: "inbound", label: "Record all inbound calls" },
 									{ value: "outbound", label: "Record all outbound calls" },
-									{ value: "all", label: "Record all inbound & outbound calls" },
+									{
+										value: "all",
+										label: "Record all inbound & outbound calls",
+									},
 								]}
 								value={form.recordingPolicy ?? "none"}
 								onChange={(v) =>
@@ -368,6 +315,7 @@ function SettingsPage() {
 										recordingPolicy: v as TenantUpdate["recordingPolicy"],
 									})
 								}
+								{...unenforced.props("recordingPolicy")}
 							/>
 
 							<RoleGate resource="tenant" action="update">
@@ -392,59 +340,6 @@ function SettingsPage() {
 					rightSection={<span />}
 				/>
 			</SurfaceCard>
-
-			<Modal
-				opened={greetingModalOpen}
-				onClose={() => setGreetingModalOpen(false)}
-				title="Voicemail & Ring Preferences"
-				centered
-			>
-				<Stack gap={14}>
-					<Select
-						label="Active Voicemail Greeting"
-						value={vmGreetingMode}
-						onChange={(v) => v && setVmGreetingMode(v)}
-						data={[
-							{
-								value: "Custom · 0:18 · Transcription on",
-								label: "Custom Greeting (0:18) · AI Transcription On",
-							},
-							{
-								value: "Out of Office · 0:24 · Transcription on",
-								label: "Out of Office Greeting (0:24)",
-							},
-							{
-								value: "Standard System Name · Transcription on",
-								label: "System Default Spoken Extension",
-							},
-						]}
-					/>
-					<TextInput
-						label="Unanswered Call Forwarding Summary"
-						value={forwardingSummary}
-						onChange={(e) => setForwardingSummary(e.currentTarget.value)}
-					/>
-					<Select
-						label="Simultaneous Ring Endpoints"
-						value={ringDevicesSummary}
-						onChange={(v) => v && setRingDevicesSummary(v)}
-						data={[
-							{
-								value: "Mobile app + Desk phone",
-								label: "Mobile app + Desk phone",
-							},
-							{
-								value: "WebRTC Browser + Mobile + Desk phone",
-								label: "All Registered Devices (WebRTC + Mobile + Desk)",
-							},
-							{ value: "Desk phone only", label: "Desk phone only" },
-						]}
-					/>
-					<Group justify="flex-end" mt="sm">
-						<Button onClick={() => setGreetingModalOpen(false)}>Done</Button>
-					</Group>
-				</Stack>
-			</Modal>
 		</Stack>
 	);
 }

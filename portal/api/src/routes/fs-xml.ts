@@ -1,5 +1,5 @@
 import { renderDirectoryUser } from "../services/cache";
-import { destinationNumber } from "../services/call-state";
+import { destinationNumber, outboundCallerId } from "../services/call-state";
 import { diallable, validatePcre } from "../lib/dialplan-safe";
 import { safeEqual } from "../lib/crypto";
 import { Hono } from "hono";
@@ -132,8 +132,20 @@ export async function handleDialplan(
     form["Caller-Destination-Number"] ?? form.destination_number ?? "",
   );
   if (!diallable(destination)) return NOT_FOUND;
+  // A forward set by qwixbox.go (R11): an extension's forwarding setting or a tenant-configured
+  // external destination. It authorizes exactly this number, in the tenant it names; channel
+  // variables cannot be set from SIP, so a peer cannot forge one. The forwarding extension, not
+  // the caller, places the outbound leg - same rule as xml_handler.lua.
+  const forwarded =
+    destination === String(form.variable_qwixbox_forward_to ?? "");
+  const forwardFrom = String(form.variable_qwixbox_forward_from ?? "");
+  if (forwarded) {
+    const forwardDomain = String(form.variable_qwixbox_forward_domain ?? "");
+    if (!peer && forwardDomain !== domain) return NOT_FOUND;
+    domain = forwardDomain;
+  }
   let did: typeof inboundRoute.$inferSelect | undefined;
-  if (peer) {
+  if (peer && !forwarded) {
     const matches = await db
       .select({ route: inboundRoute, domain: tenantSettings.sipDomain })
       .from(inboundRoute)
@@ -163,11 +175,20 @@ export async function handleDialplan(
   const org = tenant.organizationId;
   const action = (app: string, data = "") =>
     `<action application="${escapeXml(app)}" data="${escapeXml(data)}"/>`;
-  const result = (actions: string[]) =>
+  const answer = (context: string, actions: string[]) =>
     wrap(
       "dialplan",
-      `<context name="tenant_${escapeXml(org)}"><extension name="resolved"><condition field="destination_number" expression="^${escapeXml(destination.replace(/[.*+?^$()|[\]{}\\]/g, "\\$&"))}$">${actions.join("\n")}</condition></extension></context>`,
+      `<context name="${escapeXml(context)}"><extension name="resolved"><condition field="destination_number" expression="^${escapeXml(destination.replace(/[.*+?^$()|[\]{}\\]/g, "\\$&"))}$">${actions.join("\n")}</condition></extension></context>`,
     );
+  const context = `tenant_${org}`;
+  const result = (actions: string[]) => answer(context, actions);
+  // Kamailio-forwarded calls arrive in the SIP profile's context ("default"): user_context is only
+  // applied when FreeSWITCH authenticates the caller, which auth-calls=false means it never does,
+  // and mod_dialplan_xml ignores an answer in any other context. Move the call into its tenant's
+  // context first - the CDR attributes it by that name. Same rule as xml_handler.lua.
+  const hunt = form["Hunt-Context"];
+  if (typeof hunt === "string" && hunt !== context)
+    return answer(hunt, [action("transfer", `${destination} XML ${context}`)]);
   const dispatch = async (type: string, id: string | null) => {
     const number = await destinationNumber(org, type, id);
     if (type === "voicemail") {
@@ -186,7 +207,7 @@ export async function handleDialplan(
       action("lua", `destination.lua ${domain} ${type} ${number ?? "-"}`),
     ]);
   };
-  if (peer)
+  if (peer && !forwarded)
     return did ? dispatch(did.destinationType, did.destinationId) : NOT_FOUND;
 
   const routes = await db
@@ -208,7 +229,22 @@ export async function handleDialplan(
       a.route.priority - b.route.priority,
   );
   const outbound = async (emergency: boolean): Promise<string | null> => {
-    if (!authenticated) return null;
+    if (!authenticated && !forwarded) return null;
+    const placedBy = forwarded ? forwardFrom : caller;
+    // Same resolution as the cached call state xml_handler.lua reads (I03).
+    const callerExt = /^[0-9A-Za-z_.-]+$/.test(placedBy)
+      ? await db.query.extension.findFirst({
+          where: and(
+            eq(extension.organizationId, org),
+            eq(extension.number, placedBy),
+            eq(extension.enabled, true),
+          ),
+        })
+      : undefined;
+    const identity =
+      callerExt || forwarded
+        ? outboundCallerId(callerExt, tenant)
+        : { callerIdName: null, callerIdNumber: null };
     for (const { route, carrier } of routes) {
       if (
         route.isEmergency !== emergency ||
@@ -231,7 +267,10 @@ export async function handleDialplan(
       return result([
         action("set", `sip_h_X-Tenant-ID=${org}`),
         action("set", `sip_h_X-Tenant-Domain=${domain}`),
-        action("set", `sip_h_X-Auth-User=${caller}`),
+        action(
+          "set",
+          `sip_h_X-Auth-User=${callerExt ? placedBy : forwarded ? "" : caller}`,
+        ),
         action("unset", "sip_h_X-Emergency"),
         action("unset", "sip_h_X-Stir-Sign"),
         ...(tenant.stirShakenEnabled
@@ -249,20 +288,21 @@ export async function handleDialplan(
           "set",
           `sip_h_X-Trunk-Target=${host}:${carrier.port};transport=${carrier.transport}`,
         ),
-        ...(route.callerIdOverride
-          ? [
-              action(
-                "set",
-                `effective_caller_id_number=${route.callerIdOverride}`,
-              ),
-            ]
-          : []),
+        ...callerIdActions(
+          identity.callerIdName,
+          route.callerIdOverride || identity.callerIdNumber,
+        ),
         action("set", "hangup_after_bridge=true"),
         action("bridge", `sofia/external/${number}@${env.kamEgress}`),
       ]);
     }
     return null;
   };
+  // Route override, else the extension's, else the tenant default; unset leaves the call's own.
+  const callerIdActions = (name: string | null, number: string | null) => [
+    ...(name ? [action("set", `effective_caller_id_name=${name}`)] : []),
+    ...(number ? [action("set", `effective_caller_id_number=${number}`)] : []),
+  ];
   const emergency = await outbound(true);
   if (emergency) return emergency;
   if (destination === "*97" || destination === "*98")

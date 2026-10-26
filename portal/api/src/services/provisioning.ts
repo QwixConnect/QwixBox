@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { member, organization, tenantSettings, user } from "../db/schema";
 import { unsafeTenantSettings } from "../lib/dialplan-safe";
+import { enqueue } from "./projections";
 
 export async function provisionTenant(input: {
   name: string;
@@ -70,10 +71,18 @@ export async function provisionTenant(input: {
         userId: owner.id,
         role: "owner",
       });
+    // Recorded with the tenant itself (R06): a provisioned tenant cannot exist without its
+    // domain and cache publication being queued. Repeats re-publish, which is how a rerun
+    // reconciles.
+    const projectionKeys = await enqueue(tx, orgId, [
+      { kind: "domain" },
+      { kind: "cache", target: "all" },
+    ]);
     return {
       organizationId: orgId,
       domain: existing?.sipDomain ?? input.domain,
       existing: !!existing,
+      projectionKeys,
     };
   });
 }

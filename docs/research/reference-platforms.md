@@ -1,4 +1,10 @@
-# Reference Projects & Cross-Platform Analysis
+# Reference platforms — historical comparison
+
+Snapshot retained from the 2026-10-24 planning work; classified as research on 2026-10-25.
+This is not a current capability, security, licensing or release comparison. FS PBX/OpenWeb PBX
+claims below lack the pinned evidence of the separate [FusionPBX review](fusionpbx.md) and need
+upstream revalidation before adoption. QwixBox implementation status is in [status](../status.md)
+and [issues](../issues.md); the comparison below must not override those records.
 
 ## Reference Links
 
@@ -12,7 +18,8 @@
   - Website: https://openwebpbx.com/
   - GitHub: https://github.com/embire2/openwebpbx
 
-> **Companion Implementation Plan:** See **[comprehensive-implementation-plan.md](comprehensive-implementation-plan.md)** (authoritative, re-checked against the code on 2026-10-24) and its summary **[missing-features-implementation.md](missing-features-implementation.md)** for the concrete engineering specification to implement missing features, replace QwixBox's mock-backed portal screens, and adopt best practices from these three platforms.
+> Proposed feature architecture is retained in [implementation design](../design/implementation-plan.md).
+> Its duplicate summary was retired. All feature proposals need source and runtime validation.
 
 ---
 

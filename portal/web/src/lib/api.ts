@@ -1,5 +1,3 @@
-import { seedData } from "../../mock/data";
-
 const BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 export class ApiError extends Error {
@@ -73,16 +71,33 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
-// Fallback helper for roadmap preview screens when connected to a live backend
-// where those endpoints are not yet implemented (returns 404).
-const fallbackCache = seedData();
-async function getWithFallback<T>(path: string, tableKey: string): Promise<T> {
+/**
+ * A preview screen's collection route returned 404: the server has no backend for the feature.
+ * This used to be answered with seed fixtures, which presented invented records - E911 addresses
+ * among them - as if the server held them. The local mock serves these routes itself, so mock
+ * mode needs no client-side fallback either.
+ */
+export class FeatureUnavailableError extends ApiError {
+  constructor(path: string) {
+    super(
+      404,
+      "Not available on this server",
+      `${path} is not implemented by this API. The screen is a preview of planned work.`,
+    );
+    this.name = "FeatureUnavailableError";
+  }
+}
+
+/** True when a query failed because the server has no backend for the feature. */
+export function isUnavailable(error: unknown): boolean {
+  return error instanceof FeatureUnavailableError;
+}
+
+async function getPreview<T>(path: string): Promise<T> {
   try {
     return await api.get<T>(path);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      return (fallbackCache[tableKey] ?? []) as unknown as T;
-    }
+    if (err instanceof ApiError && err.status === 404) throw new FeatureUnavailableError(path);
     throw err;
   }
 }
@@ -359,6 +374,22 @@ export type Health = {
   database: boolean;
   redis: boolean;
   freeswitch: boolean;
+  projections?: { pending: number; failing: number } | null;
+};
+
+/** Saved changes not yet live in Redis/Kamailio; see portal/api/src/services/projections.ts. */
+export type ProjectionStatus = {
+  pending: number;
+  failing: number;
+  oldestPendingSeconds: number | null;
+  jobs: {
+    kind: string;
+    target: string;
+    attempts: number;
+    lastError: string | null;
+    createdAt: string;
+    nextAttemptAt: string;
+  }[];
 };
 
 // Roadmap / Mock-backed Feature Types
@@ -523,7 +554,14 @@ export type DeviceItem = {
   enabled: boolean;
 };
 
+/** Settings the server stores but does not enforce; see portal/api/src/lib/capabilities.ts. */
+export type Capabilities = {
+  unenforced: Record<string, Record<string, { inert: unknown; issue: string; reason: string }>>;
+  stirSigning: boolean;
+};
+
 export const endpoints = {
+  capabilities: () => api.get<Capabilities>("/capabilities"),
   health: () => api.get<Health>("/../health"),
   tenant: () => api.get<TenantSettings>("/tenant"),
   updateTenant: (body: TenantUpdate) => api.patch<TenantSettings>("/tenant", body),
@@ -533,6 +571,7 @@ export const endpoints = {
       body,
     ),
   rebuildCache: () => api.post<{ status: string }>("/tenant/rebuild-cache"),
+  projections: () => api.get<ProjectionStatus>("/tenant/projections"),
   addMember: (body: { email: string; role?: string }) =>
     api.post<{ id: string; userId: string; email: string; role: string; status: string }>(
       "/tenant/members",
@@ -639,67 +678,67 @@ export const endpoints = {
     return `${BASE}/cdr/export${qs ? `?${qs}` : ""}`;
   },
 
-  // Roadmap / Mock-Backed Endpoints (with fallback for unimplemented live API routes)
-  voicemails: () => getWithFallback<VoicemailItem[]>("/voicemails", "voicemails"),
+  // Preview screens: no live API route yet, so production reports FeatureUnavailableError.
+  voicemails: () => getPreview<VoicemailItem[]>("/voicemails"),
   deleteVoicemail: (id: string) => api.delete<void>(`/voicemails/${id}`),
   markVoicemailRead: (id: string) => api.patch<VoicemailItem>(`/voicemails/${id}`, { unread: false }),
 
-  recordings: () => getWithFallback<CallRecordingItem[]>("/recordings", "recordings"),
+  recordings: () => getPreview<CallRecordingItem[]>("/recordings"),
   deleteRecording: (id: string) => api.delete<void>(`/recordings/${id}`),
 
-  smsThreads: () => getWithFallback<SmsThread[]>("/sms-threads", "sms-threads"),
+  smsThreads: () => getPreview<SmsThread[]>("/sms-threads"),
   sendSmsMessage: (threadId: string, text: string) =>
     api.post<SmsThread>(`/sms-threads/${threadId}/messages`, { text }),
   createSmsThread: (body: Partial<SmsThread>) => api.post<SmsThread>("/sms-threads", body),
 
-  smsOptOuts: () => getWithFallback<SmsOptOut[]>("/sms-opt-outs", "sms-opt-outs"),
+  smsOptOuts: () => getPreview<SmsOptOut[]>("/sms-opt-outs"),
   createSmsOptOut: (body: { phoneNumber: string; reason: string }) =>
     api.post<SmsOptOut>("/sms-opt-outs", body),
   deleteSmsOptOut: (id: string) => api.delete<void>(`/sms-opt-outs/${id}`),
 
-  contacts: () => getWithFallback<ContactItem[]>("/contacts", "contacts"),
+  contacts: () => getPreview<ContactItem[]>("/contacts"),
   createContact: (body: Partial<ContactItem>) => api.post<ContactItem>("/contacts", body),
   updateContact: (id: string, body: Partial<ContactItem>) =>
     api.patch<ContactItem>(`/contacts/${id}`, body),
   deleteContact: (id: string) => api.delete<void>(`/contacts/${id}`),
 
-  queues: () => getWithFallback<CallQueueItem[]>("/queues", "queues"),
+  queues: () => getPreview<CallQueueItem[]>("/queues"),
   createQueue: (body: Partial<CallQueueItem>) => api.post<CallQueueItem>("/queues", body),
   updateQueue: (id: string, body: Partial<CallQueueItem>) =>
     api.patch<CallQueueItem>(`/queues/${id}`, body),
   deleteQueue: (id: string) => api.delete<void>(`/queues/${id}`),
 
-  queueAgents: () => getWithFallback<QueueAgentItem[]>("/queue-agents", "queue-agents"),
+  queueAgents: () => getPreview<QueueAgentItem[]>("/queue-agents"),
   updateQueueAgent: (id: string, body: Partial<QueueAgentItem>) =>
     api.patch<QueueAgentItem>(`/queue-agents/${id}`, body),
 
   emergencyLocations: () =>
-    getWithFallback<EmergencyLocationItem[]>("/emergency-locations", "emergency-locations"),
+    getPreview<EmergencyLocationItem[]>("/emergency-locations"),
   createEmergencyLocation: (body: Partial<EmergencyLocationItem>) =>
     api.post<EmergencyLocationItem>("/emergency-locations", body),
   updateEmergencyLocation: (id: string, body: Partial<EmergencyLocationItem>) =>
     api.patch<EmergencyLocationItem>(`/emergency-locations/${id}`, body),
   deleteEmergencyLocation: (id: string) => api.delete<void>(`/emergency-locations/${id}`),
 
-  conferences: () => getWithFallback<ConferenceRoomItem[]>("/conferences", "conferences"),
+  conferences: () => getPreview<ConferenceRoomItem[]>("/conferences"),
   createConference: (body: Partial<ConferenceRoomItem>) =>
     api.post<ConferenceRoomItem>("/conferences", body),
   updateConference: (id: string, body: Partial<ConferenceRoomItem>) =>
     api.patch<ConferenceRoomItem>(`/conferences/${id}`, body),
   deleteConference: (id: string) => api.delete<void>(`/conferences/${id}`),
 
-  parkingLots: () => getWithFallback<ParkingLotItem[]>("/parking-lots", "parking-lots"),
+  parkingLots: () => getPreview<ParkingLotItem[]>("/parking-lots"),
   createParkingLot: (body: Partial<ParkingLotItem>) =>
     api.post<ParkingLotItem>("/parking-lots", body),
   updateParkingLot: (id: string, body: Partial<ParkingLotItem>) =>
     api.patch<ParkingLotItem>(`/parking-lots/${id}`, body),
 
-  musicOnHold: () => getWithFallback<MusicOnHoldItem[]>("/music-on-hold", "music-on-hold"),
+  musicOnHold: () => getPreview<MusicOnHoldItem[]>("/music-on-hold"),
   createMusicOnHold: (body: Partial<MusicOnHoldItem>) =>
     api.post<MusicOnHoldItem>("/music-on-hold", body),
   deleteMusicOnHold: (id: string) => api.delete<void>(`/music-on-hold/${id}`),
 
-  devices: () => getWithFallback<DeviceItem[]>("/devices", "devices"),
+  devices: () => getPreview<DeviceItem[]>("/devices"),
   createDevice: (body: Partial<DeviceItem>) => api.post<DeviceItem>("/devices", body),
   updateDevice: (id: string, body: Partial<DeviceItem>) =>
     api.patch<DeviceItem>(`/devices/${id}`, body),

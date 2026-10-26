@@ -119,6 +119,8 @@ export function MockControls() {
 							{ value: "empty", label: "Empty data" },
 							{ value: "error", label: "API errors" },
 							{ value: "slow", label: "Slow requests" },
+							{ value: "unavailable", label: "Preview APIs missing" },
+							{ value: "unpublished", label: "Changes not live" },
 						]}
 						size="xs"
 					/>

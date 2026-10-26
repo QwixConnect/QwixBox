@@ -27,6 +27,7 @@ import {
 } from "../../components/Icons";
 import {
 	DeleteButton,
+	ErrorAlert,
 	InitialsAvatar,
 	MockFeatureBanner,
 	PageHeader,
@@ -35,15 +36,15 @@ import {
 	SurfaceCard,
 	WaveformPlayer,
 } from "../../components/Resource";
-import { useWebphone } from "../../components/WebphoneDrawer";
-import { endpoints, type VoicemailItem } from "../../lib/api";
+import { useWebphone } from "../../components/webphone-context";
+import { endpoints, isUnavailable, type VoicemailItem } from "../../lib/api";
 
 export const Route = createFileRoute("/_app/messages")({
 	component: MessagesPage,
 });
 
 function MessagesPage() {
-	const { startCall } = useWebphone();
+	const phone = useWebphone();
 	const qc = useQueryClient();
 	const [activeTab, setActiveTab] = useState<
 		"messages" | "voicemail" | "recordings" | "optouts"
@@ -161,20 +162,22 @@ function MessagesPage() {
 				title={activeTab === "voicemail" ? "Voicemail" : "Messages"}
 				subtitle="SMS/MMS business messaging, transcribed voicemail inbox, and call recordings."
 				actions={
-					<ActionIcon
-						variant="default"
-						radius="xl"
-						size={44}
-						onClick={() => setComposeOpen(true)}
-						aria-label="New message"
-						style={{
-							background: "var(--qb-surface)",
-							border: "none",
-							color: "var(--qb-text-primary)",
-						}}
-					>
-						<IconCompose size={20} />
-					</ActionIcon>
+					isUnavailable(threadsQuery.error) ? null : (
+						<ActionIcon
+							variant="default"
+							radius="xl"
+							size={44}
+							onClick={() => setComposeOpen(true)}
+							aria-label="New message"
+							style={{
+								background: "var(--qb-surface)",
+								border: "none",
+								color: "var(--qb-text-primary)",
+							}}
+						>
+							<IconCompose size={20} />
+						</ActionIcon>
+					)
 				}
 			/>
 
@@ -234,9 +237,7 @@ function MessagesPage() {
 												style={{
 													padding: "16px 16px",
 													borderRadius: 14,
-													background: selected
-														? "var(--qb-bg)"
-														: "transparent",
+													background: selected ? "var(--qb-bg)" : "transparent",
 													borderTop:
 														idx === 0 || selected
 															? "none"
@@ -356,25 +357,27 @@ function MessagesPage() {
 												</Text>
 											</Box>
 										</Group>
-										<ActionIcon
-											variant="default"
-											radius="xl"
-											size={42}
-											onClick={() =>
-												startCall(
-													activeThread.phoneNumber,
-													activeThread.contactName,
-												)
-											}
-											aria-label={`Call ${activeThread.contactName}`}
-											style={{
-												background: "var(--qb-bg)",
-												border: "1px solid var(--qb-separator)",
-												color: "var(--qb-text-primary)",
-											}}
-										>
-											<IconPhone size={18} />
-										</ActionIcon>
+										{phone && (
+											<ActionIcon
+												variant="default"
+												radius="xl"
+												size={42}
+												onClick={() =>
+													phone.startCall(
+														activeThread.phoneNumber,
+														activeThread.contactName,
+													)
+												}
+												aria-label={`Call ${activeThread.contactName}`}
+												style={{
+													background: "var(--qb-bg)",
+													border: "1px solid var(--qb-separator)",
+													color: "var(--qb-text-primary)",
+												}}
+											>
+												<IconPhone size={18} />
+											</ActionIcon>
+										)}
 									</Group>
 
 									{/* Message List */}
@@ -400,9 +403,7 @@ function MessagesPage() {
 													gap={4}
 												>
 													<Box
-														className={
-															isOut ? "qb-bubble-out" : "qb-bubble-in"
-														}
+														className={isOut ? "qb-bubble-out" : "qb-bubble-in"}
 													>
 														{msg.text}
 													</Box>
@@ -584,23 +585,25 @@ function MessagesPage() {
 													>
 														Speaker
 													</Button>
-													<Button
-														variant="default"
-														radius="xl"
-														leftSection={<IconPhone size={16} />}
-														onClick={() =>
-															startCall(vm.callerNumber, vm.callerName)
-														}
-														styles={{
-															root: {
-																background: "var(--qb-bg)",
-																border: "none",
-																color: "var(--qb-text-primary)",
-															},
-														}}
-													>
-														Call back
-													</Button>
+													{phone && (
+														<Button
+															variant="default"
+															radius="xl"
+															leftSection={<IconPhone size={16} />}
+															onClick={() =>
+																phone.startCall(vm.callerNumber, vm.callerName)
+															}
+															styles={{
+																root: {
+																	background: "var(--qb-bg)",
+																	border: "none",
+																	color: "var(--qb-text-primary)",
+																},
+															}}
+														>
+															Call back
+														</Button>
+													)}
 													<Button
 														variant="default"
 														radius="xl"
@@ -686,28 +689,31 @@ function MessagesPage() {
 			{/* SMS Opt-Out Registry */}
 			{activeTab === "optouts" && (
 				<Stack gap={16}>
-					<SurfaceCard p={24}>
-						<form
-							onSubmit={(e) => {
-								e.preventDefault();
-								if (!newOptOutNumber.trim()) return;
-								addOptOutMut.mutate();
-							}}
-						>
-							<Group align="flex-end" gap={12}>
-								<TextInput
-									label="Add E.164 Number to STOP / Opt-Out Suppression List"
-									placeholder="+14155550199"
-									value={newOptOutNumber}
-									onChange={(e) => setNewOptOutNumber(e.currentTarget.value)}
-									style={{ flex: 1 }}
-								/>
-								<Button type="submit" leftSection={<IconPlus size={16} />}>
-									Add Opt-Out
-								</Button>
-							</Group>
-						</form>
-					</SurfaceCard>
+					<ErrorAlert error={optOutsQuery.error} />
+					{!isUnavailable(optOutsQuery.error) && (
+						<SurfaceCard p={24}>
+							<form
+								onSubmit={(e) => {
+									e.preventDefault();
+									if (!newOptOutNumber.trim()) return;
+									addOptOutMut.mutate();
+								}}
+							>
+								<Group align="flex-end" gap={12}>
+									<TextInput
+										label="Add E.164 Number to STOP / Opt-Out Suppression List"
+										placeholder="+14155550199"
+										value={newOptOutNumber}
+										onChange={(e) => setNewOptOutNumber(e.currentTarget.value)}
+										style={{ flex: 1 }}
+									/>
+									<Button type="submit" leftSection={<IconPlus size={16} />}>
+										Add Opt-Out
+									</Button>
+								</Group>
+							</form>
+						</SurfaceCard>
+					)}
 
 					<div className="qb-table-wrap">
 						<Table highlightOnHover>

@@ -18,11 +18,11 @@ const FLOW = [
 ];
 
 const STATUS = [
-  ["Installs and configures", "proven", "28 steps from bare Debian, idempotent, 38 postflight checks"],
-  ["Registration", "proven", "A softphone completes digest auth against the projected HA1"],
-  ["Call setup", "proven", "Extension-to-extension, inbound DID and outbound-to-carrier"],
+  ["Installs and configures", "proven", "Historical Debian arm64 install; current safety regressions pass"],
+  ["Registration", "proven", "Current Kamailio digest fixture passes; historical softphone registration"],
+  ["Call setup", "proven", "Historical signalling only; current carrier/media acceptance remains owed"],
   ["Two-way audio", "open", "rtpengine is wired and answers; no call has been listened to end to end"],
-  ["Admin portal", "proven", "Extensions, trunks, routing, call flows, calls, faxes, users, audit"],
+  ["Admin portal", "proven", "Core CRUD implemented; missing-feature previews still show sample data"],
   ["Voicemail, fax, IVR digits", "open", "Written and deployed; each needs the media path first"],
 ];
 ---
@@ -141,7 +141,7 @@ const STATUS = [
         <div>
           <dt>Telephony</dt>
           <dd>
-            Extensions with encrypted SIP credentials, trunks with IP or registration auth,
+            Extensions with encrypted SIP credentials, IP-authenticated trunks; enabled registration trunks are unavailable,
             inbound DID routing, outbound routing with regex patterns and digit manipulation, ring
             groups with failover, IVR menus, and time conditions for business hours and holidays.
           </dd>

@@ -5,6 +5,10 @@ import { and, eq, type SQL } from "drizzle-orm";
 import type { PgTable, PgColumn } from "drizzle-orm/pg-core";
 import { db } from "../db";
 import { recordAudit } from "./audit";
+import { enqueue, runNow, type Projection } from "../services/projections";
+import { unenforcedWrite } from "./capabilities";
+import { claimNumber, dialableTable } from "./numbers";
+import { env } from "../env";
 import {
   actionForMethod,
   requirePermission,
@@ -30,11 +34,14 @@ export type CrudOptions<T extends PgTable> = {
 
   beforeDelete?: (organizationId: string, row: Row) => Promise<string | null>;
 
-  afterChange?: (
+  // Required, for the same reason as `permission`: what a change must publish to Redis and
+  // Kamailio. The jobs commit in the write's own transaction (R06), so a resource cannot be added
+  // that silently skips the outbox. A resource with nothing to publish returns [] explicitly.
+  project: (
     organizationId: string,
     row: Row,
-    action: string,
-  ) => Promise<void>;
+    action: "create" | "update" | "delete",
+  ) => readonly Projection[];
 
   validate?: (
     body: Row,
@@ -69,6 +76,7 @@ function pick(body: Row, writable: readonly string[]): Row {
 
 export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
   const app = new Hono<AppEnv>();
+  const dialable = dialableTable(opts.table);
   app.use("*", requireTenant);
 
   app.use("*", async (c, next) => {
@@ -77,11 +85,6 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
   });
 
   const present = opts.present ?? ((r: Row) => r);
-
-  const after = async (orgId: string, row: Row, action: string) => {
-    if (!opts.afterChange) return;
-    await opts.afterChange(orgId, row, action);
-  };
 
   const scoped = (orgId: string, extra?: SQL) =>
     extra ? and(eq(opts.orgColumn, orgId), extra) : eq(opts.orgColumn, orgId);
@@ -120,6 +123,13 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
     }
     const unsafe = unsafeDialplanFields(body);
     if (unsafe) return c.json({ error: unsafe }, 400);
+    const unenforced = unenforcedWrite(
+      opts.entityType,
+      body,
+      undefined,
+      env.stirSigning,
+    );
+    if (unenforced) return c.json({ error: unenforced }, 400);
     if (opts.validate) {
       const problem = await opts.validate(body, organizationId);
       if (problem) return c.json({ error: problem }, 400);
@@ -130,14 +140,26 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
       id: randomUUID(),
       organizationId,
     };
-    const inserted = (await db
-      .insert(opts.table)
-      .values(values as never)
-      .returning()) as Row[];
-    const row = inserted[0];
+    const { row, jobs } = await db.transaction(async (tx) => {
+      // Any table in the dialable registry, without an opt-in that could be forgotten (I19).
+      const number = (values as Row).number;
+      if (dialable && typeof number === "string")
+        await claimNumber(tx, organizationId, number);
+      const [row] = (await tx
+        .insert(opts.table)
+        .values(values as never)
+        .returning()) as Row[];
+      if (!row) return { row, jobs: [] };
+      const jobs = await enqueue(
+        tx,
+        organizationId,
+        opts.project(organizationId, row, "create"),
+      );
+      return { row, jobs };
+    });
     if (!row) return c.json({ error: "Insert failed" }, 500);
 
-    await after(organizationId, row, "create");
+    await runNow(jobs);
     await recordAudit(c, {
       action: "create",
       entityType: opts.entityType,
@@ -160,6 +182,13 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
     const body = await c.req.json<Row>().catch(() => ({}) as Row);
     const unsafe = unsafeDialplanFields(body);
     if (unsafe) return c.json({ error: unsafe }, 400);
+    const unenforced = unenforcedWrite(
+      opts.entityType,
+      body,
+      before as Row,
+      env.stirSigning,
+    );
+    if (unenforced) return c.json({ error: unenforced }, 400);
     if (opts.validate) {
       const problem = await opts.validate(body, organizationId, before as Row);
       if (problem) return c.json({ error: problem }, 400);
@@ -168,15 +197,28 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
     const patch = pick(body, opts.writable);
     if (Object.keys(patch).length === 0) return c.json(present(before as Row));
 
-    const updated = (await db
-      .update(opts.table)
-      .set(patch as never)
-      .where(scoped(organizationId, eq(opts.idColumn, id)))
-      .returning()) as Row[];
-    const row = updated[0];
+    const { row, jobs } = await db.transaction(async (tx) => {
+      if (dialable && typeof patch.number === "string")
+        await claimNumber(tx, organizationId, patch.number, {
+          table: opts.table,
+          id,
+        });
+      const [row] = (await tx
+        .update(opts.table)
+        .set(patch as never)
+        .where(scoped(organizationId, eq(opts.idColumn, id)))
+        .returning()) as Row[];
+      if (!row) return { row, jobs: [] };
+      const jobs = await enqueue(
+        tx,
+        organizationId,
+        opts.project(organizationId, row, "update"),
+      );
+      return { row, jobs };
+    });
     if (!row) return c.json({ error: "Update failed" }, 500);
 
-    await after(organizationId, row, "update");
+    await runNow(jobs);
     await recordAudit(c, {
       action: "update",
       entityType: opts.entityType,
@@ -199,11 +241,18 @@ export function crudRoutes<T extends PgTable>(opts: CrudOptions<T>) {
 
     const conflict = await opts.beforeDelete?.(organizationId, before as Row);
     if (conflict) return c.json({ error: conflict }, 409);
-    await db
-      .delete(opts.table)
-      .where(scoped(organizationId, eq(opts.idColumn, id)));
+    const jobs = await db.transaction(async (tx) => {
+      await tx
+        .delete(opts.table)
+        .where(scoped(organizationId, eq(opts.idColumn, id)));
+      return enqueue(
+        tx,
+        organizationId,
+        opts.project(organizationId, before as Row, "delete"),
+      );
+    });
 
-    await after(organizationId, before as Row, "delete");
+    await runNow(jobs);
     await recordAudit(c, {
       action: "delete",
       entityType: opts.entityType,

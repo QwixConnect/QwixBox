@@ -9,13 +9,16 @@ import {
   keys,
 } from "./services/redis";
 import { rebuildTenant } from "./services/cache";
+import { startProjectionWorker, withTenantLock } from "./services/projections";
 
 async function warmCache(): Promise<void> {
   const tenants = await db.query.tenantSettings.findMany();
   let failures = 0;
   for (const tenant of tenants) {
     try {
-      await rebuildTenant(tenant.organizationId);
+      await withTenantLock(tenant.organizationId, () =>
+        rebuildTenant(tenant.organizationId),
+      );
     } catch (error) {
       failures++;
       console.warn(
@@ -68,6 +71,8 @@ void safeDel(keys.warmSentinel())
     console.warn("[cache] startup refresh failed:", (error as Error).message);
   });
 setInterval(warmIfCacheLost, WARM_CHECK_INTERVAL_MS).unref();
+// Drains queued projections now (work left by a previous run or a crash) and then every 2s.
+startProjectionWorker();
 
 export default {
   port: env.port,

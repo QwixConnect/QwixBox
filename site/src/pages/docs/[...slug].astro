@@ -19,7 +19,7 @@ const title = TITLES[entry.id] ?? entry.id;
       <p class="eyebrow"><a href="/docs/">Docs</a> / {title}</p>
       <article class="prose"><Content /></article>
       <p class="src">
-        <a href={`https://github.com/QwixConnect/QwixBox/blob/main/docs/${entry.id}.md`}>
+        <a href={`https://github.com/QwixConnect/QwixBox/blob/main/docs/${entry.id === "readme" ? "README" : entry.id}.md`}>
           Edit this page on GitHub
         </a>
       </p>

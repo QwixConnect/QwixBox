@@ -566,6 +566,37 @@ export const auditLog = pgTable(
   ],
 );
 
+/**
+ * Durable outbox for the Redis/Kamailio projections (R06). A row is written in the same
+ * transaction as the change it publishes, so a commit cannot happen without its follow-up work
+ * being recorded. Jobs carry no snapshot of the data: the runner re-reads current state, which
+ * makes every job idempotent and lets one row stand for any number of changes to the same thing.
+ * See src/services/projections.ts.
+ */
+export const projectionJob = pgTable(
+  "projection_job",
+  {
+    // `<kind>:<target>`. Re-enqueueing the same key bumps `requested` instead of adding a row.
+    key: text("key").primaryKey(),
+    kind: text("kind").notNull(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    target: text("target").notNull(),
+    // What a deleted row can no longer tell the runner (an extension's number and domain).
+    payload: jsonb("payload"),
+    // Incremented on every enqueue. A run removes the row only if this is unchanged, so a change
+    // committed while the job was running is never lost.
+    requested: integer("requested").default(1).notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    lastError: text("last_error"),
+    runAfter: timestamp("run_after").defaultNow().notNull(),
+    lockedUntil: timestamp("locked_until"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [index("projection_job_run_after_idx").on(table.runAfter)],
+);
+
 export const tenantSettingsRelations = relations(tenantSettings, ({ one }) => ({
   organization: one(organization, {
     fields: [tenantSettings.organizationId],

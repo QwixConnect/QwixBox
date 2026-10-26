@@ -42,6 +42,8 @@ config_ensure_secret ENCRYPTION_KEY 48
 config_ensure_secret AUTH_SECRET 48
 config_ensure_secret FS_XML_GATEWAY_SECRET 32
 
+# shellcheck disable=SC2034  # read by name from the template
+STIR_SIGNING="$(stir_signing_ready)"
 deploy_template "$TPL/env" "$API_DIR/.env" 0640 "root:$API_USER" || true
 
 apt_install pcre2-utils
@@ -53,11 +55,16 @@ bun_as "$API_USER" "$API_DIR" bun install --frozen-lockfile \
 if grep -q '"drizzle-kit"' "$API_DIR/package.json" 2>/dev/null && [ -f "$API_DIR/drizzle.config.ts" ]; then
   bun_as "$API_USER" "$API_DIR" bun run src/cli/check-did-ownership.ts \
     || die "Duplicate DID ownership must be resolved before applying this upgrade."
+  bun_as "$API_USER" "$API_DIR" bun run src/cli/check-schema-tables.ts \
+    || die "Unknown tables would make the schema push prompt or drop data. See the message above."
   info "Applying database migrations"
   bun_as "$API_USER" "$API_DIR" bun run db:push --force \
     || die "Database migration failed - not starting the API against a mismatched schema."
   bun_as "$API_USER" "$API_DIR" bun run src/cli/check-route-patterns.ts \
     || die "Outbound pattern audit failed. Review legacy routes before starting this upgrade."
+  # Warns only: duplicates predate I19 and both XML tiers resolve them the same way.
+  bun_as "$API_USER" "$API_DIR" bun run src/cli/check-dialable-numbers.ts \
+    || warn "Could not audit dialable numbers for duplicates."
   ok "Migrations applied"
 fi
 

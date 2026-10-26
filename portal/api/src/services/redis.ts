@@ -18,6 +18,14 @@ export const keys = {
   ringGroup: (domain: string, id: string) => `qwixbox:rg:${domain}:${id}`,
   ivr: (domain: string, id: string) => `qwixbox:ivr:${domain}:${id}`,
   timeCondition: (domain: string, id: string) => `qwixbox:tc:${domain}:${id}`,
+  didPattern: (domain: string) => `qwixbox:did:${domain}:*`,
+  // Published together by cacheCallFlows(): ring groups and IVRs share the num: index.
+  callFlowPatterns: (domain: string) => [
+    `qwixbox:rg:${domain}:*`,
+    `qwixbox:ivr:${domain}:*`,
+    `qwixbox:tc:${domain}:*`,
+    `qwixbox:num:${domain}:*`,
+  ],
   tenantPatterns: (domain: string) => [
     `qwixbox:dir:${domain}:*`,
     `qwixbox:did:${domain}:*`,
@@ -58,6 +66,59 @@ export async function safeDelPattern(pattern: string): Promise<number> {
     throw err;
   }
   return deleted;
+}
+
+// SET every new key, DEL every stale one, in one script: Redis runs it atomically, so a reader
+// (xml_handler.lua through mod_hiredis) sees the previous generation or the new one, never a
+// tenant with half its keys missing. KEYS[1..n] are set to ARGV[2..n+1]; the rest are deleted.
+const PUBLISH_SCRIPT = `
+local n = tonumber(ARGV[1])
+for i = 1, n do redis.call('SET', KEYS[i], ARGV[i + 1]) end
+for i = n + 1, #KEYS do redis.call('DEL', KEYS[i]) end
+return #KEYS`;
+
+/**
+ * Replace everything matching `patterns` (and the `exact` keys) with `entries`, atomically (R13).
+ * Keys that match but are absent from `entries` are deleted in the same step. Callers must hold
+ * the tenant's projection lock (src/services/projections.ts): the scan for stale keys happens
+ * before the script, and only serialised publishers make that safe.
+ */
+export async function publishGeneration(
+  patterns: readonly string[],
+  exact: readonly string[],
+  entries: ReadonlyMap<string, string>,
+): Promise<void> {
+  const existing = new Set(exact);
+  for (const pattern of patterns) {
+    let cursor = "0";
+    do {
+      const reply = (await redis.send("SCAN", [
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        "500",
+      ])) as [string, string[]];
+      cursor = reply[0];
+      for (const key of reply[1]) existing.add(key);
+    } while (cursor !== "0");
+  }
+  const setKeys = [...entries.keys()];
+  const stale = [...existing].filter((key) => !entries.has(key));
+  if (setKeys.length + stale.length === 0) return;
+  try {
+    await redis.send("EVAL", [
+      PUBLISH_SCRIPT,
+      String(setKeys.length + stale.length),
+      ...setKeys,
+      ...stale,
+      String(setKeys.length),
+      ...setKeys.map((key) => entries.get(key)!),
+    ]);
+  } catch (err) {
+    console.error(`[redis] publish failed:`, (err as Error).message);
+    throw err;
+  }
 }
 
 export async function safeSet(

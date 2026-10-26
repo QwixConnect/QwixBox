@@ -120,39 +120,6 @@ export const invitation = pgTable(
   (table) => [index("invitation_organization_id_idx").on(table.organizationId)],
 );
 
-export const apikey = pgTable(
-  "apikey",
-  {
-    id: text("id").primaryKey(),
-    name: text("name"),
-    start: text("start"),
-    prefix: text("prefix"),
-    key: text("key").notNull(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    refillInterval: text("refill_interval"),
-    refillAmount: text("refill_amount"),
-    lastRefillAt: timestamp("last_refill_at"),
-    enabled: boolean("enabled").default(true).notNull(),
-    rateLimitEnabled: boolean("rate_limit_enabled").default(true).notNull(),
-    rateLimitTimeWindow: text("rate_limit_time_window"),
-    rateLimitMax: text("rate_limit_max"),
-    requestCount: text("request_count"),
-    remaining: text("remaining"),
-    lastRequest: timestamp("last_request"),
-    expiresAt: timestamp("expires_at"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at")
-      .defaultNow()
-      .$onUpdate(() => new Date())
-      .notNull(),
-    permissions: text("permissions"),
-    metadata: text("metadata"),
-  },
-  (table) => [index("apikey_user_id_idx").on(table.userId)],
-);
-
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),

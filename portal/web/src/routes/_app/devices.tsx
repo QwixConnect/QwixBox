@@ -23,7 +23,7 @@ import {
 	SegmentedTabs,
 	SurfaceCard,
 } from "../../components/Resource";
-import { endpoints } from "../../lib/api";
+import { endpoints, isUnavailable } from "../../lib/api";
 
 export const Route = createFileRoute("/_app/devices")({
 	component: DevicesPage,
@@ -83,12 +83,14 @@ function DevicesPage() {
 				title="Devices & Provisioning"
 				subtitle="SIP desk phones, iQFone mobile clients, WebRTC browsers, and zero-touch MAC provisioning."
 				actions={
-					<Button
-						leftSection={<IconPlus size={17} />}
-						onClick={() => setModalOpen(true)}
-					>
-						Provision Device
-					</Button>
+					isUnavailable(devicesQuery.error) ? null : (
+						<Button
+							leftSection={<IconPlus size={17} />}
+							onClick={() => setModalOpen(true)}
+						>
+							Provision Device
+						</Button>
+					)
 				}
 			/>
 

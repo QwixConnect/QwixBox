@@ -74,7 +74,16 @@ function M.api_post(path, payload)
   return (reply and reply:find('"ok"%s*:%s*true') ~= nil), reply
 end
 
-function M.go(session, domain, dtype, did, depth)
+-- The forwarding decision below needs the API (D5): with it down, refuse rather than guess.
+function M.api_healthy()
+  local base = os.getenv("QWIXBOX_API_BASE") or "http://127.0.0.1:3000"
+  local ok, reply = pcall(function() return freeswitch.API():execute("curl", base .. "/health timeout 2") end)
+  return ok and reply ~= nil and reply:find('"database"%s*:%s*true') ~= nil
+end
+
+-- `via` is the extension whose forwarding setting this is, if any: it authorizes an external
+-- destination and is the identity the forwarded leg presents and is counted against.
+function M.go(session, domain, dtype, did, depth, via)
   depth = (tonumber(depth) or tonumber(session:getVariable("qwixbox_depth")) or 0) + 1
   session:setVariable("qwixbox_depth", tostring(depth))
   if depth > MAX_DEPTH then
@@ -126,6 +135,27 @@ function M.go(session, domain, dtype, did, depth)
       M.log("qwixbox", "err", "no context on the channel - cannot route %s externally", tostring(did))
       session:hangup("EXCHANGE_ROUTING_ERROR")
       return
+    end
+    -- A forward is the tenant's decision, never the caller's (R11). These variables authorize
+    -- exactly this number on the next dialplan lookup, which is how a carrier-originated call
+    -- reaches outbound routing at all. Only this script sets them: SIP headers arrive as sip_h_*.
+    if session:getVariable("sip_h_X-Trusted-Peer") == "1" and not M.api_healthy() then
+      M.log("qwixbox", "err", "API unavailable - refusing to forward a carrier call to %s", tostring(did))
+      session:execute("pre_answer", "")
+      session:execute("playback", "tone_stream://%(250,250,480,620);loops=4")
+      -- Explicit: FreeSWITCH sends 480 for a SERVICE_UNAVAILABLE hangup, which tells a carrier
+      -- the user is away. Kamailio forwards this 503 as 500 (RFC 3261 16.7); either 5xx lets
+      -- the carrier try another route.
+      session:execute("respond", "503 Service Unavailable")
+      session:hangup("SERVICE_UNAVAILABLE")
+      return
+    end
+    session:setVariable("qwixbox_forward_to", tostring(did))
+    session:setVariable("qwixbox_forward_domain", domain)
+    if via and tostring(via):match("^[%w_.-]+$") then
+      session:setVariable("qwixbox_forward_from", tostring(via))
+    else
+      session:execute("unset", "qwixbox_forward_from")
     end
     session:execute("transfer", string.format("%s XML %s", tostring(did), context))
 

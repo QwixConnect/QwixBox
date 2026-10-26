@@ -30,6 +30,7 @@ import {
 	SurfaceCard,
 } from "../../components/Resource";
 import { endpoints, type IvrMenu, type RingGroup } from "../../lib/api";
+import { notifyFailed } from "../../lib/notify";
 
 export const Route = createFileRoute("/_app/call-flows")({
 	component: CallFlowsPage,
@@ -128,6 +129,7 @@ function RingGroupsSection() {
 	const remove = useMutation({
 		mutationFn: (id: string) => endpoints.deleteRingGroup(id),
 		onSuccess: () => qc.invalidateQueries({ queryKey: ["ring-groups"] }),
+		onError: (error) => notifyFailed("Could not delete ring group", error),
 	});
 	const toggleEnabled = useMutation({
 		mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
@@ -451,6 +453,7 @@ function IvrSection() {
 	const remove = useMutation({
 		mutationFn: (id: string) => endpoints.deleteIvrMenu(id),
 		onSuccess: () => qc.invalidateQueries({ queryKey: ["ivr-menus"] }),
+		onError: (error) => notifyFailed("Could not delete IVR", error),
 	});
 	const toggleEnabled = useMutation({
 		mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
@@ -789,6 +792,7 @@ function TimeConditionsSection() {
 	const remove = useMutation({
 		mutationFn: (id: string) => endpoints.deleteTimeCondition(id),
 		onSuccess: () => qc.invalidateQueries({ queryKey: ["time-conditions"] }),
+		onError: (error) => notifyFailed("Could not delete time condition", error),
 	});
 	const toggleEnabled = useMutation({
 		mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>

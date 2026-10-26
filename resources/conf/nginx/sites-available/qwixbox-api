@@ -51,7 +51,19 @@ server {
         return 404;
     }
 
-    location ~ ^/api/(auth|login|token) {
+    # Routine reads the signed-in portal makes on every load, tab and focus change. Under the
+    # strict zone four open tabs exhausted it within seconds and the portal 503'd (I21). This is
+    # an allowlist of exact paths on purpose: anything not named here - sign-in, password reset
+    # or change, and any endpoint a later better-auth release adds - falls to the strict location
+    # below. Regex locations match $uri, so a query string cannot smuggle a path in. better-auth
+    # applies its own per-path limits behind both (rateLimit in portal/api/src/auth.ts).
+    location ~ ^/api/auth/(get-session|sign-out|organization/(list|set-active|get-active-member|get-active-member-role|list-members|get-full-organization))$ {
+        limit_req zone=api_general burst=40 nodelay;
+        proxy_pass http://127.0.0.1:@API_PORT@;
+        include /etc/nginx/proxy_params;
+    }
+
+    location ~ ^/api/auth/ {
         limit_req zone=api_auth burst=5 nodelay;
         proxy_pass http://127.0.0.1:@API_PORT@;
         include /etc/nginx/proxy_params;

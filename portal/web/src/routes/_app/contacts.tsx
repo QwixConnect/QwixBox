@@ -29,8 +29,8 @@ import {
 	SegmentedTabs,
 	SurfaceCard,
 } from "../../components/Resource";
-import { useWebphone } from "../../components/WebphoneDrawer";
-import { type ContactItem, endpoints } from "../../lib/api";
+import { useWebphone } from "../../components/webphone-context";
+import { type ContactItem, endpoints, isUnavailable } from "../../lib/api";
 
 export const Route = createFileRoute("/_app/contacts")({
 	component: ContactsPage,
@@ -39,7 +39,7 @@ export const Route = createFileRoute("/_app/contacts")({
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("");
 
 function ContactsPage() {
-	const { startCall } = useWebphone();
+	const webphone = useWebphone();
 	const navigate = useNavigate();
 	const qc = useQueryClient();
 
@@ -136,7 +136,8 @@ function ContactsPage() {
 	const grouped = useMemo(() => {
 		const map = new Map<string, ContactItem[]>();
 		for (const c of filteredContacts) {
-			const sortKey = (c.lastName || c.firstName || "#")[0]?.toUpperCase() ?? "#";
+			const sortKey =
+				(c.lastName || c.firstName || "#")[0]?.toUpperCase() ?? "#";
 			const letter = /[A-Z]/.test(sortKey) ? sortKey : "#";
 			const arr = map.get(letter) ?? [];
 			arr.push(c);
@@ -151,20 +152,22 @@ function ContactsPage() {
 				title="Contacts"
 				subtitle="Corporate directory, speed dials, and external client address book."
 				actions={
-					<ActionIcon
-						variant="default"
-						radius="xl"
-						size={44}
-						onClick={openCreate}
-						aria-label="Add contact"
-						style={{
-							background: "var(--qb-surface)",
-							border: "none",
-							color: "var(--qb-text-primary)",
-						}}
-					>
-						<IconPlus size={20} />
-					</ActionIcon>
+					isUnavailable(contactsQuery.error) ? null : (
+						<ActionIcon
+							variant="default"
+							radius="xl"
+							size={44}
+							onClick={openCreate}
+							aria-label="Add contact"
+							style={{
+								background: "var(--qb-surface)",
+								border: "none",
+								color: "var(--qb-text-primary)",
+							}}
+						>
+							<IconPlus size={20} />
+						</ActionIcon>
+					)
 				}
 			/>
 
@@ -205,12 +208,7 @@ function ContactsPage() {
 				>
 					<Group justify="space-between" wrap="nowrap">
 						<Group gap={16} wrap="nowrap">
-							<InitialsAvatar
-								name="Demo User"
-								initials="DU"
-								size={52}
-								accent
-							/>
+							<InitialsAvatar name="Demo User" initials="DU" size={52} accent />
 							<Box>
 								<Text fw={800} size="lg">
 									Demo User
@@ -299,16 +297,20 @@ function ContactsPage() {
 												</Group>
 
 												<Group gap={8} wrap="nowrap">
-													<ActionIcon
-														variant="subtle"
-														radius="xl"
-														size={38}
-														onClick={() => startCall(contact.phone, fullName)}
-														aria-label={`Call ${fullName}`}
-														style={{ color: "var(--qb-accent-text)" }}
-													>
-														<IconPhone size={17} />
-													</ActionIcon>
+													{webphone && (
+														<ActionIcon
+															variant="subtle"
+															radius="xl"
+															size={38}
+															onClick={() =>
+																webphone.startCall(contact.phone, fullName)
+															}
+															aria-label={`Call ${fullName}`}
+															style={{ color: "var(--qb-accent-text)" }}
+														>
+															<IconPhone size={17} />
+														</ActionIcon>
+													)}
 													<ActionIcon
 														variant="subtle"
 														radius="xl"

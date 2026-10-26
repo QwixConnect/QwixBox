@@ -33,6 +33,10 @@ export const env = {
 
   kamEgress: optional("KAM_EGRESS", "127.0.0.1:5070"),
 
+  // Set by 41-api-deploy.sh only when Kamailio has the stirshaken module and a signing key.
+  // Without it the per-tenant signing toggle would set a header nothing reads.
+  stirSigning: optional("STIR_SIGNING", "0") === "1",
+
   encryptionKey: required("ENCRYPTION_KEY"),
   authSecret: required("AUTH_SECRET"),
 

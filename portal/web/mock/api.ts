@@ -1,12 +1,89 @@
 import { randomUUID } from "node:crypto";
 import { seedData, seedTenant, type Row } from "./data.ts";
+import { UNENFORCED } from "./capabilities.ts";
 
 const roles = ["owner", "admin", "member", "viewer"];
-const scenarios = ["normal", "empty", "error", "slow"];
+const scenarios = [
+  "normal",
+  "empty",
+  "error",
+  "slow",
+  "unavailable",
+  "unpublished",
+];
+// Collections with a preview screen but no route in the real API. The "unavailable" scenario
+// answers them with 404, as production does, so the unavailable state can be seen locally.
+const previewResources = new Set([
+  "voicemails",
+  "recordings",
+  "sms-threads",
+  "sms-opt-outs",
+  "contacts",
+  "queues",
+  "queue-agents",
+  "emergency-locations",
+  "conferences",
+  "parking-lots",
+  "music-on-hold",
+  "devices",
+]);
 const json = (body: unknown, status = 200, headers?: Record<string, string>) =>
   Response.json(body, { status, headers });
 
 // This is a UI fixture, never an authentication or telephony implementation.
+
+// Mirrors portal/api/src/lib/references.ts (I04): a destination still pointed at cannot be deleted.
+const DIALABLE_COLLECTIONS = [
+  "extensions",
+  "ring-groups",
+  "ivr-menus",
+  "queues",
+];
+
+const DESTINATION_TYPE: Record<string, string> = {
+  extensions: "extension",
+  "ring-groups": "ring_group",
+  "ivr-menus": "ivr",
+  "time-conditions": "time_condition",
+};
+
+function destinationReferences(
+  tables: Record<string, Row[]>,
+  type: string,
+  target: Row,
+): string[] {
+  const hits = (t: unknown, i: unknown) =>
+    (t === type && i === target.id) ||
+    (type === "extension" && t === "voicemail" && i === target.number);
+  const found: string[] = [];
+  for (const r of tables["inbound-routes"] ?? [])
+    if (hits(r.destinationType, r.destinationId))
+      found.push(`inbound route ${String(r.didPattern)}`);
+  for (const g of tables["ring-groups"] ?? [])
+    if (g.id !== target.id && hits(g.failoverType, g.failoverId))
+      found.push(`ring group ${String(g.name)} (failover)`);
+  for (const m of tables["ivr-menus"] ?? [])
+    if (m.id !== target.id && hits(m.timeoutType, m.timeoutId))
+      found.push(`IVR ${String(m.name)} (timeout)`);
+  for (const o of tables["ivr-options"] ?? []) {
+    const menu = (tables["ivr-menus"] ?? []).find((m) => m.id === o.ivrMenuId);
+    if (
+      menu &&
+      menu.id !== target.id &&
+      hits(o.destinationType, o.destinationId)
+    )
+      found.push(`IVR ${String(menu.name)} option ${String(o.digit)}`);
+  }
+  for (const c of tables["time-conditions"] ?? []) {
+    if (c.id === target.id) continue;
+    if (hits(c.matchType, c.matchId))
+      found.push(`time condition ${String(c.name)} (match)`);
+    if (hits(c.noMatchType, c.noMatchId))
+      found.push(`time condition ${String(c.name)} (no match)`);
+  }
+  return found;
+}
+
 export function createMockApi() {
   let tables = seedData();
   let tenant: Row = seedTenant();
@@ -176,6 +253,8 @@ export function createMockApi() {
         members: visible("members"),
         total: visible("members").length,
       });
+    if (path === "/api/capabilities")
+      return json({ unenforced: UNENFORCED, stirSigning: false });
     if (path.startsWith("/api/auth/"))
       return json(
         { error: "This account action is unavailable in the local mock" },
@@ -194,6 +273,8 @@ export function createMockApi() {
     const [, , resource, id, child, childId] = path
       .split("/")
       .map(decodeURIComponent);
+    if (scenario === "unavailable" && previewResources.has(resource))
+      return json({ error: "Not found" }, 404);
     const write = !["GET", "HEAD"].includes(method);
     if (
       (role === "viewer" && write) ||
@@ -217,6 +298,29 @@ export function createMockApi() {
       return json({ error: "Not allowed for this demo role" }, 403);
     if (resource === "tenant") {
       if (id === "rebuild-cache") return json({ status: "rebuilt" });
+      if (id === "projections") {
+        if (!["owner", "admin"].includes(role))
+          return json({ error: "Not allowed for this demo role" }, 403);
+        return json(
+          scenario === "unpublished"
+            ? {
+                pending: 1,
+                failing: 1,
+                oldestPendingSeconds: 420,
+                jobs: [
+                  {
+                    kind: "extension",
+                    target: "ext-1003",
+                    attempts: 4,
+                    lastError: "connect ECONNREFUSED 127.0.0.1:5432",
+                    createdAt: new Date(Date.now() - 420_000).toISOString(),
+                    nextAttemptAt: new Date(Date.now() + 16_000).toISOString(),
+                  },
+                ],
+              }
+            : { pending: 0, failing: 0, oldestPendingSeconds: null, jobs: [] },
+        );
+      }
       if (id === "members") {
         const memberId = child;
         const member = tables.members.find((row) => row.id === memberId);
@@ -375,7 +479,11 @@ export function createMockApi() {
       }
       return json(visible("ivr-options").filter((row) => row.ivrMenuId === id));
     }
-    if (child === "messages" && resource === "sms-threads" && method === "POST") {
+    if (
+      child === "messages" &&
+      resource === "sms-threads" &&
+      method === "POST"
+    ) {
       const thread = tables["sms-threads"].find((row) => row.id === id);
       if (!thread) return json({ error: "Thread not found" }, 404);
       const msg = {
@@ -395,11 +503,18 @@ export function createMockApi() {
     if (resource === "trunks" && child === "password")
       return json({ status: "updated" });
     if (method === "POST" && !id) {
+      // One number namespace across dialable collections, as portal/api/src/lib/numbers.ts (I19).
+      const numbered = DESTINATION_TYPE[resource] || resource === "queues";
       if (
         body.number &&
-        tables[resource].some((row) => row.number === body.number)
+        (numbered ? DIALABLE_COLLECTIONS : [resource]).some((name) =>
+          (tables[name] ?? []).some((row) => row.number === body.number),
+        )
       )
-        return json({ error: "Number already exists" }, 409);
+        return json(
+          { error: `Number ${String(body.number)} is already used` },
+          409,
+        );
       if (
         body.didPattern &&
         tables[resource].some((row) => row.didPattern === body.didPattern)
@@ -452,6 +567,20 @@ export function createMockApi() {
       Object.assign(row, body, { updatedAt: new Date().toISOString() });
       audit("update", resource, id, before, row);
       return json(row);
+    }
+    if (method === "DELETE" && row && resource in DESTINATION_TYPE) {
+      const refs = destinationReferences(
+        tables,
+        DESTINATION_TYPE[resource],
+        row,
+      );
+      if (refs.length)
+        return json(
+          {
+            error: `Still used by ${refs.join(", ")}. Point those somewhere else first.`,
+          },
+          409,
+        );
     }
     if (method === "DELETE" && row) {
       tables[resource] = tables[resource].filter((item) => item.id !== id);

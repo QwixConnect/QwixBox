@@ -11,7 +11,7 @@ import {
 } from "@mantine/core";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { cloneElement, isValidElement, useEffect, useState } from "react";
-import { ApiError } from "../lib/api";
+import { ApiError, FeatureUnavailableError } from "../lib/api";
 import {
 	type PermissionAction,
 	type PermissionResource,
@@ -479,6 +479,13 @@ export function ErrorAlert({
 	title?: string;
 }) {
 	if (!error) return null;
+	if (error instanceof FeatureUnavailableError) {
+		return (
+			<Alert color="gray" title={error.message} mb="md">
+				<Text size="sm">{error.detail}</Text>
+			</Alert>
+		);
+	}
 	const api = error instanceof ApiError ? error : null;
 	return (
 		<Alert

@@ -12,6 +12,7 @@ import { fsXml } from "./routes/fs-xml";
 import { tenants } from "./routes/tenants";
 import { faxHook, faxes } from "./routes/fax";
 import { audit } from "./routes/audit";
+import { capabilities } from "./routes/capabilities";
 import {
   inboundRoutes,
   ivrMenus,
@@ -23,6 +24,7 @@ import {
 import { ping as redisPing } from "./services/redis";
 import { esl } from "./services/esl";
 import { pool } from "./db";
+import { projectionStatus } from "./services/projections";
 
 export const app = new Hono();
 
@@ -42,13 +44,20 @@ app.get("/health", async (c) => {
     probe(esl.status(750).then((r) => r.ok)),
   ]);
 
-  const healthy = dbOk && redisOk;
+  // Counts only: this endpoint is public. A failing job is a change that is committed but not
+  // live - possibly a revocation - so it degrades health rather than hiding in a log.
+  const projections = dbOk ? await projectionStatus().catch(() => null) : null;
+  const healthy = dbOk && redisOk && (projections?.failing ?? 0) === 0;
   return c.json(
     {
       status: healthy ? "ok" : "degraded",
       database: dbOk,
       redis: redisOk,
       freeswitch: eslOk,
+      projections: projections && {
+        pending: projections.pending,
+        failing: projections.failing,
+      },
     },
     healthy ? 200 : 503,
   );
@@ -83,6 +92,7 @@ app.route("/api/ivr-menus", ivrMenus);
 app.route("/api/time-conditions", timeConditions);
 app.route("/api/cdr", cdrs);
 app.route("/api/audit", audit);
+app.route("/api/capabilities", capabilities);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 

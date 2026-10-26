@@ -34,6 +34,11 @@ KAM_EGRESS=@FS_HOST@:@KAM_EGRESS_PORT@
 # Sender for fax-to-email. Matches what steps/15-mail.sh gave Postfix and what FreeSWITCH's
 # voicemail templates use, so every notification the platform sends comes from one address that
 # SPF and DKIM can be aligned to.
+# 1 only when Kamailio has the stirshaken module and a signing key (lib/common.sh
+# stir_signing_ready). The API refuses the per-tenant signing toggle otherwise, because the
+# header it sets would reach nothing. 34-kamailio-config.sh re-runs this step when it changes.
+STIR_SIGNING=@STIR_SIGNING@
+
 SMTP_FROM=@SMTP_FROM@
 MAIL_FROM_NAME=@MAIL_FROM_NAME@
 MAIL_REPLY_TO=@MAIL_REPLY_TO@

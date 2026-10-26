@@ -23,7 +23,7 @@ import {
 	QueryState,
 	SurfaceCard,
 } from "../../components/Resource";
-import { endpoints } from "../../lib/api";
+import { endpoints, isUnavailable } from "../../lib/api";
 
 export const Route = createFileRoute("/_app/emergency")({
 	component: EmergencyPage,
@@ -50,6 +50,14 @@ function EmergencyPage() {
 		queryKey: ["extensions"],
 		queryFn: endpoints.extensions,
 	});
+	const routesQuery = useQuery({
+		queryKey: ["outbound-routes"],
+		queryFn: endpoints.outboundRoutes,
+	});
+	const emergencyRoutes = (routesQuery.data ?? []).filter(
+		(r) => r.isEmergency && r.enabled,
+	).length;
+	const locationsUnavailable = isUnavailable(locationsQuery.error);
 
 	const createMut = useMutation({
 		mutationFn: () =>
@@ -62,7 +70,6 @@ function EmergencyPage() {
 				region,
 				postalCode,
 				country,
-				validatedAt: new Date().toISOString(),
 				assignedExtensions: [],
 			}),
 		onSuccess: () => {
@@ -84,57 +91,68 @@ function EmergencyPage() {
 		<Stack gap={24}>
 			<PageHeader
 				title="Emergency Calling (E911)"
-				subtitle="Kari’s Law & RAY BAUM’S Act dispatchable civic addresses, ELIN callback DIDs, and safety alerts."
+				subtitle="Emergency outbound routes, civic locations and callback numbers."
 				actions={
-					<Button
-						leftSection={<IconPlus size={17} />}
-						onClick={() => setModalOpen(true)}
-					>
-						Add Civic Location
-					</Button>
+					isUnavailable(locationsQuery.error) ? null : (
+						<Button
+							leftSection={<IconPlus size={17} />}
+							onClick={() => setModalOpen(true)}
+						>
+							Add Civic Location
+						</Button>
+					)
 				}
 			/>
 
 			<MockFeatureBanner
-				title="E911 Civic Location Registry (Mock-Backed UI)"
-				description="The database schema already includes emergency_location in packages/db/src/schema/system.ts. See docs/roadmap.md to expose CRUD routes in apps/api and enforce per-extension E911 PIDF-LO headers."
+				title="E911 Civic Location Registry (Preview)"
+				description="emergency_location exists in portal/api/src/db/schema.ts but has no API route, and no location or callback number is sent on an emergency call yet (I02). See docs/mvp-plan.md, milestone M4."
 			/>
 
+			{/* Each tile reports what the server holds. These were hard-coded claims ("911 enabled",
+			    "instant email & SMS dispatch") shown regardless of support (I22). */}
 			<SimpleGrid cols={{ base: 1, md: 3 }} spacing={20}>
 				<SurfaceCard p={24}>
 					<Stack gap={6}>
 						<Text className="qb-caption" tt="uppercase" fw={700}>
-							Validated Locations
+							Civic Locations
 						</Text>
-						<div className="qb-display">{locations.length}</div>
-						<Text className="qb-caption">
-							PSAP-verified US & Canadian civic addresses
-						</Text>
-					</Stack>
-				</SurfaceCard>
-
-				<SurfaceCard p={24}>
-					<Stack gap={6}>
-						<Text className="qb-caption" tt="uppercase" fw={700}>
-							Direct 911 Dialing
-						</Text>
-						<div className="qb-display">Enabled</div>
-						<Text className="qb-caption">
-							No prefix required (911 and 933 test active)
-						</Text>
-					</Stack>
-				</SurfaceCard>
-
-				<SurfaceCard p={24}>
-					<Stack gap={6}>
-						<Text className="qb-caption" tt="uppercase" fw={700}>
-							Safety Notification
-						</Text>
-						<div className="qb-display" style={{ fontSize: 24 }}>
-							Real-time
+						<div className="qb-display">
+							{locationsUnavailable ? "—" : locations.length}
 						</div>
 						<Text className="qb-caption">
-							Instant email & SMS dispatch alert on any 911 call
+							{locationsUnavailable
+								? "Location management is not available on this server"
+								: "Stored addresses; not validated against a PSAP database"}
+						</Text>
+					</Stack>
+				</SurfaceCard>
+
+				<SurfaceCard p={24}>
+					<Stack gap={6}>
+						<Text className="qb-caption" tt="uppercase" fw={700}>
+							Emergency Routes
+						</Text>
+						<div className="qb-display">
+							{routesQuery.isSuccess ? emergencyRoutes : "—"}
+						</div>
+						<Text className="qb-caption">
+							Enabled outbound routes marked emergency. A caller at their call
+							limit can still be refused (I02).
+						</Text>
+					</Stack>
+				</SurfaceCard>
+
+				<SurfaceCard p={24}>
+					<Stack gap={6}>
+						<Text className="qb-caption" tt="uppercase" fw={700}>
+							Emergency Notification
+						</Text>
+						<div className="qb-display" style={{ fontSize: 24 }}>
+							Not available
+						</div>
+						<Text className="qb-caption">
+							No alert is sent when an emergency call is placed (I02)
 						</Text>
 					</Stack>
 				</SurfaceCard>
@@ -238,54 +256,56 @@ function EmergencyPage() {
 				</div>
 			</QueryState>
 
-			{/* Extension-to-Location Mapping */}
-			<SurfaceCard p={24}>
-				<Stack gap={16}>
-					<Box>
-						<Text className="qb-headline">Extension E911 Assignment</Text>
-						<Text className="qb-caption">
-							Ensure every physical or remote SIP endpoint transmits an accurate
-							emergency callback location
-						</Text>
-					</Box>
-					<SimpleGrid cols={{ base: 1, md: 3 }} spacing={14}>
-						{(extensionsQuery.data ?? []).map((ext, i) => (
-							<Box
-								key={ext.id}
-								style={{
-									background: "var(--qb-bg)",
-									padding: 16,
-									borderRadius: 14,
-									border: "1px solid var(--qb-separator)",
-								}}
-							>
-								<Group justify="space-between" mb={10}>
-									<Box>
-										<Text fw={700} size="sm">
-											Ext {ext.number} · {ext.displayName}
-										</Text>
-										<Text className="qb-caption">
-											{ext.deviceMac
-												? `MAC ${ext.deviceMac}`
-												: "WebRTC / Softphone"}
-										</Text>
-									</Box>
-								</Group>
-								<Select
-									size="xs"
-									defaultValue={
-										locations[i % Math.max(1, locations.length)]?.id
-									}
-									data={locations.map((l) => ({
-										value: l.id,
-										label: `${l.label} (${l.callbackNumber ?? "Default"})`,
-									}))}
-								/>
-							</Box>
-						))}
-					</SimpleGrid>
-				</Stack>
-			</SurfaceCard>
+			{/* Extension-to-Location Mapping. There is no API to save an assignment, so the selects are
+			    disabled and start empty rather than showing a location the extension never had. */}
+			{!locationsUnavailable && (
+				<SurfaceCard p={24}>
+					<Stack gap={16}>
+						<Box>
+							<Text className="qb-headline">Extension E911 Assignment</Text>
+							<Text className="qb-caption">
+								Preview: assignments cannot be saved yet, and no location is
+								sent on a call
+							</Text>
+						</Box>
+						<SimpleGrid cols={{ base: 1, md: 3 }} spacing={14}>
+							{(extensionsQuery.data ?? []).map((ext) => (
+								<Box
+									key={ext.id}
+									style={{
+										background: "var(--qb-bg)",
+										padding: 16,
+										borderRadius: 14,
+										border: "1px solid var(--qb-separator)",
+									}}
+								>
+									<Group justify="space-between" mb={10}>
+										<Box>
+											<Text fw={700} size="sm">
+												Ext {ext.number} · {ext.displayName}
+											</Text>
+											<Text className="qb-caption">
+												{ext.deviceMac
+													? `MAC ${ext.deviceMac}`
+													: "WebRTC / Softphone"}
+											</Text>
+										</Box>
+									</Group>
+									<Select
+										size="xs"
+										disabled
+										placeholder="Not assigned"
+										data={locations.map((l) => ({
+											value: l.id,
+											label: `${l.label} (${l.callbackNumber ?? "Default"})`,
+										}))}
+									/>
+								</Box>
+							))}
+						</SimpleGrid>
+					</Stack>
+				</SurfaceCard>
+			)}
 
 			<Modal
 				opened={modalOpen}

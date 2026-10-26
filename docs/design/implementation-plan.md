@@ -1,28 +1,14 @@
-# QwixBox Comprehensive Implementation Plan: Codebase Fixes & Phases 1–3
+# Design: proposed implementation phases
 
-> **Companion Documents:**
-> - [`docs/reference.md`](./reference.md) — Cross-Reference Analysis of **FusionPBX**, **FS PBX**, and **OpenWeb PBX** vs. **QwixBox**
-> - [`docs/missing-features-implementation.md`](./missing-features-implementation.md) — Executive Feature Summary
+Retained from the 2026-10-24 feature plan; reorganized 2026-10-25. This is future design,
+not an implementation status report or an approved patch recipe. Read [status](../status.md)
+and [active issues](../issues.md) before choosing work. Source, interfaces and dependencies
+must be rechecked at implementation time. [MVP acceptance](../mvp.md) takes precedence over
+feature expansion. Existing media, restore and target-host verification gaps remain open.
 
-This plan specifies the complete engineering implementation for **fixing existing bugs in the QwixBox codebase** and **building all three phases of missing features and reference-app best practices**, written strictly in QwixBox's native stack and design patterns:
-- **Runtime & HTTP Framework:** Bun (`Bun.spawn`, `Bun.file`) + Hono (`new Hono<AppEnv>()`)
-- **Database & ORM:** PostgreSQL 18 + Drizzle ORM (`pgTable`, `organizationId` tenant boundary, `drizzle-kit push --force`)
-- **Authentication & RBAC:** Better Auth (`organization` plugin + `createAccessControl` `ROLES` in `portal/api/src/auth.ts`) + `requireTenant` / `requirePermission` (`portal/api/src/middleware/tenant.ts`) + `crudRoutes` (`portal/api/src/lib/crud.ts`)
-- **Call-Time Data Plane:** Kamailio 6.1 edge (`resources/conf/kamailio/kamailio.cfg`) + `rtpengine` + FreeSWITCH 1.11 (`resources/lua/*.lua`) + Redis (`mod_hiredis` + `portal/api/src/services/redis.ts` & `cache.ts`)
-- **Frontend Portal:** React 19 + TanStack Router + Mantine (`portal/web/src/routes/_app/*.tsx`) + typed `api` client (`portal/web/src/lib/api.ts`)
-
-> **Status — checked against the code on 2026-10-24.** This is a plan, not a description of the
-> system. Every "Location" and "already exists" claim below was re-read against the source on that
-> date. Corrections are made inline, and Appendix A lists each one. The twelve bugs in §1 are
-> **confirmed by reading the code, not by placing a call**. Prove each fix the way CLAUDE.md
-> requires: reproduce the failure first, then re-run the identical sequence after the fix.
->
-> **This plan does not override [`mvp.md`](./mvp.md).** Two-way audio has never been confirmed on any
-> call, a backup has never been restored, and there has been no amd64 pass. Everything here that
-> depends on media (recording, voicemail, queues, conferences, parking, MoH, the webphone) sits
-> behind mvp.md item 1, so close that first.
-
----
+Reference context is in the historical [platform comparison](../research/reference-platforms.md).
+The duplicate `missing-features-implementation.md` summary was retired; this is the retained
+feature design. Section numbers remain stable for links from the roadmap.
 
 ## 0. QwixBox Design Patterns & Invariants
 
@@ -55,180 +41,27 @@ constraints (8–10) that several features below would otherwise get wrong:
 
 ---
 
-## 1. Pre-Phase Remediation: Fixing 12 Existing Bugs in QwixBox
+## 1. Prerequisite issue mapping
 
-An audit of the codebase against the three reference PBXs found **10 concrete bugs** in QwixBox's current implementation. A re-read on 2026-10-24 found two more (11 and 12). Fix these first, so Phases 1–3 do not build on them. Every one of them is **confirmed by reading the code only**. None has been reproduced on a live call yet.
+The earlier plan mixed findings and suggested fixes. Current findings and acceptance checks
+now live in [issues](../issues.md). The detailed old patch recipes were retired, particularly
+the forwarding identity rewrite and fixed emergency-number bypass, which need a reviewed trust
+model rather than a copied snippet. Later “Bug N” references map as follows:
 
-| # | Severity | Re-check result |
-|---|---|---|
-| 1 | High | Confirmed. `mvp.md` records the external-forward fix as verified, yet the code still fails a forward of a carrier-originated call, so that test most likely used an internal caller. Reproduce it with a carrier call |
-| 2 | Medium | Confirmed, but the reason given below was wrong and has been corrected (see invariant 10) |
-| 3 | **Critical** (life safety) | Confirmed. `route[INGRESS]` calls `route(FRAUD)` unconditionally |
-| 4 | Low | Partly confirmed. Trusted peers cannot reach `*97`/`*98` in either tier. See the corrected text |
-| 5 | Medium | Confirmed. Nothing anywhere runs `record_session` |
-| 6 | High | Confirmed |
-| 7 | Medium | DND/call-waiting bypass confirmed. The `call_timeout` part is **unverified** |
-| 8 | Medium | Confirmed |
-| 9 | Medium | Confirmed. `uac.so` is also loaded with no `reg_*` parameters |
-| 10 | Low | Confirmed. Every role holds `tenant:read`, so the missing GET gate exposes nothing today |
-| 11 | High | New: the production portal shows seed data for unimplemented screens |
-| 12 | Medium | New: `recording` permission and `cdr.recordingPath` exist with no route |
-
-### Bug 1: External Call Forwarding (`forwardAllTo` / `forwardBusyTo` / `forwardNoAnswerTo` / IVR -> `external`) Drops All Inbound PSTN Calls
-
-* **Location:** [`resources/lua/extension.lua`](../resources/lua/extension.lua), [`resources/lua/qwixbox.lua`](../resources/lua/qwixbox.lua), [`resources/lua/xml_handler.lua`](../resources/lua/xml_handler.lua), and [`portal/api/src/routes/fs-xml.ts`](../portal/api/src/routes/fs-xml.ts).
-* **Root Cause:**
-  1. When an inbound call arrives from a carrier trunk, Kamailio sets `X-Trusted-Peer: 1` and no `X-Auth-User`.
-  2. When the call reaches `extension.lua` and the extension has `forwardAllTo` (or `forwardBusyTo` / `forwardNoAnswerTo`) set to an external PSTN number (e.g. `+14165559999`), `qwixbox.go(session, domain, "external", ext.forwardAllTo, depth)` calls `session:transfer("+14165559999", "XML", "tenant_<org>")`.
-  3. On the transferred dialplan lookup, `variable_sip_h_X-Trusted-Peer` is **still `"1"`** on the channel, and `variable_sip_h_X-Auth-User` is still empty.
-  4. `xml_handler.lua` declines the request (`M.dialplan`, at `if p:getHeader("variable_sip_h_X-Trusted-Peer") == "1" then return nil end`), so `handleDialplan()` in `fs-xml.ts` answers it. There, `if (peer) return did ? dispatch(...) : NOT_FOUND;` treats the forwarded destination `+14165559999` as an inbound DID lookup. It finds no DID matching the mobile number and returns `NOT_FOUND`.
-  5. Clearing `X-Trusted-Peer` alone is not enough. `outbound()` in `fs-xml.ts` returns `null` unless `authenticated` is true, and `build_outbound` in Lua runs only when `caller` is set. Both need a non-empty `X-Auth-User`. That is why the fix sets one.
-* **Fix:**
-  1. In [`resources/lua/qwixbox.lua`](../resources/lua/qwixbox.lua), when `dtype == "external"`, unset `sip_h_X-Trusted-Peer`, set `sip_h_X-Tenant-Domain` to `domain`, and if `sip_h_X-Auth-User` is empty, set `sip_h_X-Auth-User` to `sip_h_X-Forwarded-From` or `"pbx_forward"` along with `qwixbox_forwarded=true`:
-     ```lua
-     elseif dtype == "external" then
-       session:execute("unset", "sip_h_X-Trusted-Peer")
-       session:execute("set", "sip_h_X-Tenant-Domain=" .. domain)
-       local auth_user = session:getVariable("sip_h_X-Auth-User")
-       local fwd_from = session:getVariable("sip_h_X-Forwarded-From")
-       if not auth_user or auth_user == "" then
-         session:execute("set", "sip_h_X-Auth-User=" .. (fwd_from or "forward"))
-       end
-       session:transfer(did, "XML", "tenant_" .. (M.tenant_id(domain) or domain))
-     ```
-     `M.tenant_id` does not exist. The current code transfers to the channel's own `context` variable, which is already `tenant_<org>` on both tiers, so keep that. Use the forwarding extension's number as `X-Auth-User`. A bare `"forward"` would make Kamailio's `route[FRAUD]` count every forwarded call against one shared `forward@<domain>` bucket, and since it passes the `^[0-9A-Za-z_.-]+$` caller check in both tiers, nothing would flag it. Treat the forwarded leg as an outbound call by that extension: it is billed and capped as one.
-  2. In [`resources/lua/extension.lua`](../resources/lua/extension.lua), release the `limit` hash lock before transferring on `no_answer_treatment`, or only acquire `limit` right before `bridge` so a forwarded call does not hold the extension's concurrency slot if the bridge failed.
-
----
-
-### Bug 2: Outbound Calls Send Raw Extension Numbers (`101`) as Caller ID When `route.callerIdOverride` Is Null
-
-* **Location:** [`resources/lua/xml_handler.lua`](../resources/lua/xml_handler.lua), [`portal/api/src/routes/fs-xml.ts`](../portal/api/src/routes/fs-xml.ts), and [`portal/api/src/services/cache.ts`](../portal/api/src/services/cache.ts).
-* **Root Cause:**
-  - `build_outbound` in `xml_handler.lua` and `outbound()` in `fs-xml.ts` only set `effective_caller_id_number` if `route.callerIdOverride` is non-empty.
-  - `renderDirectoryUser` does set `effective_caller_id_*` and `outbound_caller_id_*` on the directory `<user>`. But both SIP profiles run with `auth-calls=false` (invariant 10), so those variables are never applied to an A-leg arriving from Kamailio. The caller ID is just the `From` user. Kamailio forces that to equal the auth user (`$au == $fU`), which makes it the extension number.
-  - `cacheTenantSettings()` (`portal/api/src/services/cache.ts`) also leaves `defaultCallerIdName` and `defaultCallerIdNumber` out of the cached tenant JSON. The Lua tier therefore has nothing to fall back to.
-* **Fix:**
-  1. Include `defaultCallerIdName` and `defaultCallerIdNumber` in `cacheTenantSettings()` (`portal/api/src/services/cache.ts`) and `callerIdName` / `callerIdNumber` in `cacheExtension()` (`keys.extensionCall`).
-  2. In `xml_handler.lua` (`build_outbound`) and `fs-xml.ts` (`outbound`), resolve outbound Caller ID with explicit precedence:
-     `route.callerIdOverride ?? ext.callerIdNumber ?? tenant.defaultCallerIdNumber ?? "${outbound_caller_id_number}"`
-     and set both `effective_caller_id_number` and `effective_caller_id_name`.
-
----
-
-### Bug 3: Kamailio `route[INGRESS]` Rejects Emergency (`911`/`933`/`112`/`999`) Calls When Account Is at `MAX_CONCURRENT_CALLS`
-
-* **Location:** [`resources/conf/kamailio/kamailio.cfg`](../resources/conf/kamailio/kamailio.cfg).
-* **Root Cause:**
-  - `route[EGRESS]` has an emergency bypass (`if ($hdr(X-Emergency) == "true")`), **but** `route[INGRESS]` runs `route(FRAUD)` on line 362 *before* relaying the call to FreeSWITCH. If an extension or shared office account already has 10 active calls, Kamailio rejects a `911` call on ingress with `486 Busy Here` before FreeSWITCH ever sees it!
-* **Fix:**
-  - In [`resources/conf/kamailio/kamailio.cfg`](../resources/conf/kamailio/kamailio.cfg), bypass `route(FRAUD)` on ingress when `$rU =~ "^(911|933|112|999)$"`:
-    ```kamailio
-    route[INGRESS] {
-        remove_hf_re("^X-");
-        route(AUTH);
-        if (!($rU =~ "^(911|933|112|999)$")) {
-            route(FRAUD);
-        }
-    ```
-  - Kamailio cannot see which outbound routes a tenant has flagged `isEmergency`, because that decision is made later, in FreeSWITCH. A fixed list in the config is therefore the only practical ingress test. Keep it a superset of every emergency pattern a tenant can configure, and document that pairing in both places. The call must still go through `dlg_manage()` and accounting.
-  - Test it under saturation. Hold `MAX_CONCURRENT_CALLS` calls open on one account, dial 911, and confirm the INVITE reaches FreeSWITCH. `mvp.md` item 4 asks for exactly this.
-
----
-
-### Bug 4: Unauthenticated `*97` / `*98` Voicemail Check Allowed in `xml_handler.lua` and `fs-xml.ts`
-
-* **Location:** [`resources/lua/xml_handler.lua`](../resources/lua/xml_handler.lua) and [`portal/api/src/routes/fs-xml.ts`](../portal/api/src/routes/fs-xml.ts).
-* **Root Cause (corrected):**
-  - The feature codes `*72`–`*93` reject an unauthenticated caller with `CALL_REJECTED`. `*98`, and `*97` without an authenticated `X-Auth-User`, instead run `voicemail check default <domain>`, which prompts for a mailbox and a PIN.
-  - **The exposure is smaller than first claimed.** Both tiers stop trusted-peer (carrier) traffic before they reach feature codes. Lua declines it outright, and `fs-xml.ts` returns from its `peer` branch. A transfer into the context still carries `X-Trusted-Peer`, so the "IVR transfer" or "misrouted trunk" path cannot get there either. In practice, everyone who reaches `*98` today is an authenticated extension, and "any mailbox, with its PIN" is how `*98` is meant to work.
-* **Fix (hardening, not an open hole):**
-  - Require `caller`/`authenticated` for both codes anyway, as defence in depth against a future path that clears the peer header. Bug 1's fix is such a path. Leave `*98`'s mailbox prompt in place for authenticated callers. `mod_voicemail` already caps attempts with `max-login-attempts=3`.
-
----
-
-### Bug 5: `tenantSettings.recordingPolicy` Is Stored in DB & Redis but Never Executed on Any Call Leg
-
-* **Location:** [`resources/lua/extension.lua`](../resources/lua/extension.lua), [`resources/lua/ring_group.lua`](../resources/lua/ring_group.lua), [`resources/lua/xml_handler.lua`](../resources/lua/xml_handler.lua), and [`portal/api/src/routes/fs-xml.ts`](../portal/api/src/routes/fs-xml.ts).
-* **Root Cause:**
-  - `tenantSettings.recordingPolicy` (`none | inbound | outbound | all`) is editable via `PATCH /api/tenant` and cached in `qwixbox:tenant:<domain>`, and `portal/api/src/services/cdr.ts` reads `vars.recording_file`, but nothing in the Lua scripts or XML dialplan ever arms `record_session`.
-* **Fix:**
-  - Add one shared helper in `resources/lua/qwixbox.lua`. §2.3 calls it `M.arm_recording`; use that name throughout. Add post-answer recording actions (`media_bug_answer_req=true`, `RECORD_STEREO=true`, `execute_on_answer=record_session ...`) to the outbound builders in **both** tiers: `build_outbound` in `xml_handler.lua` and `outbound()` in `fs-xml.ts`. For inbound calls, arm it in `destination.lua`, which every inbound DID passes through (invariant 8), rather than in each destination script. Set `recording_file`, so that `parseCdrXml()` in `portal/api/src/services/cdr.ts` fills `cdr.recordingPath`. It already reads `vars.recording_file`.
-
----
-
-### Bug 6: Disabling or Deleting an Extension Leaves Stale Routing Pointers in Redis (`qwixbox:did:*`, `qwixbox:ivr:*`, `qwixbox:tc:*`)
-
-* **Location:** [`portal/api/src/routes/extensions.ts`](../portal/api/src/routes/extensions.ts), in the `PATCH /:id` and `DELETE /:id` handlers. Extension numbers are immutable (PATCH rejects `number`), so enable/disable and delete are the only triggers.
-* **Root Cause:**
-  - `cacheInboundRoutes`, `cacheIvrMenus`, and `cacheTimeConditions` resolve `destinationNumber(org, "extension", id)` (which checks `eq(extension.enabled, true)`) at cache-build time and store the extension's number in Redis.
-  - When an extension is disabled (`PATCH /api/extensions/:id` with `{ enabled: false }`) or deleted (`DELETE /api/extensions/:id`), `extensions.ts` only refreshes `cacheExtension` and `cacheRingGroups`. Inbound DIDs, IVR options, and Time Conditions in Redis continue routing to the disabled/deleted extension!
-* **Fix:**
-  - In `portal/api/src/routes/extensions.ts`, when `before.enabled !== row.enabled` on `PATCH` or on `DELETE`, also call `cacheInboundRoutes(organizationId)`, `cacheIvrMenus(organizationId)`, and `cacheTimeConditions(organizationId)`.
-  - Deleting an extension also leaves **dangling Postgres pointers**. `destinationId`, `failoverId`, `timeoutId`, `matchId` and `noMatchId` are plain `text`, with no foreign key. Either refuse the delete while something references the extension (a `beforeDelete`-style check, like `trunks` uses for routes), or clear those references in the same transaction.
-
----
-
-### Bug 7: Ring Groups Ignore Member `dnd` and `callWaitingEnabled` Settings & Misapply `call_timeout` on Sequential Strategy
-
-* **Location:** [`resources/lua/ring_group.lua`](../resources/lua/ring_group.lua) and [`portal/api/src/services/call-state.ts`](../portal/api/src/services/call-state.ts).
-* **Root Cause:**
-  - `ring_group.lua` bridges directly to `user/<number>@<domain>`, bypassing `extension.lua`. As a result, a Ring Group member who turned on DND (`*78`) or disabled Call Waiting (`callWaitingEnabled = false`) still gets rung on every Ring Group call.
-  - **Unverified:** the claim that `call_timeout`, set once on the A-leg, breaks sequential (`|`) groups after the first member. FreeSWITCH treats each `|` segment as a separate originate attempt, so this has to be tested before anything is changed. Per-leg `[leg_timeout=N]` is still the explicit form and is harmless to adopt. Note too that `random` also uses `|`, so it is sequential in a shuffled order.
-* **Fix:**
-  - Include `dnd` and `callWaitingEnabled` in the `members` projection in `callState(domain, "rg", id)` (`portal/api/src/services/call-state.ts`).
-  - In `resources/lua/ring_group.lua`, skip any member with `m.dnd == true` or (when `m.callWaitingEnabled == false`) `limit_usage hash <domain> <m.number> >= 1`, and set `[leg_timeout=<timeout>]` on each member leg.
-
----
-
-### Bug 8: Extension `callWaitingEnabled = false` Does Not Count Outbound Calls Placed by That Extension
-
-* **Location:** [`resources/lua/xml_handler.lua`](../resources/lua/xml_handler.lua), [`portal/api/src/routes/fs-xml.ts`](../portal/api/src/routes/fs-xml.ts), and [`resources/lua/extension.lua`](../resources/lua/extension.lua).
-* **Root Cause:**
-  - `limit hash <domain> <number>` is only executed in `extension.lua` when an extension is **called**, never when an extension **places** an outbound or internal call. Thus, if Extension `101` (`callWaitingEnabled = false`) is on an active outbound PSTN call, `limit_usage hash <domain> 101` is `0`, and incoming calls still ring `101`.
-* **Fix:**
-  - Whenever an authenticated extension (`caller`) initiates a call in `xml_handler.lua` and `fs-xml.ts`, add `<action application="limit" data="hash ${domain} ${caller}"/>` on the A-leg so `limit_usage hash <domain> <ext>` accurately reflects both inbound and outbound active calls for that extension.
-
----
-
-### Bug 9: `steps/34-kamailio-config.sh` Omits `uac` Schema Creation
-
-* **Location:** [`steps/34-kamailio-config.sh`](../steps/34-kamailio-config.sh).
-* **Root Cause:**
-  - `KAM_SCHEMAS="standard auth_db usrloc domain permissions dispatcher dialog acc"` omits `uac`, so the `uacreg` table is never created in the `kamailio` PostgreSQL database. If `subscriber` already exists on an upgrade, new schema files are skipped entirely.
-  - Separately, `kamailio.cfg` **does** load `uac.so`, but it sets only `restore_mode`. With no `reg_db_url` or `reg_*` parameters, nothing registers even once the table exists. §2.2 adds those parameters.
-* **Fix:**
-  - Add `uac` to `KAM_SCHEMAS` in `steps/34-kamailio-config.sh` and apply `uac-create.sql` idempotently: guard it on `to_regclass('public.uacreg')`, outside the existing `subscriber` guard.
-
----
-
-### Bug 10: `GET /api/tenant` Missing `requirePermission("tenant", "read")` & `PATCH /api/tenant` Ignores Several `tenantSettings` Columns
-
-* **Location:** [`portal/api/src/routes/tenants.ts`](../portal/api/src/routes/tenants.ts), in the `GET /` and `PATCH /` handlers.
-* **Root Cause:**
-  - `tenants.get("/")` runs `requireTenant` but not `requirePermission("tenant", "read")`. Every role holds `tenant:read`, so nothing is exposed today. The problem is that the gate is remembered rather than structural.
-  - `tenants.patch("/")` does not accept `defaultRingTimeoutSec`, `emergencyNotifyEmail`, `emergencyNotifySms` or `stirShakenAttest`, although all four columns exist in `tenantSettings`. It accepts `faxNotifyEmail`, `maxConcurrentCalls`, `timezone`, `defaultCallerIdName`, `defaultCallerIdNumber`, `recordingPolicy` and `stirShakenEnabled`.
-  - `tenants.post("/")` and `PATCH /members/:id` gate on `requireRole("owner", "admin")` rather than `requirePermission`. That is a hard-coded role list, which CLAUDE.md asks not to add.
-* **Fix:**
-  - Add `requirePermission("tenant", "read")` to `tenants.get("/")`. Accept the four fields in `tenants.patch("/")` and validate them in `unsafeTenantSettings()` (`portal/api/src/lib/dialplan-safe.ts`). After a successful PATCH, call `cacheTenantSettings()` so the Lua tier sees the change.
-
----
-
-### Bug 11 (new): The Production Portal Shows Seed Data for Every Unimplemented Screen
-
-* **Location:** `getWithFallback()` in [`portal/web/src/lib/api.ts`](../portal/web/src/lib/api.ts) and [`portal/web/mock/data.ts`](../portal/web/mock/data.ts).
-* **Root Cause:** The twelve roadmap endpoints are `/voicemails`, `/recordings`, `/sms-threads`, `/sms-opt-outs`, `/contacts`, `/queues`, `/queue-agents`, `/emergency-locations`, `/conferences`, `/parking-lots`, `/music-on-hold` and `/devices`. Each is read through `getWithFallback(path, key)`. On a `404` it returns `seedData()[key]`, and the API's `app.notFound` answers `404` for every one of those paths. `mock/data.ts` is imported statically, so it ships in the production bundle. On a live install, a tenant therefore sees invented voicemails, queues and **E911 locations**, under a `MockFeatureBanner`. Any write then fails with a 404.
-* **Fix:** Gate the fallback on the Vite dev or mock mode (`import.meta.env.DEV` or the existing mock plugin). In production, render "not available yet". Fake emergency addresses on a live PBX are not acceptable, banner or not. The plan below says "remove the path from `mockByPath`", but no `mockByPath` exists. The real step is to replace `getWithFallback(...)` with `api.get(...)` for that endpoint.
-
----
-
-### Bug 12 (new): `recording` Permission and `cdr.recordingPath` Are Wired to Nothing
-
-* **Location:** `statement.recording` in [`portal/api/src/auth.ts`](../portal/api/src/auth.ts), `cdr.recordingPath` in `schema.ts`, and `app.ts`.
-* **Root Cause:** The RBAC statement grants `recording: ["read", "delete"]`, and the CDR row has a `recordingPath`, but no route reads either one. Meanwhile `qwixbox-maintenance` (`resources/conf/maintenance/qwixbox-maintenance`) deletes files under `$PREFIX/recordings` after `RECORDING_KEEP_DAYS` without touching `cdr.recordingPath`. Once §2.3 lands, the CDR table would point at deleted files.
-* **Fix:** This is delivered by §2.3. Note the reconciliation requirement there.
-
----
+| Earlier bug | Current issue |
+|---|---|
+| 1 — carrier-originated external forwarding | R11 |
+| 2 — outbound caller ID fallback | I03 |
+| 3 — emergency ingress capacity | I02 / R08 |
+| 4 — mailbox feature-code hardening | Additional hardening to assess with R11; no current unauthenticated path was established |
+| 5 — recording policy ignored | I07 |
+| 6 — stale destination pointers | I04 |
+| 7 — ring-group member policy / timeout hypothesis | I05 |
+| 8 — caller concurrency accounting | I06 / R08 |
+| 9 — registration infrastructure absent | I08; enabled registration trunks remain rejected |
+| 10 — settings permission/field coverage | I07; extend fields only with their runtime behavior |
+| 11 — production fixture fallback | I01 |
+| 12 — recording API absent | I07 / I09 |
 
 ## 2. Phase 1: Core MVP & Trunk/Routing Completion
 
@@ -242,15 +75,15 @@ Several features below assume a link that **does not exist**: "the user's own ex
 
 ### 2.1 Emergency Calling (E911 — Kari's Law & RAY BAUM'S Act)
 
-**Current state (checked):** `emergencyLocation` and `extension.emergencyLocationId` exist, and **nothing reads or writes either one** (see `mvp.md` item 4). Emergency classification is not a fixed number list. It is any outbound route with `isEmergency = true` whose PCRE matches the number, and it is offered only to an authenticated caller. The matching route then sets `X-Emergency: true`, which Kamailio's `route[EGRESS]` honours. `extensions.ts` does not accept `emergencyLocationId` today. `tenantSettings.emergencyNotifyEmail` and `emergencyNotifySms` exist and are not writable (Bug 10). No SMS sender exists anywhere, so `emergencyNotifySms` cannot be honoured until §3.5 lands.
+**Current state (checked):** `emergencyLocation` and `extension.emergencyLocationId` exist, and **nothing reads or writes either one** (see `../mvp.md` item 4). Emergency classification is not a fixed number list. It is any outbound route with `isEmergency = true` whose PCRE matches the number, and it is offered only to an authenticated caller. The matching route then sets `X-Emergency: true`, which Kamailio's `route[EGRESS]` honours. `extensions.ts` does not accept `emergencyLocationId` today. `tenantSettings.emergencyNotifyEmail` and `emergencyNotifySms` exist and are not writable (Bug 10). No SMS sender exists anywhere, so `emergencyNotifySms` cannot be honoured until §3.5 lands.
 
 #### 1. RBAC & Schema (`portal/api/src/auth.ts` & `portal/api/src/db/schema.ts`)
-- `emergencyLocation` and `extension.emergencyLocationId` already exist in [`portal/api/src/db/schema.ts`](../portal/api/src/db/schema.ts).
+- `emergencyLocation` and `extension.emergencyLocationId` already exist in [`portal/api/src/db/schema.ts`](../../portal/api/src/db/schema.ts).
 - Add `defaultEmergencyLocationId` to `tenantSettings` in `portal/api/src/db/schema.ts`:
   ```ts
   defaultEmergencyLocationId: text("default_emergency_location_id"),
   ```
-- In [`portal/api/src/auth.ts`](../portal/api/src/auth.ts), add `emergency: ["create", "read", "update", "delete"]` to `statement` (`viewer`: `["read"]`, `member`: `["read"]`, `admin`/`owner`: `["create", "read", "update", "delete"]`).
+- In [`portal/api/src/auth.ts`](../../portal/api/src/auth.ts), add `emergency: ["create", "read", "update", "delete"]` to `statement` (`viewer`: `["read"]`, `member`: `["read"]`, `admin`/`owner`: `["create", "read", "update", "delete"]`).
 
 #### 2. CRUD & Extension Assignment (`portal/api/src/routes/telephony.ts` & `extensions.ts`)
 - Mount `emergencyLocations` via `crudRoutes` in `portal/api/src/routes/telephony.ts` and register `app.route("/api/emergency-locations", emergencyLocations)` in `portal/api/src/app.ts`:
@@ -297,7 +130,7 @@ Several features below assume a link that **does not exist**: "the user's own ex
 - Kamailio's ingress bypass is Bug 3. Ship it with this section, not after it.
 
 #### 4. Portal Frontend (`portal/web/src/routes/_app/emergency.tsx`)
-- Switch `emergencyLocations` in [`portal/web/src/lib/api.ts`](../portal/web/src/lib/api.ts) from `getWithFallback(...)` to `api.get(...)` (Bug 11), and remove `<MockFeatureBanner />` from `emergency.tsx`.
+- Switch `emergencyLocations` in [`portal/web/src/lib/api.ts`](../../portal/web/src/lib/api.ts) from `getWithFallback(...)` to `api.get(...)` (Bug 11), and remove `<MockFeatureBanner />` from `emergency.tsx`.
 
 ---
 
@@ -306,7 +139,7 @@ Several features below assume a link that **does not exist**: "the user's own ex
 **Current state (checked):** `outboundRoute.trunkId` is a single foreign key (`onDelete: "restrict"`). Kamailio's `failure_route[MANAGE_CARRIER_FAILOVER]` only logs a carrier failure. Its comment already says failover belongs in the FreeSWITCH dialplan, because only FreeSWITCH still has the dialled number. Trunk credentials are `trunk.username` and `trunk.passwordEnc`, set through `PUT /api/trunks/:id/password`. Register-mode trunks are rejected while enabled (`trunks.validate`) and are filtered out of both `cacheRouteTable()` and `fs-xml.ts` (`eq(trunk.authMode, "ip")`).
 
 #### 1. Ordered Failover Trunks on Outbound Routes (from OpenWeb PBX)
-- Add `backupTrunkId` to `outboundRoute` in [`portal/api/src/db/schema.ts`](../portal/api/src/db/schema.ts):
+- Add `backupTrunkId` to `outboundRoute` in [`portal/api/src/db/schema.ts`](../../portal/api/src/db/schema.ts):
   ```ts
   backupTrunkId: text("backup_trunk_id").references(() => trunk.id, {
     onDelete: "set null",
@@ -327,7 +160,7 @@ Several features below assume a link that **does not exist**: "the user's own ex
   ```
 
 #### 2. Registration-Based Trunks (`authMode = "register"`) via Kamailio `uacreg`
-- In [`resources/conf/kamailio/kamailio.cfg`](../resources/conf/kamailio/kamailio.cfg), add `uac` registration parameters:
+- In [`resources/conf/kamailio/kamailio.cfg`](../../resources/conf/kamailio/kamailio.cfg), add `uac` registration parameters:
   ```kamailio
   modparam("uac", "restore_mode", "none")
   modparam("uac", "reg_db_url", DBURL)
@@ -336,7 +169,7 @@ Several features below assume a link that **does not exist**: "the user's own ex
   modparam("uac", "reg_retry_interval", 120)
   modparam("uac", "reg_contact_addr", "@PBX_FQDN@:@SIP_PORT@")
   ```
-- In [`portal/api/src/services/kamailio-sync.ts`](../portal/api/src/services/kamailio-sync.ts), extend `syncTrunkAddress(trunk)` and `removeTrunkAddress(trunkId)`:
+- In [`portal/api/src/services/kamailio-sync.ts`](../../portal/api/src/services/kamailio-sync.ts), extend `syncTrunkAddress(trunk)` and `removeTrunkAddress(trunkId)`:
   - When `trunk.authMode === "register"` and `trunk.enabled`:
     - Resolve the carrier host (IP literal or DNS `A` record via `dns.promises.lookup`) into `address` so inbound INVITEs from the registered carrier pass `allow_source_address("1")`.
     - Decrypt `trunk.passwordEnc` via `decrypt()` and upsert into Kamailio's `uacreg` table (`l_uuid = trunk.id.slice(0, 64)`, `l_username = trunk.username`, `l_domain = sipDomain`, `r_username = trunk.username`, `r_domain = trunk.fromDomain ?? trunk.host`, `realm = trunk.fromDomain ?? trunk.host`, `auth_username = trunk.username`, `auth_password = plaintext`, `auth_proxy = "sip:" + trunk.host + ":" + trunk.port + ";transport=" + trunk.transport`, `expires = 3600`).
@@ -370,7 +203,7 @@ Several features below assume a link that **does not exist**: "the user's own ex
   - Using `media_bug_answer_req=true` + `execute_on_answer=record_session` guarantees that:
     1. FreeSWITCH never converts `180 Ringing` into silent `183 Session Progress` early media before the B-leg answers.
     2. Unanswered/abandoned calls never create 0-byte WAV files on disk.
-    3. `vars.recording_file` is automatically present in the XML CDR, so `parseCdrXml()` in [`portal/api/src/services/cdr.ts`](../portal/api/src/services/cdr.ts) stores `cdr.recordingPath` with zero changes to the CDR parser.
+    3. `vars.recording_file` is automatically present in the XML CDR, so `parseCdrXml()` in [`portal/api/src/services/cdr.ts`](../../portal/api/src/services/cdr.ts) stores `cdr.recordingPath` with zero changes to the CDR parser.
   - Do not shell out from Lua. The earlier draft's `os.execute("mkdir -p " .. dir)` was removed. Confirm on the target build that `record_session` creates missing parent directories. If it does not, create the per-domain tree from the API when a tenant is provisioned.
   - Read the prefix from the environment (`runtime.env`/`freeswitch.env`) rather than hard-coding `/usr/local/freeswitch`, so a non-default `PREFIX` keeps working.
   - Arm it in both tiers and on the inbound peer path (invariant 8, Bug 5).
@@ -416,12 +249,12 @@ Several features below assume a link that **does not exist**: "the user's own ex
 ### 3.1 Call Queues (`mod_callcenter`), ESL Wallboard & Queue Callbacks (`queues.tsx`)
 
 #### 1. FreeSWITCH Module & Config (`steps/31-freeswitch-config.sh`)
-- `applications/mod_callcenter` is already in `FS_ENABLE_MODULES` in [`steps/30-freeswitch.sh`](../steps/30-freeswitch.sh).
-- Add `mod_callcenter` to `FS_AUTOLOAD_ADD` in [`steps/31-freeswitch-config.sh`](../steps/31-freeswitch-config.sh) and ship `resources/conf/freeswitch/autoload_configs/callcenter.conf.xml`. Do not rely on the vanilla copy: step 31 would install the vanilla one if ours were missing, and that one defines a sample queue.
+- `applications/mod_callcenter` is already in `FS_ENABLE_MODULES` in [`steps/30-freeswitch.sh`](../../steps/30-freeswitch.sh).
+- Add `mod_callcenter` to `FS_AUTOLOAD_ADD` in [`steps/31-freeswitch-config.sh`](../../steps/31-freeswitch-config.sh) and ship `resources/conf/freeswitch/autoload_configs/callcenter.conf.xml`. Do not rely on the vanilla copy: step 31 would install the vanilla one if ours were missing, and that one defines a sample queue.
 - Queues and agents are created at runtime with `callcenter_config queue load|reload` and `callcenter_config agent add|set|del`, not by templating the config. Name queues `<id>@<sipDomain>` so two tenants can never collide.
 
 #### 2. Schema Additions (`portal/api/src/db/schema.ts`)
-- The existing `queue` table has `number`, `name`, `strategy` (free text, default `longest-idle-agent`), `mohSound`, `maxWaitSec`, `timeoutType`/`timeoutId` and `enabled`. `"queue"` is already in `destinationTypeEnum`. Expand that table in [`portal/api/src/db/schema.ts`](../portal/api/src/db/schema.ts), and add `queueAgent` and `queueCallback`. Constrain `strategy` to `mod_callcenter`'s names in `validate`, since the column itself is unconstrained text:
+- The existing `queue` table has `number`, `name`, `strategy` (free text, default `longest-idle-agent`), `mohSound`, `maxWaitSec`, `timeoutType`/`timeoutId` and `enabled`. `"queue"` is already in `destinationTypeEnum`. Expand that table in [`portal/api/src/db/schema.ts`](../../portal/api/src/db/schema.ts), and add `queueAgent` and `queueCallback`. Constrain `strategy` to `mod_callcenter`'s names in `validate`, since the column itself is unconstrained text:
   ```ts
   // Additional columns on queue:
   maxWaitNoAgentSec: integer("max_wait_no_agent_sec").default(90).notNull(),
@@ -477,7 +310,7 @@ Several features below assume a link that **does not exist**: "the user's own ex
   ```
 
 #### 3. Destination & Lua Runtime (`resources/lua/queue.lua` & `qwixbox.lua`)
-- Remove `if (effectiveType === "queue") return "Queues are not implemented";` in [`portal/api/src/routes/telephony.ts`](../portal/api/src/routes/telephony.ts) and add `case "queue": return tenantOwns(queue, queue.organizationId, queue.id, id_, organizationId);`.
+- Remove `if (effectiveType === "queue") return "Queues are not implemented";` in [`portal/api/src/routes/telephony.ts`](../../portal/api/src/routes/telephony.ts) and add `case "queue": return tenantOwns(queue, queue.organizationId, queue.id, id_, organizationId);`.
 - Add `kind === "queue"` to `callState()` (`portal/api/src/services/call-state.ts`), `keys.queue(domain, id)` to `portal/api/src/services/redis.ts`, and `cacheQueues(organizationId)` to `portal/api/src/services/cache.ts` (including `cacheFeatureNumber(tenant.sipDomain, q.number, "queue", q.id)`).
 - Add `elseif dtype == "queue" then` in `resources/lua/qwixbox.lua` (`session:execute("lua", string.format("queue.lua %s %s %d", domain, did, depth))`).
 - Create `resources/lua/queue.lua`:
@@ -491,7 +324,7 @@ Several features below assume a link that **does not exist**: "the user's own ex
 - Mount `/api/queues` and `/api/queue-agents` in `portal/api/src/app.ts`.
 - Add ESL helpers in `portal/api/src/services/esl.ts` (`syncCallcenterQueue`, `syncCallcenterAgent`, `getQueueLiveStats`) to synchronize queues, agents, and tiers into `mod_callcenter` via `callcenter_config` ESL commands and expose live wallboard metrics (`GET /api/queues/wallboard`).
 - `esl.ts` is a **one-shot command client** that opens a socket, sends one `api` command and closes. A wallboard and agent-state history need a **persistent event subscription** (`event plain CUSTOM callcenter::info`). That is a new long-lived consumer. Start it in `src/index.ts`, which owns the background workers (`app.ts` must stay timer-free), and reconnect on loss. Also re-sync every queue and agent into `mod_callcenter` after a FreeSWITCH restart, because its runtime state does not survive one. Treat it like the Redis warm sentinel.
-- Agent feature codes (`*60`–`*62` in `missing-features-implementation.md`) go into `FEATURE_CODES` in **both** `xml_handler.lua` and `fs-xml.ts`.
+- Proposed agent feature codes (`*60`–`*62`; verify number conflicts before adoption) go into `FEATURE_CODES` in **both** `xml_handler.lua` and `fs-xml.ts`.
 - Switch `queues` and `queueAgents` in `portal/web/src/lib/api.ts` from `getWithFallback` to `api.get`, and remove `<MockFeatureBanner />` from `portal/web/src/routes/_app/queues.tsx`.
 
 ---
@@ -680,8 +513,8 @@ Several features below assume a link that **does not exist**: "the user's own ex
   ```
 
 #### 2. Redis Inbound Caller-ID Enrichment & Vendor XML Phonebook (FS PBX Pattern)
-- Register `cid: (domain: string, number: string) => \`qwixbox:cid:\${domain}:\${number}\`` and `\`qwixbox:cid:\${domain}:*\`` in [`portal/api/src/services/redis.ts`](../portal/api/src/services/redis.ts).
-- Add `cacheContacts(organizationId)` to [`portal/api/src/services/cache.ts`](../portal/api/src/services/cache.ts): populates `qwixbox:cid:<domain>:<normalizedNumber>` -> `JSON.stringify({ name: c.name, company: c.company, vip: c.vip })`, and if `c.speedDial` is set (e.g. `*01`), populates `cacheFeatureNumber(domain, c.speedDial, "external", c.number)`.
+- Register `cid: (domain: string, number: string) => \`qwixbox:cid:\${domain}:\${number}\`` and `\`qwixbox:cid:\${domain}:*\`` in [`portal/api/src/services/redis.ts`](../../portal/api/src/services/redis.ts).
+- Add `cacheContacts(organizationId)` to [`portal/api/src/services/cache.ts`](../../portal/api/src/services/cache.ts): populates `qwixbox:cid:<domain>:<normalizedNumber>` -> `JSON.stringify({ name: c.name, company: c.company, vip: c.vip })`, and if `c.speedDial` is set (e.g. `*01`), populates `cacheFeatureNumber(domain, c.speedDial, "external", c.number)`.
 - Inbound DID calls never pass through `xml_handler.lua` (invariant 8). Do the lookup in **`destination.lua`**, which runs for every DID on both tiers (the `qwixbox_did` variable marks a DID entry): `qwixbox.redis_get("qwixbox:cid:<domain>:<caller>")`, then set `effective_caller_id_name` (prefixing `[VIP] ` when `vip === true`). Normalize the caller number to the same form the cache stores. Carriers send `+1NXX…`, `1NXX…` and `NXX…` interchangeably. Strip any `%` and control characters from contact names before caching. Names are tenant-controlled, and `qwixbox.redis_get` refuses keys containing `%`, but not values.
 - Speed dials cached through `cacheFeatureNumber()` resolve only in the Lua tier. `fs-xml.ts` does not read `qwixbox:num:`, so add a matching lookup there (invariant 6).
 - In `portal/api/src/routes/contacts.ts`, expose:
@@ -808,7 +641,7 @@ Several features below assume a link that **does not exist**: "the user's own ex
 
 #### 2. Real `SIP.js` Client in `portal/web/src/components/WebphoneDrawer.tsx`
 - Add `sip.js` to `portal/web/package.json`.
-- Replace the `setInterval` mock timer in [`portal/web/src/components/WebphoneDrawer.tsx`](../portal/web/src/components/WebphoneDrawer.tsx) with a real `SIP.js` `UserAgent` + `Registerer` + `Inviter` / `Invitation` state machine connected to `wss://<pbxFqdn>:<wssPort>`. Kamailio's `WITH_WEBRTC` listener and the `rtpengine` DTLS-SRTP handling in [`resources/conf/kamailio/kamailio.cfg`](../resources/conf/kamailio/kamailio.cfg) are **configured but untested**, per roadmap item 14: no browser has ever connected. `WITH_WEBRTC` is defined only when `ENABLE_WEBRTC=1` (the default) *and* the TLS certificate is ready (`34-kamailio-config.sh`). Treat the first browser registration as a verification task, not a given.
+- Replace the `setInterval` mock timer in [`portal/web/src/components/WebphoneDrawer.tsx`](../../portal/web/src/components/WebphoneDrawer.tsx) with a real `SIP.js` `UserAgent` + `Registerer` + `Inviter` / `Invitation` state machine connected to `wss://<pbxFqdn>:<wssPort>`. Kamailio's `WITH_WEBRTC` listener and the `rtpengine` DTLS-SRTP handling in [`resources/conf/kamailio/kamailio.cfg`](../../resources/conf/kamailio/kamailio.cfg) are **configured but untested**, per roadmap item 14: no browser has ever connected. `WITH_WEBRTC` is defined only when `ENABLE_WEBRTC=1` (the default) *and* the TLS certificate is ready (`34-kamailio-config.sh`). Treat the first browser registration as a verification task, not a given.
 - Every call-control route (`transfer`, `hangup`, `eavesdrop`) must check that the target UUID carries this tenant's `qwixbox_org` before acting. Add a `call` permission to `statement` for them. An `eavesdrop` originate uses `user/<ext>@<domain>`, never `sofia/internal/...` (invariant 9).
 
 ---
@@ -818,12 +651,12 @@ Several features below assume a link that **does not exist**: "the user's own ex
 ### 4.1 "Where Will This Call Go?" Route Simulator & Temporary Office-Hours Override (from OpenWeb PBX)
 
 #### 1. Auto-Expiring Office-Hours Override on `timeCondition`
-- Add `overrideMode` and `overrideUntil` to `timeCondition` in [`portal/api/src/db/schema.ts`](../portal/api/src/db/schema.ts):
+- Add `overrideMode` and `overrideUntil` to `timeCondition` in [`portal/api/src/db/schema.ts`](../../portal/api/src/db/schema.ts):
   ```ts
   overrideMode: text("override_mode"), // null | "force_match" | "force_no_match"
   overrideUntil: timestamp("override_until"),
   ```
-- In [`resources/lua/time_condition.lua`](../resources/lua/time_condition.lua), before checking `cond.rules`, evaluate:
+- In [`resources/lua/time_condition.lua`](../../resources/lua/time_condition.lua), before checking `cond.rules`, evaluate:
   ```lua
   if cond.overrideMode and cond.overrideUntilEpoch and os.time() < cond.overrideUntilEpoch then
     if cond.overrideMode == "force_match" then
@@ -836,7 +669,7 @@ Several features below assume a link that **does not exist**: "the user's own ex
   end
   ```
   Once `os.time() >= cond.overrideUntilEpoch`, normal schedule evaluation resumes automatically without requiring an admin to remember to turn off a holiday/snow-day toggle.
-- `overrideUntilEpoch` is a derived field. Compute it in `cacheTimeConditions()` and in `callState(..., "tc", ...)`, so both tiers agree. Use `force_match`/`force_no_match` everywhere. `missing-features-implementation.md` previously said `force_open`/`force_closed`; this name follows the `match*`/`noMatch*` columns. Use `timestamp(..., { withTimezone: true })`: every other timestamp in the schema is naive, and an expiry is exactly where that bites.
+- `overrideUntilEpoch` is a derived field. Compute it in `cacheTimeConditions()` and in `callState(..., "tc", ...)`, so both tiers agree. Use `force_match`/`force_no_match` everywhere. The retired summary previously said `force_open`/`force_closed`; this name follows the `match*`/`noMatch*` columns. Use `timestamp(..., { withTimezone: true })`: every other timestamp in the schema is naive, and an expiry is exactly where that bites.
 - Every write to a time condition already calls `rebuildTenant()`. An override that expires needs no write, because the Lua compares against `os.time()`.
 
 #### 2. Dry-Run Call Routing Simulator (`POST /api/routing/simulate`)
@@ -927,7 +760,7 @@ Several features below assume a link that **does not exist**: "the user's own ex
    - Deploy `/usr/local/sbin/qwixbox-restore` in `steps/51-backups.sh`: verifies archive integrity, confirms `/etc/qwixbox/config.env` (`ENCRYPTION_KEY`) is present, creates a pre-restore safety snapshot before touching PostgreSQL, restores `kamailio` and `qwixbox` databases, runs `drizzle-kit push --force`, reloads Kamailio, and rebuilds Redis tenant caches.
    - What the backup actually contains (`resources/conf/backups/qwixbox-backup`): a custom-format `pg_dump` per database, `pg_dumpall --globals-only`, and `config.tar.gz`, which must contain `etc/qwixbox/config.env`. A run is complete only if it wrote a `COMPLETE` marker. Redis is not backed up and does not need to be, because it is a pure cache that the warm watchdog rebuilds. Restore `globals.sql` first, so the roles exist before the database dumps reference them. Refuse to restore a backup directory without `COMPLETE`.
    - Running `drizzle-kit push --force` after a restore applies any destructive schema difference between the backup and the current code. If the backup is older than the code, that is intended. If it is newer, it destroys data. Compare first, and stop on any difference that would drop something.
-   - This is `mvp.md` blocker 5. The script is only proven once a restore into a fresh container brings back a tenant, its extensions and its registrations.
+   - This is `../mvp.md` blocker 5. The script is only proven once a restore into a fresh container brings back a tenant, its extensions and its registrations.
    - In `steps/31-freeswitch-config.sh`, before `restart_service freeswitch`, check `fs_cli -x "show calls count"`. If calls are active, run `fs_cli -x "fsctl pause inbound"` and wait up to `DRAIN_TIMEOUT_SEC="${DRAIN_TIMEOUT_SEC:-60}"` for active calls to finish before restarting FreeSWITCH.
    - The same applies to rtpengine in `35-rtpengine.sh`. `fs_cli` needs `-p "$FS_ESL_PASSWORD"`, because ESL is password-protected on 127.0.0.1. During the drain, new calls are refused by FreeSWITCH after Kamailio has accepted them, so callers hear a failure rather than a busy tone. Say so in the installer output. Under `tui_available`'s false branch (CI and containers) there are no calls, so the check must not prompt.
 
@@ -941,7 +774,7 @@ Several features below assume a link that **does not exist**: "the user's own ex
 | **Schema** | Full installer run in the Debian 13 container (step 41 runs `drizzle-kit push --force`), then a **re-run** over the finished install | Both exit 0. On the re-run, no table outside `schema.ts`/`auth-schema.ts` is dropped. |
 | **RBAC** | For every new route, sign in as `viewer` and attempt a write | `403`, while `owner` gets past the gate (to a `400` or `200`). A `200` for `viewer` means the gate is missing. |
 | **Pre-Phase Bug Fixes** | Inbound carrier call (`X-Trusted-Peer: 1`) to an extension with `forwardAllTo` set to an external number. `*98` from an authenticated extension. `911` while the account holds `MAX_CONCURRENT_CALLS` calls. Disable an extension that a DID points at. Run `fs_cli -x xml_flush_cache` between phases. | The forwarded call leaves through the trunk with the tenant's caller ID and counts against the forwarding extension. `*98` still prompts. The 911 INVITE reaches FreeSWITCH. The DID stops routing to the disabled extension. |
-| **Phase 1 (MVP Gaps)** | Needs `mvp.md` item 1 (two-way audio) first. Create an emergency location, a registration trunk and a failover outbound route. Test post-answer recording and voicemail playback in `messages.tsx`. | ELIN sent on 911 and the email alert delivered. `uacreg` populated, and the carrier challenge on INVITE answered. WAV created only after the B-leg answers, and none for unanswered calls. Voicemail audio streams, and read/unread round-trips. MWI is out of scope until presence exists. |
+| **Phase 1 (MVP Gaps)** | Needs `../mvp.md` item 1 (two-way audio) first. Create an emergency location, a registration trunk and a failover outbound route. Test post-answer recording and voicemail playback in `messages.tsx`. | ELIN sent on 911 and the email alert delivered. `uacreg` populated, and the carrier challenge on INVITE answered. WAV created only after the B-leg answers, and none for unanswered calls. Voicemail audio streams, and read/unread round-trips. MWI is out of scope until presence exists. |
 | **Phase 2 (Zero Mock Screens)** | `grep getWithFallback portal/web/src/lib/api.ts`. Open each formerly mock screen against a live API. | No `getWithFallback` left, or it is dev-only, and the production bundle does not contain `mock/data.ts`. Each page reads and writes live endpoints. A browser registers over WSS and completes a call with audio. |
 | **Phase 3 (Best Practices)** | Run the route simulator against the shared time-condition fixtures. Toggle day/night by feature code and by API. Call from a blocked number with Redis warm and again with it flushed. Check trunk readiness. | The simulator agrees with `time_condition.lua` on every fixture. The toggle changes routing (lamps are out of scope until presence exists). A blocked caller is rejected on both tiers without ringing anyone. |
 | **Architecture** | Any change to apt packages (`ffmpeg`) or FreeSWITCH modules | Re-run on `--platform linux/amd64` (CLAUDE.md). An arm64 pass is not a general pass. |

@@ -18,7 +18,7 @@ local ring_timeout = ext.ringTimeoutSec or 25
 if ext.forwardAllTo and ext.forwardAllTo ~= "" then
   qwixbox.log("extension", "info", "%s@%s: forwarded to %s", number, domain, ext.forwardAllTo)
   session:execute("set", "sip_h_X-Forwarded-From=" .. number)
-  qwixbox.go(session, domain, "external", ext.forwardAllTo, depth)
+  qwixbox.go(session, domain, "external", ext.forwardAllTo, depth, number)
   return
 end
 
@@ -28,7 +28,7 @@ local function no_answer_treatment(reason, forward_to)
   if forward_to and forward_to ~= "" then
     qwixbox.log("extension", "info", "%s@%s: %s, forwarding to %s", number, domain, reason, forward_to)
     session:execute("set", "sip_h_X-Forwarded-From=" .. number)
-    qwixbox.go(session, domain, "external", forward_to, depth)
+    qwixbox.go(session, domain, "external", forward_to, depth, number)
     return
   end
 

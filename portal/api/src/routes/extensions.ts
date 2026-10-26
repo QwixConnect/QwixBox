@@ -11,18 +11,27 @@ import {
   generateVoicemailPin,
 } from "../lib/crypto";
 import { recordAudit } from "../lib/audit";
-import {
-  cacheExtension,
-  invalidateExtension,
-  cacheRingGroups,
-} from "../services/cache";
-import { syncSubscriber, removeSubscriber } from "../services/kamailio-sync";
+import { unenforcedWrite } from "../lib/capabilities";
+import { referencedBy } from "../lib/references";
+import { claimNumber } from "../lib/numbers";
+import { env } from "../env";
+import { writeAndPublish, type Projection } from "../services/projections";
 import {
   actionForMethod,
   requirePermission,
   requireTenant,
   type AppEnv,
 } from "../middleware/tenant";
+
+// Subscriber row, directory and call-state cache, and the ring groups that list this extension -
+// all re-read from the database when the job runs (src/services/projections.ts).
+function publishExtension(
+  id: string,
+  number: string,
+  sipDomain: string,
+): Projection[] {
+  return [{ kind: "extension", target: id, payload: { number, sipDomain } }];
+}
 
 export const extensions = new Hono<AppEnv>();
 extensions.use("*", requireTenant);
@@ -72,11 +81,19 @@ extensions.post("/", async (c) => {
 
   const unsafe = unsafeDialplanFields(body);
   if (unsafe) return c.json({ error: unsafe }, 400);
+  const unenforced = unenforcedWrite(
+    "extension",
+    body,
+    undefined,
+    env.stirSigning,
+  );
+  if (unenforced) return c.json({ error: unenforced }, 400);
   if (!body.number || !body.displayName) {
     return c.json({ error: "number and displayName are required" }, 400);
   }
 
-  if (!/^[0-9]{1,15}$/.test(body.number))
+  const { number, displayName } = body;
+  if (!/^[0-9]{1,15}$/.test(number))
     return c.json({ error: "number must be 1 to 15 digits" }, 400);
   if (
     body.sipPassword !== undefined &&
@@ -106,29 +123,34 @@ extensions.post("/", async (c) => {
   const password = body.sipPassword ?? generateSipPassword();
   const pin = body.voicemailPin ?? generateVoicemailPin();
 
-  const [row] = await db
-    .insert(extension)
-    .values({
-      id: randomUUID(),
-      organizationId,
-      number: body.number,
-      displayName: body.displayName,
-      sipPasswordEnc: encrypt(password),
-      voicemailPinEnc: encrypt(pin),
-      voicemailEnabled: body.voicemailEnabled ?? true,
-      voicemailEmail: body.voicemailEmail ?? null,
-      callerIdName: body.callerIdName ?? null,
-      callerIdNumber: body.callerIdNumber ?? null,
-      codecPrefs: body.codecPrefs ?? null,
-      maxConcurrentCalls: body.maxConcurrentCalls ?? null,
-      deviceMac: body.deviceMac ?? null,
-    })
-    .returning();
+  const id = randomUUID();
+  const [row] = await writeAndPublish(
+    organizationId,
+    async (tx) => {
+      await claimNumber(tx, organizationId, number);
+      return tx
+        .insert(extension)
+        .values({
+          id,
+          organizationId,
+          number,
+          displayName,
+          sipPasswordEnc: encrypt(password),
+          voicemailPinEnc: encrypt(pin),
+          voicemailEnabled: body.voicemailEnabled ?? true,
+          voicemailEmail: body.voicemailEmail ?? null,
+          callerIdName: body.callerIdName ?? null,
+          callerIdNumber: body.callerIdNumber ?? null,
+          codecPrefs: body.codecPrefs ?? null,
+          maxConcurrentCalls: body.maxConcurrentCalls ?? null,
+          deviceMac: body.deviceMac ?? null,
+        })
+        .returning();
+    },
+    () => publishExtension(id, number, tenant.sipDomain),
+  );
 
   if (!row) return c.json({ error: "Insert failed" }, 500);
-
-  await syncSubscriber(row, tenant.sipDomain, password);
-  await cacheExtension(row.id);
   await recordAudit(c, {
     action: "create",
     entityType: "extension",
@@ -179,6 +201,13 @@ extensions.patch("/:id", async (c) => {
 
   const unsafe = unsafeDialplanFields(body);
   if (unsafe) return c.json({ error: unsafe }, 400);
+  const unenforced = unenforcedWrite(
+    "extension",
+    body,
+    before,
+    env.stirSigning,
+  );
+  if (unenforced) return c.json({ error: unenforced }, 400);
   if ("number" in body)
     return c.json({ error: "Extension numbers are immutable" }, 400);
   if (
@@ -241,27 +270,25 @@ extensions.patch("/:id", async (c) => {
     patch.voicemailPinEnc = encrypt(newPin);
   }
 
-  const [row] = await db
-    .update(extension)
-    .set(patch)
-    .where(
-      and(eq(extension.id, id), eq(extension.organizationId, organizationId)),
-    )
-    .returning();
-  if (!row) return c.json({ error: "Update failed" }, 500);
-
   const tenant = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.organizationId, organizationId),
   });
-  if (tenant) {
-    if (!row.enabled) {
-      await removeSubscriber(row.number, tenant.sipDomain);
-    } else {
-      await syncSubscriber(row, tenant.sipDomain, decrypt(row.sipPasswordEnc));
-    }
-    await cacheExtension(row.id);
-    await cacheRingGroups(organizationId);
-  }
+  const [row] = await writeAndPublish(
+    organizationId,
+    (tx) =>
+      tx
+        .update(extension)
+        .set(patch)
+        .where(
+          and(
+            eq(extension.id, id),
+            eq(extension.organizationId, organizationId),
+          ),
+        )
+        .returning(),
+    () => (tenant ? publishExtension(id, before.number, tenant.sipDomain) : []),
+  );
+  if (!row) return c.json({ error: "Update failed" }, 500);
   await recordAudit(c, {
     action: "update",
     entityType: "extension",
@@ -287,21 +314,32 @@ extensions.delete("/:id", async (c) => {
   });
   if (!before) return c.json({ error: "Not found" }, 404);
 
+  // Destinations point at an extension by id, and voicemail by number. Deleting it while they
+  // do would hand those calls to whoever is given the number next (I04).
+  const conflict = await referencedBy(organizationId, {
+    type: "extension",
+    id,
+    number: before.number,
+  });
+  if (conflict) return c.json({ error: conflict }, 409);
+
   const tenant = await db.query.tenantSettings.findFirst({
     where: eq(tenantSettings.organizationId, organizationId),
   });
 
-  await db
-    .delete(extension)
-    .where(
-      and(eq(extension.id, id), eq(extension.organizationId, organizationId)),
-    );
-
-  if (tenant) {
-    await removeSubscriber(before.number, tenant.sipDomain);
-    await invalidateExtension(organizationId, before.number, tenant.sipDomain);
-    await cacheRingGroups(organizationId);
-  }
+  await writeAndPublish(
+    organizationId,
+    (tx) =>
+      tx
+        .delete(extension)
+        .where(
+          and(
+            eq(extension.id, id),
+            eq(extension.organizationId, organizationId),
+          ),
+        ),
+    () => (tenant ? publishExtension(id, before.number, tenant.sipDomain) : []),
+  );
   await recordAudit(c, {
     action: "delete",
     entityType: "extension",

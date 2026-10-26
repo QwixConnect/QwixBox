@@ -19,21 +19,22 @@ import { useState } from "react";
 import { IconPlus } from "../../components/Icons";
 import {
 	DeleteButton,
+	ErrorAlert,
 	MockFeatureBanner,
 	PageHeader,
 	SegmentedTabs,
 	SurfaceCard,
 	WaveformPlayer,
 } from "../../components/Resource";
-import { useWebphone } from "../../components/WebphoneDrawer";
-import { endpoints } from "../../lib/api";
+import { useWebphone } from "../../components/webphone-context";
+import { endpoints, isUnavailable } from "../../lib/api";
 
 export const Route = createFileRoute("/_app/conferences")({
 	component: ConferencesPage,
 });
 
 function ConferencesPage() {
-	const { startCall } = useWebphone();
+	const phone = useWebphone();
 	const qc = useQueryClient();
 	const [tab, setTab] = useState<"conferences" | "parking" | "moh">(
 		"conferences",
@@ -117,7 +118,9 @@ function ConferencesPage() {
 				title="Conferences, Park & MOH"
 				subtitle="Audio bridge rooms, valet call parking lots, and hold music audio streams."
 				actions={
-					tab === "conferences" ? (
+					(tab === "conferences" && isUnavailable(confQuery.error)) ||
+					(tab === "parking" && isUnavailable(parkQuery.error)) ? null : tab ===
+						"conferences" ? (
 						<Button
 							leftSection={<IconPlus size={17} />}
 							onClick={() => setConfModal(true)}
@@ -161,6 +164,10 @@ function ConferencesPage() {
 				title="Conferencing, Valet Park & MOH (Mock-Backed UI)"
 				description="Audio bridges (mod_conference), valet parking slots (mod_valet_parking), and hold playlists (mod_local_stream) are seeded in the portal mock store. See docs/roadmap.md for backend dialplan synthesis."
 			/>
+
+			{tab === "conferences" && <ErrorAlert error={confQuery.error} />}
+			{tab === "parking" && <ErrorAlert error={parkQuery.error} />}
+			{tab === "moh" && <ErrorAlert error={mohQuery.error} />}
 
 			{tab === "conferences" && (
 				<SimpleGrid cols={{ base: 1, md: 3 }} spacing={20}>
@@ -224,17 +231,19 @@ function ConferencesPage() {
 								</Stack>
 
 								<Group justify="space-between">
-									<Button
-										variant="default"
-										size="sm"
-										onClick={() => startCall(room.number, room.name)}
-										style={{
-											background: "var(--qb-bg)",
-											border: "1px solid var(--qb-separator)",
-										}}
-									>
-										Join Room
-									</Button>
+									{phone && (
+										<Button
+											variant="default"
+											size="sm"
+											onClick={() => phone.startCall(room.number, room.name)}
+											style={{
+												background: "var(--qb-bg)",
+												border: "1px solid var(--qb-separator)",
+											}}
+										>
+											Join Room
+										</Button>
+									)}
 									<DeleteButton
 										what={`conference ${room.name}`}
 										onConfirm={() =>

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { extension, tenantSettings } from "../db/schema";
-import { cacheExtension } from "../services/cache";
+import { writeAndPublish } from "../services/projections";
 import { recordAudit } from "../lib/audit";
 import { safeEqual } from "../lib/crypto";
 
@@ -93,14 +93,23 @@ fsFeature.post("/", async (c) => {
     return c.json({ ok: false, error: "nothing to change" }, 400);
   }
 
-  const [row] = await db
-    .update(extension)
-    .set(patch)
-    .where(eq(extension.id, before.id))
-    .returning();
+  const [row] = await writeAndPublish(
+    tenant.organizationId,
+    (tx) =>
+      tx
+        .update(extension)
+        .set(patch)
+        .where(eq(extension.id, before.id))
+        .returning(),
+    () => [
+      {
+        kind: "extension",
+        target: before.id,
+        payload: { number: before.number, sipDomain: tenant.sipDomain },
+      },
+    ],
+  );
   if (!row) return c.json({ ok: false, error: "update failed" }, 500);
-
-  await cacheExtension(row.id);
 
   await recordAudit(c, {
     action: "update",

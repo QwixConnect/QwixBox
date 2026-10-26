@@ -35,15 +35,17 @@ import {
 	RoleGate,
 	SurfaceCard,
 } from "../../components/Resource";
-import { useWebphone } from "../../components/WebphoneDrawer";
+import { useWebphone } from "../../components/webphone-context";
 import { type Extension, endpoints } from "../../lib/api";
+import { notifyFailed } from "../../lib/notify";
+import { useUnenforced } from "../../lib/use-unenforced";
 
 export const Route = createFileRoute("/_app/extensions")({
 	component: ExtensionsPage,
 });
 
 function ExtensionsPage() {
-	const { startCall } = useWebphone();
+	const phone = useWebphone();
 	const qc = useQueryClient();
 	const list = useQuery({
 		queryKey: ["extensions"],
@@ -106,9 +108,11 @@ function ExtensionsPage() {
 		setOpen(true);
 	};
 
+	const unenforced = useUnenforced("extension");
+
 	const saveMut = useMutation({
 		mutationFn: async () => {
-			const payload = {
+			const payload = unenforced.omit({
 				number,
 				displayName,
 				voicemailEmail: voicemailEmail || null,
@@ -119,7 +123,7 @@ function ExtensionsPage() {
 				maxConcurrentCalls,
 				voicemailEnabled,
 				enabled,
-			};
+			});
 			if (editingExt) {
 				return endpoints.updateExtension(editingExt.id, payload);
 			}
@@ -174,6 +178,7 @@ function ExtensionsPage() {
 	const deleteMut = useMutation({
 		mutationFn: (id: string) => endpoints.deleteExtension(id),
 		onSuccess: () => void qc.invalidateQueries({ queryKey: ["extensions"] }),
+		onError: (error) => notifyFailed("Could not delete extension", error),
 	});
 
 	const extensions = list.data ?? [];
@@ -275,7 +280,9 @@ function ExtensionsPage() {
 										</Group>
 									</Table.Td>
 									<Table.Td>
-										{ext.callerIdNumber ? (
+										{unenforced.isUnenforced("callerIdNumber") ? (
+											<Text className="qb-caption">Set by outbound route</Text>
+										) : ext.callerIdNumber ? (
 											<Box>
 												<Text size="sm" fw={600}>
 													{ext.callerIdName || ext.displayName}
@@ -337,19 +344,21 @@ function ExtensionsPage() {
 									</Table.Td>
 									<Table.Td>
 										<Group gap={8} wrap="nowrap">
-											<Tooltip label={`Dial Ext ${ext.number}`}>
-												<ActionIcon
-													variant="subtle"
-													radius="xl"
-													size={36}
-													onClick={() =>
-														startCall(ext.number, ext.displayName)
-													}
-													style={{ color: "var(--qb-accent-text)" }}
-												>
-													<IconPhone size={16} />
-												</ActionIcon>
-											</Tooltip>
+											{phone && (
+												<Tooltip label={`Dial Ext ${ext.number}`}>
+													<ActionIcon
+														variant="subtle"
+														radius="xl"
+														size={36}
+														onClick={() =>
+															phone.startCall(ext.number, ext.displayName)
+														}
+														style={{ color: "var(--qb-accent-text)" }}
+													>
+														<IconPhone size={16} />
+													</ActionIcon>
+												</Tooltip>
+											)}
 											<RoleGate resource="extension" action="update">
 												<Group gap={6} wrap="nowrap">
 													<Button
@@ -475,12 +484,14 @@ function ExtensionsPage() {
 								placeholder="Northstar Sales"
 								value={callerIdName}
 								onChange={(e) => setCallerIdName(e.currentTarget.value)}
+								{...unenforced.props("callerIdName")}
 							/>
 							<TextInput
 								label="Outbound Caller ID Number (E.164)"
 								placeholder="+14165550101"
 								value={callerIdNumber}
 								onChange={(e) => setCallerIdNumber(e.currentTarget.value)}
+								{...unenforced.props("callerIdNumber")}
 							/>
 						</Group>
 						<Group grow>
@@ -502,6 +513,7 @@ function ExtensionsPage() {
 								onChange={(v) => setMaxConcurrentCalls(Number(v) || 4)}
 								min={1}
 								max={32}
+								{...unenforced.props("maxConcurrentCalls")}
 							/>
 						</Group>
 						<Switch

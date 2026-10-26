@@ -29,6 +29,8 @@ import {
 	SurfaceCard,
 } from "../../components/Resource";
 import { endpoints, type Trunk } from "../../lib/api";
+import { notifyFailed } from "../../lib/notify";
+import { useUnenforced } from "../../lib/use-unenforced";
 
 export const Route = createFileRoute("/_app/trunks")({
 	component: TrunksPage,
@@ -90,9 +92,11 @@ function TrunksPage() {
 		setOpen(true);
 	};
 
+	const unenforced = useUnenforced("trunk");
+
 	const saveMut = useMutation({
 		mutationFn: async () => {
-			const payload: Partial<Trunk> = {
+			const payload: Partial<Trunk> = unenforced.omit({
 				name,
 				host,
 				port,
@@ -104,7 +108,7 @@ function TrunksPage() {
 				priority,
 				carrierSigns,
 				enabled,
-			};
+			});
 			let saved: Trunk;
 			if (editingTrunk) {
 				saved = await endpoints.updateTrunk(editingTrunk.id, payload);
@@ -125,6 +129,7 @@ function TrunksPage() {
 	const remove = useMutation({
 		mutationFn: (id: string) => endpoints.deleteTrunk(id),
 		onSuccess: () => void qc.invalidateQueries({ queryKey: ["trunks"] }),
+		onError: (error) => notifyFailed("Could not delete trunk", error),
 	});
 
 	const trunks = list.data ?? [];
@@ -171,13 +176,14 @@ function TrunksPage() {
 				<SurfaceCard p={22}>
 					<Stack gap={4}>
 						<Text className="qb-caption" tt="uppercase" fw={700}>
-							Failover Mode
+							Carrier Failover
 						</Text>
 						<div className="qb-display" style={{ fontSize: 28 }}>
-							Priority LCR
+							None
 						</div>
 						<Text className="qb-caption">
-							Automatic hunting on 5xx carrier response
+							Each outbound route uses one trunk; a carrier failure is not
+							retried
 						</Text>
 					</Stack>
 				</SurfaceCard>
@@ -197,7 +203,6 @@ function TrunksPage() {
 								<Table.Th>SIP Endpoint</Table.Th>
 								<Table.Th>Transport</Table.Th>
 								<Table.Th>Auth & Signing</Table.Th>
-								<Table.Th>Priority</Table.Th>
 								<Table.Th>Status</Table.Th>
 								<Table.Th />
 							</Table.Tr>
@@ -232,10 +237,9 @@ function TrunksPage() {
 										<Text className="qb-caption">
 											{t.carrierSigns
 												? "Carrier signs STIR/SHAKEN"
-												: "Local STI-AS signing"}
+												: "Not signed by carrier"}
 										</Text>
 									</Table.Td>
-									<Table.Td fw={700}>#{t.priority}</Table.Td>
 									<Table.Td>
 										<Box
 											className="qb-online-pill"
@@ -341,12 +345,14 @@ function TrunksPage() {
 							<Select
 								label="Authentication Mode"
 								value={authMode}
-								onChange={(v) =>
-									v && setAuthMode(v as "ip" | "register")
-								}
+								onChange={(v) => v && setAuthMode(v as "ip" | "register")}
 								data={[
 									{ value: "ip", label: "IP ACL Peer" },
-									{ value: "register", label: "SIP REGISTER Digest" },
+									{
+										value: "register",
+										label: "SIP REGISTER Digest (not available yet)",
+										disabled: true,
+									},
 								]}
 							/>
 							<NumberInput
@@ -355,6 +361,7 @@ function TrunksPage() {
 								onChange={(v) => setPriority(Number(v) || 10)}
 								min={1}
 								max={1000}
+								{...unenforced.props("priority")}
 							/>
 						</Group>
 						{authMode === "register" && (
@@ -379,15 +386,18 @@ function TrunksPage() {
 								label="From Domain (optional)"
 								value={fromDomain}
 								onChange={(e) => setFromDomain(e.currentTarget.value)}
+								{...unenforced.props("fromDomain")}
 							/>
 							<TextInput
 								label="Codec Preferences"
 								value={codecPrefs}
 								onChange={(e) => setCodecPrefs(e.currentTarget.value)}
+								{...unenforced.props("codecPrefs")}
 							/>
 						</Group>
 						<Switch
 							label="Carrier signs outbound calls with STIR/SHAKEN PASSporT"
+							description="A note about the carrier for your records; this server neither enforces nor checks it."
 							checked={carrierSigns}
 							onChange={(e) => setCarrierSigns(e.currentTarget.checked)}
 						/>

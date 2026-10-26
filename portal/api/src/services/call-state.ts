@@ -26,6 +26,38 @@ export async function destinationNumber(
   return ext?.number ?? null;
 }
 
+type Extension = typeof extension.$inferSelect;
+type Tenant = typeof tenantSettings.$inferSelect;
+
+/**
+ * The caller ID an extension presents on an outbound call, before any route override (I03):
+ * its own, else the tenant default. Null means "set nothing" - the carrier sees what the call
+ * already carries. Both XML tiers use this, so a call cannot present one identity when the cache
+ * answers and another when the API does.
+ */
+export function outboundCallerId(ext: Extension | undefined, tenant: Tenant) {
+  return {
+    callerIdName: ext?.callerIdName ?? tenant.defaultCallerIdName ?? null,
+    callerIdNumber: ext?.callerIdNumber ?? tenant.defaultCallerIdNumber ?? null,
+  };
+}
+
+/** The `qwixbox:call:` entry for an extension, cached and served from one definition. */
+export function extensionCallState(ext: Extension, tenant: Tenant) {
+  return {
+    number: ext.number,
+    displayName: ext.displayName,
+    dnd: ext.dnd,
+    forwardAllTo: ext.forwardAllTo,
+    forwardBusyTo: ext.forwardBusyTo,
+    forwardNoAnswerTo: ext.forwardNoAnswerTo,
+    ringTimeoutSec: ext.ringTimeoutSec ?? tenant.defaultRingTimeoutSec,
+    callWaitingEnabled: ext.callWaitingEnabled,
+    voicemailEnabled: ext.voicemailEnabled,
+    ...outboundCallerId(ext, tenant),
+  };
+}
+
 // Used when Redis is unavailable. Never accept an organization id supplied by a caller.
 export async function callState(
   domain: string,
@@ -49,17 +81,7 @@ export async function callState(
       ),
     });
     if (!ext) return null;
-    return {
-      number: ext.number,
-      displayName: ext.displayName,
-      dnd: ext.dnd,
-      forwardAllTo: ext.forwardAllTo,
-      forwardBusyTo: ext.forwardBusyTo,
-      forwardNoAnswerTo: ext.forwardNoAnswerTo,
-      ringTimeoutSec: ext.ringTimeoutSec ?? tenant.defaultRingTimeoutSec,
-      callWaitingEnabled: ext.callWaitingEnabled,
-      voicemailEnabled: ext.voicemailEnabled,
-    };
+    return extensionCallState(ext, tenant);
   }
   if (kind === "rg") {
     const group = await db.query.ringGroup.findFirst({

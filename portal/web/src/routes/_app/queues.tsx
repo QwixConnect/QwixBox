@@ -19,6 +19,7 @@ import { useState } from "react";
 import { IconPlus } from "../../components/Icons";
 import {
 	DeleteButton,
+	ErrorAlert,
 	InitialsAvatar,
 	MockFeatureBanner,
 	PageHeader,
@@ -26,7 +27,7 @@ import {
 	SegmentedTabs,
 	SurfaceCard,
 } from "../../components/Resource";
-import { endpoints, type QueueAgentItem } from "../../lib/api";
+import { endpoints, isUnavailable, type QueueAgentItem } from "../../lib/api";
 
 export const Route = createFileRoute("/_app/queues")({
 	component: QueuesPage,
@@ -98,9 +99,9 @@ function QueuesPage() {
 	const totalAnswered = queues.reduce((s, q) => s + q.answeredToday, 0);
 	const avgSla =
 		queues.length > 0
-			? (
-					queues.reduce((s, q) => s + q.slaPercent, 0) / queues.length
-				).toFixed(1)
+			? (queues.reduce((s, q) => s + q.slaPercent, 0) / queues.length).toFixed(
+					1,
+				)
 			: "95.0";
 
 	return (
@@ -109,12 +110,14 @@ function QueuesPage() {
 				title="Call Queues & Wallboard"
 				subtitle="Real-time ACD queue telemetry, SLA compliance, and agent presence management."
 				actions={
-					<Button
-						leftSection={<IconPlus size={17} />}
-						onClick={() => setModalOpen(true)}
-					>
-						New Queue
-					</Button>
+					isUnavailable(queuesQuery.error) ? null : (
+						<Button
+							leftSection={<IconPlus size={17} />}
+							onClick={() => setModalOpen(true)}
+						>
+							New Queue
+						</Button>
+					)
 				}
 			/>
 
@@ -158,8 +161,7 @@ function QueuesPage() {
 							{totalWaiting}
 						</div>
 						<Text className="qb-caption">
-							Avg wait:{" "}
-							{Math.max(0, ...queues.map((q) => q.avgWaitSec))}s
+							Avg wait: {Math.max(0, ...queues.map((q) => q.avgWaitSec))}s
 						</Text>
 					</Stack>
 				</SurfaceCard>
@@ -198,6 +200,11 @@ function QueuesPage() {
 					</Stack>
 				</SurfaceCard>
 			</SimpleGrid>
+
+			{tab === "wallboard" && (
+				<ErrorAlert error={queuesQuery.error ?? agentsQuery.error} />
+			)}
+			{tab === "agents" && <ErrorAlert error={agentsQuery.error} />}
 
 			{tab === "wallboard" && (
 				<SimpleGrid cols={{ base: 1, lg: 3 }} spacing={20}>

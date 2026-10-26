@@ -1,6 +1,6 @@
 # FusionPBX reference implementation research
 
-Reviewed 2026-10-24 for the [QwixBox reference comparison](../reference.md). This is a source and documentation review, not a deployed-system acceptance test. “Implemented” below means the public code contains the implementation; it does not establish reliability, capacity, or security of a particular deployment.
+Reviewed 2026-10-24 for the [QwixBox reference comparison](reference-platforms.md). This is a source and documentation review, not a deployed-system acceptance test. “Implemented” below means the public code contains the implementation; it does not establish reliability, capacity, or security of a particular deployment.
 
 ## Snapshot and product boundary
 

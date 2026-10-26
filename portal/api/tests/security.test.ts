@@ -1,4 +1,5 @@
 import { beforeEach, expect, spyOn, test } from "bun:test";
+import { eq } from "drizzle-orm";
 
 // Run only against a disposable database: TEST_DATABASE_URL is deliberately required.
 if (!process.env.TEST_DATABASE_URL)
@@ -36,6 +37,22 @@ spyOn(redis, "safeDelPattern").mockImplementation(async (pattern) => {
     }
   return n;
 });
+// Same contract as the real script (tests/cache-publish.test.ts proves atomicity on Redis):
+// set the entries, delete matching keys the generation does not contain.
+spyOn(redis, "publishGeneration").mockImplementation(
+  async (patterns, exact, entries) => {
+    const matches = (key: string) =>
+      patterns.some((pattern) =>
+        pattern.endsWith("*")
+          ? key.startsWith(pattern.slice(0, -1))
+          : key === pattern,
+      );
+    for (const key of [...memory.keys(), ...exact])
+      if ((matches(key) || exact.includes(key)) && !entries.has(key))
+        memory.delete(key);
+    for (const [key, value] of entries) memory.set(key, value);
+  },
+);
 spyOn(esl, "flushXmlCache").mockResolvedValue(true);
 spyOn(auth.api, "getSession").mockImplementation(
   async ({ headers }: any) =>
@@ -216,7 +233,7 @@ test("disable removes subscriber and location; enable restores subscriber and ri
   await db
     .insert(schema.ringGroupMember)
     .values({ id: "rgm", ringGroupId: "rg", extensionId: ext.id });
-  await cache.cacheRingGroups("a");
+  await cache.cacheCallFlows("a");
   expect(
     (
       await request(
@@ -393,6 +410,27 @@ test("fallback peers are DID-only and duplicate ownership is prevented by the da
   ).toContain("tenant_b");
 });
 
+test("a call outside its tenant's context is moved into it before routing (I27)", async () => {
+  const { handleDialplan } = await import("../src/routes/fs-xml");
+  const form = {
+    "variable_sip_h_X-Tenant-Domain": "a.test",
+    "variable_sip_h_X-Auth-User": "101",
+    "Caller-Destination-Number": "14165551234",
+  };
+  // The SIP profile's context, and another tenant's: both are answered in the requested context
+  // (or FreeSWITCH ignores the answer) with a transfer into this tenant's own.
+  for (const hunt of ["default", "tenant_b"]) {
+    const xml = await handleDialplan({ ...form, "Hunt-Context": hunt });
+    expect(xml).toContain(`<context name="${hunt}">`);
+    expect(xml).toContain(
+      'application="transfer" data="14165551234 XML tenant_a"',
+    );
+  }
+  const inside = await handleDialplan({ ...form, "Hunt-Context": "tenant_a" });
+  expect(inside).toContain('<context name="tenant_a">');
+  expect(inside).not.toContain('application="transfer"');
+});
+
 test("concurrent DID claims from two tenants yield one success and a conflict", async () => {
   await db.insert(schema.member).values({
     id: "b-owner",
@@ -505,4 +543,759 @@ test("legacy outbound quarantine preserves unrelated tenant cache rebuilds", asy
   await cache.rebuildTenant("a");
   expect(memory.has("qwixbox:dir:a.test:101")).toBe(true);
   expect(JSON.parse(memory.get("qwixbox:routes:a.test")!)).toEqual([]);
+});
+
+// Settings the call path never reads must be refused, not stored and ignored (gate 8, I07/I22).
+test("unenforced settings are refused, inert and unchanged values still save", async () => {
+  for (const body of [
+    { recordingPolicy: "all" },
+    { maxConcurrentCalls: 50 },
+    { stirShakenEnabled: true },
+  ]) {
+    const res = await request("/tenant", body, "owner", "PATCH");
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("not enforced");
+  }
+  expect(
+    (
+      await request(
+        "/tenant",
+        { recordingPolicy: "none", timezone: "America/Toronto" },
+        "owner",
+        "PATCH",
+      )
+    ).status,
+  ).toBe(200);
+  const tenant = await db.query.tenantSettings.findFirst({
+    where: (t, { eq }) => eq(t.organizationId, "a"),
+  });
+  expect(tenant?.recordingPolicy).toBe("none");
+  expect(tenant?.maxConcurrentCalls).toBe(10);
+
+  expect(
+    (
+      await request("/extensions", {
+        number: "201",
+        displayName: "X",
+        maxConcurrentCalls: 4,
+      })
+    ).status,
+  ).toBe(400);
+  const created = await request("/extensions", {
+    number: "201",
+    displayName: "X",
+  });
+  expect(created.status).toBe(201);
+  const ext = await created.json();
+  expect(
+    (
+      await request(
+        `/extensions/${ext.id}`,
+        { maxConcurrentCalls: 4 },
+        "owner",
+        "PATCH",
+      )
+    ).status,
+  ).toBe(400);
+  expect(
+    (
+      await request(
+        `/extensions/${ext.id}`,
+        { displayName: "Y", maxConcurrentCalls: null },
+        "owner",
+        "PATCH",
+      )
+    ).status,
+  ).toBe(200);
+
+  for (const extra of [
+    { codecPrefs: "PCMU" },
+    { priority: 1 },
+    { fromDomain: "carrier.example" },
+  ]) {
+    expect(
+      (await request("/trunks", { name: "T", host: "192.0.2.10", ...extra }))
+        .status,
+    ).toBe(400);
+  }
+  expect(await db.query.trunk.findMany()).toHaveLength(0);
+  const sync = await import("../src/services/kamailio-sync");
+  const reload = spyOn(sync, "reloadKamailio").mockResolvedValue(true);
+  await pool.query(
+    "CREATE TABLE IF NOT EXISTS address (grp int, ip_addr text, mask int, port int, tag text); TRUNCATE address",
+  );
+  expect(
+    (await request("/trunks", { name: "T", host: "192.0.2.10", priority: 10 }))
+      .status,
+  ).toBe(201);
+  reload.mockRestore();
+});
+
+test("capabilities report every unenforced field to any tenant member", async () => {
+  const res = await app.request("/api/capabilities", {
+    headers: { "test-user": "viewer", "test-org": "a" },
+  });
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(Object.keys(body.unenforced.tenant_settings)).toContain(
+    "recordingPolicy",
+  );
+  expect(Object.keys(body.unenforced.extension)).toContain(
+    "maxConcurrentCalls",
+  );
+  expect(Object.keys(body.unenforced.trunk)).toContain("codecPrefs");
+  expect(body.stirSigning).toBe(false);
+});
+
+test("password-reset requests are limited by the configured rule, not the library default", async () => {
+  // The rule once named /forget-password, which the portal never calls, so the library's
+  // default (3 per minute) applied instead and the configured 5 per 5 minutes was dead.
+  const statuses: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    const res = await auth.handler(
+      new Request("https://localhost/api/auth/request-password-reset", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-real-ip": "203.0.113.21",
+        },
+        body: JSON.stringify({
+          email: "nobody@example.test",
+          redirectTo: "/reset-password",
+        }),
+      }),
+    );
+    statuses.push(res.status);
+  }
+  expect(statuses.slice(0, 5).every((s) => s !== 429)).toBe(true);
+  expect(statuses[5]).toBe(429);
+});
+
+test("revocation converges after Kamailio and Redis fail post-commit (R06)", async () => {
+  const kam = await import("../src/services/kamailio-sync");
+  const projections = await import("../src/services/projections");
+  const jobs = () =>
+    pool.query("SELECT attempts, last_error FROM projection_job");
+  const created = await request("/extensions", {
+    number: "101",
+    displayName: "X",
+  });
+  const ext = (await created.json()) as any;
+  await pool.query("INSERT INTO location VALUES ('101','a.test')");
+  expect((await jobs()).rowCount).toBe(0);
+
+  // Kamailio's database is unreachable at the moment the disable commits.
+  const down = spyOn(kam, "removeSubscriber").mockRejectedValue(
+    new Error("connect ECONNREFUSED"),
+  );
+  const res = await request(
+    `/extensions/${ext.id}`,
+    { enabled: false },
+    "owner",
+    "PATCH",
+  );
+  down.mockRestore();
+  expect(res.status).toBe(200);
+  expect((await pool.query("SELECT * FROM subscriber")).rowCount).toBe(1);
+  const queued = (await jobs()).rows;
+  expect(queued).toHaveLength(1);
+  expect(queued[0].last_error).toContain("ECONNREFUSED");
+
+  const status = (await (
+    await request("/tenant/projections", undefined, "owner", "GET")
+  ).json()) as any;
+  expect(status.pending).toBe(1);
+  expect(status.jobs[0].lastError).toContain("ECONNREFUSED");
+  expect(
+    (await request("/tenant/projections", undefined, "viewer", "GET")).status,
+  ).toBe(403);
+  expect(
+    ((await (await app.request("/health")).json()) as any).projections.pending,
+  ).toBe(1);
+
+  // Dependencies are back; after the backoff a restarted API drains on startup.
+  await Bun.sleep(2_100);
+  expect(await projections.drainProjections()).toEqual({ done: 1, failed: 0 });
+  expect((await pool.query("SELECT * FROM subscriber")).rowCount).toBe(0);
+  expect((await pool.query("SELECT * FROM location")).rowCount).toBe(0);
+  expect(memory.has("qwixbox:dir:a.test:101")).toBe(false);
+  expect((await jobs()).rowCount).toBe(0);
+
+  // Redis down instead: Kamailio is revoked, the cached directory entry is not, and the job
+  // stays until it is.
+  await request(`/extensions/${ext.id}`, { enabled: true }, "owner", "PATCH");
+  expect(memory.has("qwixbox:dir:a.test:101")).toBe(true);
+  (redis.publishGeneration as any).mockImplementationOnce(async () => {
+    throw new Error("Redis connection lost");
+  });
+  await request(`/extensions/${ext.id}`, { enabled: false }, "owner", "PATCH");
+  expect((await pool.query("SELECT * FROM subscriber")).rowCount).toBe(0);
+  expect(memory.has("qwixbox:dir:a.test:101")).toBe(true);
+  expect((await jobs()).rows[0].last_error).toContain("Redis");
+  await Bun.sleep(2_100);
+  await projections.drainProjections();
+  expect(memory.has("qwixbox:dir:a.test:101")).toBe(false);
+  expect((await jobs()).rowCount).toBe(0);
+  // Two real backoff waits, so longer than the default 5s.
+}, 20_000);
+
+test("a change committed while its projection runs is not lost (R06)", async () => {
+  const kam = await import("../src/services/kamailio-sync");
+  const projections = await import("../src/services/projections");
+  const created = await request("/extensions", {
+    number: "102",
+    displayName: "Y",
+  });
+  const ext = (await created.json()) as any;
+  const key = `extension:a:${ext.id}`;
+  await projections.enqueue(db, "a", [
+    {
+      kind: "extension",
+      target: ext.id,
+      payload: { number: "102", sipDomain: "a.test" },
+    },
+  ]);
+  // Another request commits a change to the same extension mid-run.
+  const real = kam.syncSubscriber;
+  const mid = spyOn(kam, "syncSubscriber").mockImplementation(
+    async (...args) => {
+      await projections.enqueue(db, "a", [
+        {
+          kind: "extension",
+          target: ext.id,
+          payload: { number: "102", sipDomain: "a.test" },
+        },
+      ]);
+      return real(...args);
+    },
+  );
+  expect(await projections.runNow([key])).toBe(true);
+  mid.mockRestore();
+  const left = await pool.query(
+    "SELECT attempts FROM projection_job WHERE key = $1",
+    [key],
+  );
+  expect(left.rowCount).toBe(1);
+  expect(left.rows[0].attempts).toBe(0);
+  expect(await projections.drainProjections()).toEqual({ done: 1, failed: 0 });
+  expect(
+    (await pool.query("SELECT 1 FROM projection_job WHERE key = $1", [key]))
+      .rowCount,
+  ).toBe(0);
+});
+
+test("a failed cache build leaves the previous generation live (R13)", async () => {
+  const callState = await import("../src/services/call-state");
+  await db
+    .insert(schema.ringGroup)
+    .values({ id: "rg", organizationId: "a", number: "600", name: "Sales" });
+  await cache.rebuildTenant("a");
+  const before = new Map(memory);
+  expect(before.has("qwixbox:tenant:a.test")).toBe(true);
+  expect(before.has("qwixbox:rg:a.test:rg")).toBe(true);
+
+  await db
+    .update(schema.tenantSettings)
+    .set({ timezone: "Europe/London" })
+    .where(eq(schema.tenantSettings.organizationId, "a"));
+  const broken = spyOn(callState, "callState").mockRejectedValue(
+    new Error("database went away mid-build"),
+  );
+  await expect(cache.rebuildTenant("a")).rejects.toThrow("mid-build");
+  broken.mockRestore();
+  // Nothing was written: not the new tenant settings, and nothing was purged.
+  expect(new Map(memory)).toEqual(before);
+
+  await cache.rebuildTenant("a");
+  expect(JSON.parse(memory.get("qwixbox:tenant:a.test")!).timezone).toBe(
+    "Europe/London",
+  );
+});
+
+test("a deleted call flow loses its keys; other feature numbers stay (R13)", async () => {
+  await db
+    .insert(schema.ringGroup)
+    .values({ id: "rg", organizationId: "a", number: "600", name: "Sales" });
+  await db
+    .insert(schema.ivrMenu)
+    .values({ id: "ivr", organizationId: "a", number: "700", name: "Main" });
+  await cache.cacheCallFlows("a");
+  expect(memory.has("qwixbox:num:a.test:600")).toBe(true);
+  expect(memory.has("qwixbox:num:a.test:700")).toBe(true);
+
+  await db.delete(schema.ringGroup).where(eq(schema.ringGroup.id, "rg"));
+  await cache.cacheCallFlows("a");
+  expect(memory.has("qwixbox:rg:a.test:rg")).toBe(false);
+  expect(memory.has("qwixbox:num:a.test:600")).toBe(false);
+  expect(memory.has("qwixbox:num:a.test:700")).toBe(true);
+});
+
+test("a referenced extension cannot be deleted; its number cannot inherit the calls (I04)", async () => {
+  const created = await request("/extensions", {
+    number: "101",
+    displayName: "Alice",
+  });
+  const alice = (await created.json()) as any;
+  const pointers = [
+    () =>
+      db.insert(schema.inboundRoute).values({
+        id: "did",
+        organizationId: "a",
+        didPattern: "+14165551234",
+        destinationType: "extension",
+        destinationId: alice.id,
+      }),
+    () =>
+      db.insert(schema.ringGroup).values({
+        id: "rg",
+        organizationId: "a",
+        number: "600",
+        name: "Sales",
+        failoverType: "extension",
+        failoverId: alice.id,
+      }),
+    () =>
+      db.insert(schema.ivrMenu).values({
+        id: "ivr",
+        organizationId: "a",
+        number: "700",
+        name: "Main",
+        timeoutType: "voicemail",
+        timeoutId: "101",
+      }),
+    () =>
+      db.insert(schema.ivrOption).values({
+        id: "opt",
+        ivrMenuId: "ivr",
+        digit: "1",
+        destinationType: "extension",
+        destinationId: alice.id,
+      }),
+    () =>
+      db.insert(schema.timeCondition).values({
+        id: "tc",
+        organizationId: "a",
+        name: "Hours",
+        rules: [],
+        noMatchType: "voicemail",
+        noMatchId: "101",
+      }),
+    () =>
+      db.insert(schema.queue).values({
+        id: "q",
+        organizationId: "a",
+        number: "800",
+        name: "Support",
+        timeoutType: "extension",
+        timeoutId: alice.id,
+      }),
+  ];
+  // Each pointer alone keeps the extension alive.
+  for (const add of pointers) {
+    await add();
+    const refused = await request(
+      `/extensions/${alice.id}`,
+      {},
+      "owner",
+      "DELETE",
+    );
+    expect(refused.status).toBe(409);
+  }
+  const body = (await (
+    await request(`/extensions/${alice.id}`, {}, "owner", "DELETE")
+  ).json()) as any;
+  for (const named of [
+    "inbound route +14165551234",
+    "ring group Sales (failover)",
+    "IVR Main (timeout)",
+    "IVR Main option 1",
+    "time condition Hours (no match)",
+    "queue Support (timeout)",
+  ])
+    expect(body.error).toContain(named);
+
+  // Repoint everything, and the delete goes through.
+  await pool.query(
+    "UPDATE inbound_route SET destination_type='hangup', destination_id=NULL; UPDATE ring_group SET failover_type=NULL, failover_id=NULL; UPDATE ivr_menu SET timeout_type=NULL, timeout_id=NULL; UPDATE ivr_option SET destination_type='hangup', destination_id=NULL; UPDATE time_condition SET no_match_type=NULL, no_match_id=NULL; UPDATE queue SET timeout_type=NULL, timeout_id=NULL",
+  );
+  expect(
+    (await request(`/extensions/${alice.id}`, {}, "owner", "DELETE")).status,
+  ).toBe(204);
+
+  // The number is reused; the DID does not follow it, in either tier.
+  const bob = (await (
+    await request("/extensions", { number: "101", displayName: "Bob" })
+  ).json()) as any;
+  await cache.rebuildTenant("a");
+  expect(JSON.parse(memory.get("qwixbox:did:a.test:+14165551234")!)).toEqual(
+    expect.objectContaining({ destinationType: "hangup" }),
+  );
+  const { destinationNumber } = await import("../src/services/call-state");
+  expect(await destinationNumber("a", "extension", bob.id)).toBe("101");
+});
+
+test("referenced call flows cannot be deleted; their own pointers do not count (I04)", async () => {
+  await db.insert(schema.ringGroup).values({
+    id: "rg",
+    organizationId: "a",
+    number: "600",
+    name: "Sales",
+  });
+  await db.insert(schema.ivrMenu).values({
+    id: "ivr",
+    organizationId: "a",
+    number: "700",
+    name: "Main",
+    timeoutType: "ivr",
+    timeoutId: "ivr",
+  });
+  await db.insert(schema.ivrOption).values({
+    id: "opt",
+    ivrMenuId: "ivr",
+    digit: "0",
+    destinationType: "ivr",
+    destinationId: "ivr",
+  });
+  await db.insert(schema.timeCondition).values({
+    id: "tc",
+    organizationId: "a",
+    name: "Hours",
+    rules: [],
+    matchType: "ring_group",
+    matchId: "rg",
+    noMatchType: "ivr",
+    noMatchId: "ivr",
+  });
+  await db.insert(schema.inboundRoute).values({
+    id: "did",
+    organizationId: "a",
+    didPattern: "+14165551234",
+    destinationType: "time_condition",
+    destinationId: "tc",
+  });
+
+  for (const path of [
+    "/ring-groups/rg",
+    "/ivr-menus/ivr",
+    "/time-conditions/tc",
+  ])
+    expect((await request(path, {}, "owner", "DELETE")).status).toBe(409);
+
+  // Another tenant's identically-named pointer is not this tenant's reference.
+  await db.insert(schema.ringGroup).values({
+    id: "rg-b",
+    organizationId: "b",
+    number: "600",
+    name: "Other",
+    failoverType: "ring_group",
+    failoverId: "rg",
+  });
+  await pool.query(
+    "UPDATE inbound_route SET destination_type='hangup' WHERE id='did'",
+  );
+  expect(
+    (await request("/time-conditions/tc", {}, "owner", "DELETE")).status,
+  ).toBe(204);
+  expect((await request("/ring-groups/rg", {}, "owner", "DELETE")).status).toBe(
+    204,
+  );
+  // The menu's own timeout and option point at itself, and go with it.
+  expect((await request("/ivr-menus/ivr", {}, "owner", "DELETE")).status).toBe(
+    204,
+  );
+});
+
+// What each tier would run for `number` dialled by an authenticated 101 in tenant a.
+async function bothTiers(number: string) {
+  const { handleDialplan } = await import("../src/routes/fs-xml");
+  await cache.rebuildTenant("a");
+  const warm = memory.get(`qwixbox:num:a.test:${number}`);
+  const cold = await handleDialplan({
+    "variable_sip_h_X-Tenant-Domain": "a.test",
+    "variable_sip_h_X-Auth-User": "101",
+    "Caller-Destination-Number": number,
+  });
+  const match = /destination\.lua a\.test (\w+) (\S+)"/.exec(cold);
+  return {
+    warm: warm ? JSON.parse(warm) : null,
+    cold: match ? { type: match[1], id: match[2] } : null,
+  };
+}
+
+test("a number belongs to one dialable resource across types (I19)", async () => {
+  const group = await request("/ring-groups", { number: "600", name: "Sales" });
+  expect(group.status).toBe(201);
+  const clash = await request("/ivr-menus", { number: "600", name: "Main" });
+  expect(clash.status).toBe(409);
+  expect(((await clash.json()) as any).error).toContain("ring group Sales");
+  expect(
+    (await request("/extensions", { number: "600", displayName: "X" })).status,
+  ).toBe(409);
+
+  // A number change is a claim too.
+  const ext = await request("/extensions", { number: "101", displayName: "A" });
+  expect(ext.status).toBe(201);
+  const menu = (await (
+    await request("/ivr-menus", { number: "700", name: "Main" })
+  ).json()) as any;
+  expect(
+    (
+      await request(
+        `/ivr-menus/${menu.id}`,
+        { number: "101" },
+        "owner",
+        "PATCH",
+      )
+    ).status,
+  ).toBe(409);
+  expect(
+    (
+      await request(
+        `/ivr-menus/${menu.id}`,
+        { number: "700" },
+        "owner",
+        "PATCH",
+      )
+    ).status,
+  ).toBe(200);
+
+  // The other tenant's 600 is its own.
+  expect(
+    (
+      await request(
+        "/ring-groups",
+        { number: "600", name: "B" },
+        "owner",
+        "POST",
+        "b",
+      )
+    ).status,
+  ).not.toBe(409);
+});
+
+test("concurrent creates of one number across types yield one success (I19)", async () => {
+  const results = await Promise.all([
+    request("/ring-groups", { number: "650", name: "Sales" }),
+    request("/ivr-menus", { number: "650", name: "Main" }),
+    request("/extensions", { number: "650", displayName: "X" }),
+  ]);
+  expect(results.map((r) => r.status).sort()).toEqual([201, 409, 409]);
+});
+
+test("a legacy duplicate resolves to the same destination warm and cold (I19)", async () => {
+  // Written past the API, as an install from before I19 could hold.
+  await db.insert(schema.ivrMenu).values({
+    id: "ivr",
+    organizationId: "a",
+    number: "600",
+    name: "Main",
+  });
+  await db.insert(schema.ringGroup).values({
+    id: "rg",
+    organizationId: "a",
+    number: "600",
+    name: "Sales",
+  });
+  const tiers = await bothTiers("600");
+  expect(tiers.cold).toEqual({ type: "ring_group", id: "rg" });
+  expect(tiers.warm).toEqual(tiers.cold);
+});
+
+test("outbound caller ID resolves route, then extension, then tenant, identically in both tiers (I03)", async () => {
+  const { handleDialplan } = await import("../src/routes/fs-xml");
+  await db.insert(schema.trunk).values({
+    id: "trunk",
+    organizationId: "a",
+    name: "Carrier",
+    host: "192.0.2.1",
+  });
+  await db.insert(schema.outboundRoute).values({
+    id: "route",
+    organizationId: "a",
+    name: "NANP",
+    pattern: "^1[0-9]{10}$",
+    patternSyntax: "pcre",
+    trunkId: "trunk",
+  });
+  const ext = (await (
+    await request("/extensions", { number: "101", displayName: "Alice" })
+  ).json()) as any;
+  const form = {
+    "variable_sip_h_X-Tenant-Domain": "a.test",
+    "variable_sip_h_X-Auth-User": "101",
+    "Caller-Destination-Number": "14165551234",
+  };
+  // Cold: what fs-xml.ts sets. Warm: what xml_handler.lua reads from the call state.
+  const tiers = async () => {
+    await cache.rebuildTenant("a");
+    const xml = await handleDialplan(form);
+    const cold = {
+      name: /effective_caller_id_name=([^"]*)"/.exec(xml)?.[1] ?? null,
+      number: /effective_caller_id_number=([^"]*)"/.exec(xml)?.[1] ?? null,
+    };
+    const state = JSON.parse(memory.get("qwixbox:call:a.test:101")!);
+    const routes = JSON.parse(memory.get("qwixbox:routes:a.test")!);
+    const warm = {
+      name: state.callerIdName || null,
+      number: routes[0].callerIdOverride || state.callerIdNumber || null,
+    };
+    expect(warm).toEqual(cold);
+    return cold;
+  };
+
+  // Nothing configured: nothing set, the call keeps its own identity.
+  expect(await tiers()).toEqual({ name: null, number: null });
+
+  const patch = (path: string, body: unknown) =>
+    request(path, body, "owner", "PATCH");
+  expect(
+    (
+      await patch("/tenant", {
+        defaultCallerIdName: "Acme",
+        defaultCallerIdNumber: "+14165550100",
+      })
+    ).status,
+  ).toBe(200);
+  expect(await tiers()).toEqual({ name: "Acme", number: "+14165550100" });
+
+  expect(
+    (
+      await patch(`/extensions/${ext.id}`, {
+        callerIdName: "Alice Smith",
+        callerIdNumber: "+14165550101",
+      })
+    ).status,
+  ).toBe(200);
+  expect(await tiers()).toEqual({
+    name: "Alice Smith",
+    number: "+14165550101",
+  });
+
+  expect(
+    (
+      await patch("/outbound-routes/route", {
+        callerIdOverride: "+14165550199",
+      })
+    ).status,
+  ).toBe(200);
+  expect(await tiers()).toEqual({
+    name: "Alice Smith",
+    number: "+14165550199",
+  });
+
+  // A name is set by a dialplan action, so `$` is refused.
+  expect(
+    (await patch(`/extensions/${ext.id}`, { callerIdName: "A $1 B" })).status,
+  ).toBe(400);
+});
+
+test("a carrier call reaches outbound routing only through a forward the tenant configured (R11)", async () => {
+  const { handleDialplan } = await import("../src/routes/fs-xml");
+  await db.insert(schema.trunk).values({
+    id: "trunk",
+    organizationId: "a",
+    name: "Carrier",
+    host: "192.0.2.1",
+  });
+  await db.insert(schema.outboundRoute).values({
+    id: "route",
+    organizationId: "a",
+    name: "NANP",
+    pattern: "^1[0-9]{10}$",
+    patternSyntax: "pcre",
+    trunkId: "trunk",
+  });
+  await request("/extensions", { number: "101", displayName: "Alice" });
+  await request("/extensions", { number: "102", displayName: "Bob" });
+  expect(
+    (
+      await request(
+        "/tenant",
+        { defaultCallerIdNumber: "+14165550100" },
+        "owner",
+        "PATCH",
+      )
+    ).status,
+  ).toBe(200);
+  const peer = {
+    "variable_sip_h_X-Trusted-Peer": "1",
+    "Hunt-Context": "tenant_a",
+    "Caller-Destination-Number": "14165551234",
+  };
+  const forward = {
+    variable_qwixbox_forward_to: "14165551234",
+    variable_qwixbox_forward_domain: "a.test",
+  };
+  const bridged = (xml: string) => xml.includes('application="bridge"');
+
+  // The peer itself is never an outbound caller: direct dial, and a forward of another number.
+  // Nor may it dial an extension: without a forward, a peer reaches DIDs only.
+  expect(bridged(await handleDialplan(peer))).toBe(false);
+  expect(
+    await handleDialplan({ ...peer, "Caller-Destination-Number": "102" }),
+  ).not.toContain("extension.lua");
+  expect(
+    bridged(
+      await handleDialplan({
+        ...peer,
+        ...forward,
+        variable_qwixbox_forward_to: "14165559999",
+      }),
+    ),
+  ).toBe(false);
+
+  // An extension's forward: placed and counted as that extension.
+  const viaExt = await handleDialplan({
+    ...peer,
+    ...forward,
+    variable_qwixbox_forward_from: "101",
+  });
+  expect(bridged(viaExt)).toBe(true);
+  expect(viaExt).toContain("sip_h_X-Auth-User=101");
+  expect(viaExt).toContain("effective_caller_id_number=+14165550100");
+
+  // A tenant-configured external destination (DID, IVR option): the tenant's identity.
+  const viaTenant = await handleDialplan({ ...peer, ...forward });
+  expect(bridged(viaTenant)).toBe(true);
+  expect(viaTenant).toContain('data="sip_h_X-Auth-User="');
+  expect(viaTenant).toContain("effective_caller_id_number=+14165550100");
+
+  // A forward to another extension resolves internally, still in the forward's tenant.
+  const internal = await handleDialplan({
+    ...peer,
+    "Caller-Destination-Number": "102",
+    variable_qwixbox_forward_to: "102",
+    variable_qwixbox_forward_domain: "a.test",
+    variable_qwixbox_forward_from: "101",
+  });
+  expect(internal).toContain("extension.lua a.test 102");
+
+  // An endpoint's forward must name its own tenant.
+  expect(
+    bridged(
+      await handleDialplan({
+        "variable_sip_h_X-Tenant-Domain": "b.test",
+        "variable_sip_h_X-Auth-User": "101",
+        "Hunt-Context": "tenant_b",
+        "Caller-Destination-Number": "14165551234",
+        ...forward,
+      }),
+    ),
+  ).toBe(false);
+});
+
+test("a kamcmd RPC error on stdout is a failed reload, so the projection retries", async () => {
+  const { kamcmdFailed } = await import("../src/services/kamailio-sync");
+  expect(kamcmdFailed(0, "Reload OK\n", "")).toBe(false);
+  expect(kamcmdFailed(0, "", "")).toBe(false);
+  // permissions/dispatcher within reload_delta of the previous reload: exit 0, error on stdout.
+  expect(kamcmdFailed(0, "error: 500 - ongoing reload\n", "")).toBe(true);
+  expect(
+    kamcmdFailed(
+      0,
+      "",
+      "ERROR: connect_unix_sock: connect(...): Permission denied",
+    ),
+  ).toBe(true);
+  expect(kamcmdFailed(1, "", "")).toBe(true);
 });

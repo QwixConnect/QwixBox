@@ -26,15 +26,17 @@ PostgreSQL, Redis, nginx, Postfix/OpenDKIM, and a Bun/Hono API with a React port
 
 ## Status
 
-Honest, because the alternative wastes your afternoon:
+Reviewed 2026-10-25. The install, registration and signalling rows below summarize historical
+acceptance records; they do not certify a fresh install of the current revision. Current checks,
+open findings and cleanup history are tracked in [docs/](docs/README.md).
 
 | | |
 |---|---|
-| **Installs and configures** | Proven. 28 steps from bare Debian, idempotent, 38 postflight checks |
-| **Registration** | Proven on real hardware. A softphone completes digest auth against the projected HA1 |
-| **Call setup** | Proven. Extension-to-extension, inbound DID and outbound-to-carrier all deliver the INVITE |
+| **Installs and configures** | Historical Debian arm64 install passed; current installer safety regressions pass. Full current-stack install remains owed |
+| **Registration** | Historical softphone registration; current real Kamailio fixture verifies valid/wrong/empty digest credentials |
+| **Call setup** | Historical signalling evidence for extension, inbound DID and outbound-to-carrier paths; current carrier/media acceptance remains owed |
 | **Two-way audio** | **Not yet confirmed.** rtpengine is wired and answers on its control socket; no call has been listened to end to end |
-| **Portal** | Working. Extensions, trunks, routing, call flows, calls, faxes, users, audit, settings |
+| **Portal** | Live core CRUD; tests/build pass. Missing-feature previews show "Not available on this server"; see [issues](docs/issues.md#telephony-and-portal-gaps) |
 | **Voicemail, fax, IVR DTMF** | Written and deployed; each needs the media path before it can be called done |
 
 Not ready to carry a paying customer's calls yet — [docs/mvp.md](docs/mvp.md) is the list of what
@@ -43,7 +45,7 @@ against the code rather than against intent.
 
 ## What it does
 
-**Telephony** — extensions with encrypted SIP credentials, SIP trunks (IP or registration auth),
+**Telephony** — extensions with encrypted SIP credentials, IP-authenticated SIP trunks (enabled registration trunks are rejected),
 inbound DID routing, outbound routing with regex patterns and digit manipulation, ring groups
 (simultaneous or sequential, with failover), IVR menus, time conditions for business hours and
 holidays, and per-user call handling: DND, call forwarding (all / busy / no answer), call waiting
@@ -83,7 +85,7 @@ lib/dns.sh              picks a DNS tier and dispatches; the only entry point st
 lib/dns-domainconnect.sh  Domain Connect - discovery and the browser approval flow
 lib/dns-cloudflare.sh   Cloudflare API - zone lookup and record upsert
 steps/                  the numbered step scripts
-docs/                   MVP checklist, roadmap, and design notes for features not yet built
+docs/                   current status, issues, change/deletion log, MVP, roadmap and designs
 resources/              systemd unit template
 resources/conf/         the config files the steps deploy, one directory per step
 resources/lua/          FreeSWITCH call-time scripts (XML handler, ring groups, IVR, ...)
@@ -153,14 +155,14 @@ how you create the instance, and where the inbound firewall lives.
 
 | | |
 |---|---|
-| OS | Debian 13 (trixie). Ubuntu also works; nothing else is supported. |
+| OS | Debian 13 (trixie) is the validation target. Preflight accepts Ubuntu; current Ubuntu behavior is unverified. |
 | vCPU | 2 minimum. The FreeSWITCH build is the heavy part; call capacity needs far less. |
 | RAM | 4 GB recommended, 2 GB is the floor (`00-preflight.sh` warns below ~1.8 GB). |
 | Disk | 20 GB. The build plus sound files needs about 10 GB, and the rest is logs, recordings and voicemail. |
-| Architecture | x86_64 or arm64. Both build; x86_64 is what this is verified on for production. |
+| Architecture | x86_64 or arm64. Historical FreeSWITCH builds covered both; a full current-stack amd64 acceptance pass is still owed. |
 
-A 2 vCPU / 4 GB instance handles a small business comfortably. The build takes roughly 10–20
-minutes on 2 vCPU — that is the slow part of the install, not the configuration.
+The sizes above are starting estimates, not measured call-capacity guarantees. Benchmark your
+intended workload; build time varies by host, architecture and dependency downloads.
 
 ### 2. Open the ports in the provider firewall
 
@@ -691,7 +693,7 @@ file up: without it the database passwords are unrecoverable.
 
 ## Requirements
 
-- Debian 13 (trixie) or Ubuntu, with systemd
+- Debian 13 (trixie) with systemd; Ubuntu is accepted by preflight but lacks current validation
 - Root/sudo access and internet access
 - A DNS record for `PBX_FQDN` pointing at the server
 - 2 vCPU, 4 GB RAM and 20 GB disk recommended; the installer warns below ~1.8 GB RAM or 15 GB
@@ -718,8 +720,8 @@ role/empty/error/slow controls. See [portal/web/README.md](portal/web/README.md)
 
 ## Upgrading and verifying review fixes
 
-See the repository-root `CHANGELOG.md` and `REVIEW-PLAN.md` for implementation status and remaining
-verification. Run the installer from the updated checkout so changed source/template hashes redeploy
+See [project status](docs/status.md), [active issues](docs/issues.md) and
+[the change log](docs/changelog.md) for implementation status, verification and deletions. Run the installer from the updated checkout so changed source/template hashes redeploy
 the affected steps. Reapplying step 34 loads the corrected HA1 authentication settings; reapplying
 step 31 moves runtime gateway credentials into a root-only environment file. Existing secrets are
 preserved. Retest both successful and refused SIP authentication before returning the PBX to service.

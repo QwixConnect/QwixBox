@@ -17,17 +17,9 @@ import {
 } from "../db/schema";
 import { crudRoutes, tenantOwns } from "../lib/crud";
 import { recordAudit } from "../lib/audit";
+import { referencedBy } from "../lib/references";
 import { encrypt } from "../lib/crypto";
-import {
-  cacheInboundRoutes,
-  cacheRouteTable,
-  rebuildTenant,
-} from "../services/cache";
-import {
-  reloadKamailio,
-  removeTrunkAddress,
-  syncTrunkAddress,
-} from "../services/kamailio-sync";
+import { writeAndPublish } from "../services/projections";
 import {
   requirePermission,
   requireTenant,
@@ -167,16 +159,10 @@ export const trunks = crudRoutes({
       ? `Trunk is used by routes: ${routes.map((r) => r.name).join(", ")}`
       : null;
   },
-  afterChange: async (organizationId, row, action) => {
-    if (action === "delete") {
-      await removeTrunkAddress(row.id as string);
-    } else {
-      await syncTrunkAddress(row as never);
-    }
-    if (!(await reloadKamailio()))
-      throw new Error("Kamailio reload failed; retry reconciliation");
-    await cacheRouteTable(organizationId);
-  },
+  // Address ACL, Kamailio reload and the route table that names this trunk.
+  project: (_organizationId, row) => [
+    { kind: "trunk", target: String(row.id) },
+  ],
 });
 
 const trunkSecrets = new Hono<AppEnv>();
@@ -241,9 +227,7 @@ export const inboundRoutes = crudRoutes({
       existing?.destinationId,
     );
   },
-  afterChange: async (organizationId) => {
-    await cacheInboundRoutes(organizationId);
-  },
+  project: () => [{ kind: "cache", target: "inbound" }],
 });
 
 export const outboundRoutes = crudRoutes({
@@ -291,9 +275,7 @@ export const outboundRoutes = crudRoutes({
     }
     return null;
   },
-  afterChange: async (organizationId) => {
-    await cacheRouteTable(organizationId);
-  },
+  project: () => [{ kind: "cache", target: "routes" }],
 });
 
 export const ringGroups = crudRoutes({
@@ -320,9 +302,9 @@ export const ringGroups = crudRoutes({
       existing?.failoverType,
       existing?.failoverId,
     ),
-  afterChange: async (organizationId) => {
-    await rebuildTenant(organizationId);
-  },
+  beforeDelete: (organizationId, row) =>
+    referencedBy(organizationId, { type: "ring_group", id: String(row.id) }),
+  project: () => [{ kind: "cache", target: "callflows" }],
 });
 
 const ringGroupMembers = new Hono<AppEnv>();
@@ -389,19 +371,24 @@ ringGroupMembers.post("/:id/members", async (c) => {
     );
   if (!ext) return c.json({ error: "Extension not found" }, 404);
 
-  const [row] = await db
-    .insert(ringGroupMember)
-    .values({
-      id: crypto.randomUUID(),
-      ringGroupId: groupId,
-      extensionId: body.extensionId,
-      position: body.position ?? 0,
-      delaySec: body.delaySec ?? 0,
-    })
-    .onConflictDoNothing()
-    .returning();
-
-  await rebuildTenant(organizationId);
+  const row = await writeAndPublish(
+    organizationId,
+    async (tx) => {
+      const [row] = await tx
+        .insert(ringGroupMember)
+        .values({
+          id: crypto.randomUUID(),
+          ringGroupId: groupId,
+          extensionId: body.extensionId!,
+          position: body.position ?? 0,
+          delaySec: body.delaySec ?? 0,
+        })
+        .onConflictDoNothing()
+        .returning();
+      return row;
+    },
+    (row) => (row ? [{ kind: "cache", target: "callflows" }] : []),
+  );
   return c.json(row ?? { status: "already a member" }, row ? 201 : 200);
 });
 
@@ -417,19 +404,24 @@ ringGroupMembers.delete("/:id/members/:memberId", async (c) => {
     );
   if (!group) return c.json({ error: "Ring group not found" }, 404);
 
-  const removed = await db
-    .delete(ringGroupMember)
-    .where(
-      and(
-        eq(ringGroupMember.id, c.req.param("memberId")),
-        eq(ringGroupMember.ringGroupId, group.id),
-      ),
-    )
-    .returning();
+  const removed = await writeAndPublish(
+    c.get("organizationId"),
+    (tx) =>
+      tx
+        .delete(ringGroupMember)
+        .where(
+          and(
+            eq(ringGroupMember.id, c.req.param("memberId")),
+            eq(ringGroupMember.ringGroupId, group.id),
+          ),
+        )
+        .returning(),
+    (removed) =>
+      removed.length ? [{ kind: "cache", target: "callflows" }] : [],
+  );
   if (removed.length === 0)
     return c.json({ error: "Member not found in this group" }, 404);
 
-  await rebuildTenant(c.get("organizationId"));
   return c.body(null, 204);
 });
 ringGroups.route("/", ringGroupMembers);
@@ -460,9 +452,9 @@ export const ivrMenus = crudRoutes({
       existing?.timeoutType,
       existing?.timeoutId,
     ),
-  afterChange: async (organizationId) => {
-    await rebuildTenant(organizationId);
-  },
+  beforeDelete: (organizationId, row) =>
+    referencedBy(organizationId, { type: "ivr", id: String(row.id) }),
+  project: () => [{ kind: "cache", target: "callflows" }],
 });
 
 const ivrOptions = new Hono<AppEnv>();
@@ -521,27 +513,30 @@ ivrOptions.put("/:id/options/:digit", async (c) => {
   );
   if (problem) return c.json({ error: problem }, 400);
 
-  const [row] = await db
-    .insert(ivrOption)
-    .values({
-      id: crypto.randomUUID(),
-      ivrMenuId: menu.id,
-      digit: c.req.param("digit"),
-      destinationType: body.destinationType as never,
-      destinationId: body.destinationId ?? null,
-      description: body.description ?? null,
-    })
-    .onConflictDoUpdate({
-      target: [ivrOption.ivrMenuId, ivrOption.digit],
-      set: {
-        destinationType: body.destinationType as never,
-        destinationId: body.destinationId ?? null,
-        description: body.description ?? null,
-      },
-    })
-    .returning();
-
-  await rebuildTenant(c.get("organizationId"));
+  const [row] = await writeAndPublish(
+    c.get("organizationId"),
+    (tx) =>
+      tx
+        .insert(ivrOption)
+        .values({
+          id: crypto.randomUUID(),
+          ivrMenuId: menu.id,
+          digit: c.req.param("digit"),
+          destinationType: body.destinationType as never,
+          destinationId: body.destinationId ?? null,
+          description: body.description ?? null,
+        })
+        .onConflictDoUpdate({
+          target: [ivrOption.ivrMenuId, ivrOption.digit],
+          set: {
+            destinationType: body.destinationType as never,
+            destinationId: body.destinationId ?? null,
+            description: body.description ?? null,
+          },
+        })
+        .returning(),
+    () => [{ kind: "cache", target: "callflows" }],
+  );
   return c.json(row);
 });
 
@@ -557,15 +552,19 @@ ivrOptions.delete("/:id/options/:digit", async (c) => {
     );
   if (!menu) return c.json({ error: "Not found" }, 404);
 
-  await db
-    .delete(ivrOption)
-    .where(
-      and(
-        eq(ivrOption.ivrMenuId, menu.id),
-        eq(ivrOption.digit, c.req.param("digit")),
-      ),
-    );
-  await rebuildTenant(c.get("organizationId"));
+  await writeAndPublish(
+    c.get("organizationId"),
+    (tx) =>
+      tx
+        .delete(ivrOption)
+        .where(
+          and(
+            eq(ivrOption.ivrMenuId, menu.id),
+            eq(ivrOption.digit, c.req.param("digit")),
+          ),
+        ),
+    () => [{ kind: "cache", target: "callflows" }],
+  );
   return c.body(null, 204);
 });
 ivrMenus.route("/", ivrOptions);
@@ -621,7 +620,10 @@ export const timeConditions = crudRoutes({
     }
     return null;
   },
-  afterChange: async (organizationId) => {
-    await rebuildTenant(organizationId);
-  },
+  beforeDelete: (organizationId, row) =>
+    referencedBy(organizationId, {
+      type: "time_condition",
+      id: String(row.id),
+    }),
+  project: () => [{ kind: "cache", target: "callflows" }],
 });

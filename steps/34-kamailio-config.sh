@@ -132,6 +132,12 @@ STIR_SHAKEN_ORIGID="${STIR_SHAKEN_ORIGID:-}"
 
 deploy_template "$TPL/kamailio.cfg" /etc/kamailio/kamailio.cfg 0640 root:kamailio || true
 
+# The API's .env records whether signing is live; re-render it when that changed.
+API_ENV="${API_DIR:-/opt/qwixbox-api}/.env"
+if [ -f "$API_ENV" ] && ! grep -qx "STIR_SIGNING=$(stir_signing_ready)" "$API_ENV"; then
+  invalidate_step 41-api-deploy.sh
+fi
+
 info "Kamailio module path: ${KAM_MPATH}/"
 
 install -d -m 0755 -o kamailio -g kamailio /run/kamailio

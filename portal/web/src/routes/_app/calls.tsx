@@ -31,7 +31,7 @@ import {
 	SegmentedTabs,
 	SurfaceCard,
 } from "../../components/Resource";
-import { useWebphone } from "../../components/WebphoneDrawer";
+import { useWebphone } from "../../components/webphone-context";
 import { type Cdr, type CdrFilters, endpoints } from "../../lib/api";
 
 export const Route = createFileRoute("/_app/calls")({
@@ -46,7 +46,7 @@ function formatDurationMinSec(sec: number): string {
 }
 
 function CallsPage() {
-	const { startCall, openKeypad } = useWebphone();
+	const phone = useWebphone();
 	const [page, setPage] = useState(1);
 	const [tab, setTab] = useState<"all" | "missed" | "inbound" | "outbound">(
 		"all",
@@ -108,13 +108,15 @@ function CallsPage() {
 								Export CSV
 							</Button>
 						</RoleGate>
-						<Button
-							radius="xl"
-							leftSection={<IconKeypad size={17} />}
-							onClick={() => openKeypad()}
-						>
-							Open Keypad
-						</Button>
+						{phone && (
+							<Button
+								radius="xl"
+								leftSection={<IconKeypad size={17} />}
+								onClick={() => phone.openKeypad()}
+							>
+								Open Keypad
+							</Button>
+						)}
 					</Group>
 				}
 			/>
@@ -231,7 +233,8 @@ function CallsPage() {
 								}}
 							>
 								<UnstyledButton
-									onClick={() => startCall(peerNumber, peerName)}
+									disabled={!phone}
+									onClick={() => phone?.startCall(peerNumber, peerName)}
 									style={{ flex: 1, minWidth: 0 }}
 								>
 									<Group gap={14} wrap="nowrap">
@@ -300,16 +303,18 @@ function CallsPage() {
 											{dateStr}
 										</Text>
 									</Stack>
-									<ActionIcon
-										variant="subtle"
-										radius="xl"
-										size={38}
-										onClick={() => startCall(peerNumber, peerName)}
-										aria-label={`Call ${peerName}`}
-										style={{ color: "var(--qb-accent-text)" }}
-									>
-										<IconPhone size={17} />
-									</ActionIcon>
+									{phone && (
+										<ActionIcon
+											variant="subtle"
+											radius="xl"
+											size={38}
+											onClick={() => phone.startCall(peerNumber, peerName)}
+											aria-label={`Call ${peerName}`}
+											style={{ color: "var(--qb-accent-text)" }}
+										>
+											<IconPhone size={17} />
+										</ActionIcon>
+									)}
 									<ActionIcon
 										variant="subtle"
 										radius="xl"
@@ -385,8 +390,8 @@ function CallsPage() {
 								<Group justify="space-between">
 									<Text className="qb-caption">Duration / Billsec</Text>
 									<Text className="qb-mono" size="sm">
-										{selectedCall.durationSec}s total / {selectedCall.billsecSec}s
-										billed
+										{selectedCall.durationSec}s total /{" "}
+										{selectedCall.billsecSec}s billed
 									</Text>
 								</Group>
 								<Group justify="space-between">
@@ -410,27 +415,26 @@ function CallsPage() {
 						</SurfaceCard>
 
 						<Group justify="flex-end">
-							<Button
-								variant="default"
-								onClick={() => setSelectedCall(null)}
-							>
+							<Button variant="default" onClick={() => setSelectedCall(null)}>
 								Close
 							</Button>
-							<Button
-								leftSection={<IconPhone size={16} />}
-								onClick={() => {
-									const num =
-										selectedCall.direction === "inbound"
-											? (selectedCall.callerNumber ??
-												selectedCall.destinationNumber)
-											: selectedCall.destinationNumber;
-									const name = selectedCall.callerName || num;
-									setSelectedCall(null);
-									startCall(num, name);
-								}}
-							>
-								Call Back
-							</Button>
+							{phone && (
+								<Button
+									leftSection={<IconPhone size={16} />}
+									onClick={() => {
+										const num =
+											selectedCall.direction === "inbound"
+												? (selectedCall.callerNumber ??
+													selectedCall.destinationNumber)
+												: selectedCall.destinationNumber;
+										const name = selectedCall.callerName || num;
+										setSelectedCall(null);
+										phone.startCall(num, name);
+									}}
+								>
+									Call Back
+								</Button>
+							)}
 						</Group>
 					</Stack>
 				)}

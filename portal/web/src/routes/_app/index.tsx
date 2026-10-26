@@ -24,7 +24,7 @@ import {
 	SurfaceCard,
 	WaveformPlayer,
 } from "../../components/Resource";
-import { useWebphone } from "../../components/WebphoneDrawer";
+import { useWebphone } from "../../components/webphone-context";
 import { endpoints } from "../../lib/api";
 
 export const Route = createFileRoute("/_app/")({
@@ -32,10 +32,9 @@ export const Route = createFileRoute("/_app/")({
 });
 
 function DashboardPage() {
-	const { openKeypad, startCall } = useWebphone();
+	const phone = useWebphone();
 
 	const health = useQuery({ queryKey: ["health"], queryFn: endpoints.health });
-	const tenant = useQuery({ queryKey: ["tenant"], queryFn: endpoints.tenant });
 	const exts = useQuery({
 		queryKey: ["extensions"],
 		queryFn: endpoints.extensions,
@@ -56,10 +55,6 @@ function DashboardPage() {
 		queryKey: ["sms-threads"],
 		queryFn: endpoints.smsThreads,
 	});
-	const queues = useQuery({
-		queryKey: ["queues"],
-		queryFn: endpoints.queues,
-	});
 
 	const totalCalls = cdr.data?.total ?? 0;
 	const recentRows = cdr.data?.rows ?? [];
@@ -70,11 +65,9 @@ function DashboardPage() {
 	const totalExts = exts.data?.length ?? 0;
 	const unreadVm = (voicemails.data ?? []).filter((v) => v.unread).length;
 	const unreadSms = (smsThreads.data ?? []).filter((t) => t.unread).length;
-	const totalChannels = tenant.data?.maxConcurrentCalls ?? 24;
-	const activeQueueCalls = (queues.data ?? []).reduce(
-		(sum, q) => sum + q.activeCalls + q.waitingCount,
-		0,
-	);
+	// Voicemail and SMS have preview screens only; their 404 must not read as "0 unread".
+	const inboxAvailable = !voicemails.isError && !smsThreads.isError;
+	const enabledTrunks = (trunks.data ?? []).filter((t) => t.enabled).length;
 
 	return (
 		<Stack gap={28}>
@@ -100,13 +93,15 @@ function DashboardPage() {
 						>
 							Live Wallboard
 						</Button>
-						<Button
-							radius="xl"
-							leftSection={<IconKeypad size={17} />}
-							onClick={() => openKeypad()}
-						>
-							Open Keypad
-						</Button>
+						{phone && (
+							<Button
+								radius="xl"
+								leftSection={<IconKeypad size={17} />}
+								onClick={() => phone.openKeypad()}
+							>
+								Open Keypad
+							</Button>
+						)}
 					</>
 				}
 			/>
@@ -166,19 +161,25 @@ function DashboardPage() {
 							<Text className="qb-caption" tt="uppercase" fw={700}>
 								Unread Inbox
 							</Text>
-							<Badge
-								radius="xl"
-								style={{
-									background: "var(--qb-accent)",
-									color: "#FFFFFF",
-								}}
-							>
-								Action Needed
-							</Badge>
+							{inboxAvailable && unreadVm + unreadSms > 0 && (
+								<Badge
+									radius="xl"
+									style={{
+										background: "var(--qb-accent)",
+										color: "#FFFFFF",
+									}}
+								>
+									Action Needed
+								</Badge>
+							)}
 						</Group>
-						<div className="qb-display">{unreadVm + unreadSms}</div>
+						<div className="qb-display">
+							{inboxAvailable ? unreadVm + unreadSms : "—"}
+						</div>
 						<Text className="qb-caption">
-							{unreadVm} new voicemails · {unreadSms} unread SMS threads
+							{inboxAvailable
+								? `${unreadVm} new voicemails · ${unreadSms} unread SMS threads`
+								: "Voicemail and SMS inboxes are not available on this server"}
 						</Text>
 					</Stack>
 				</SurfaceCard>
@@ -187,14 +188,11 @@ function DashboardPage() {
 					<Stack gap={8}>
 						<Group justify="space-between" align="center">
 							<Text className="qb-caption" tt="uppercase" fw={700}>
-								Channel Capacity
+								Carrier Trunks
 							</Text>
-							<Badge variant="light" color="gray" radius="xl">
-								{(trunks.data ?? []).length} Trunks
-							</Badge>
 						</Group>
 						<div className="qb-display">
-							{activeQueueCalls}
+							{enabledTrunks}
 							<span
 								style={{
 									fontSize: 22,
@@ -203,12 +201,10 @@ function DashboardPage() {
 								}}
 							>
 								{" "}
-								/ {totalChannels}
+								/ {(trunks.data ?? []).length}
 							</span>
 						</div>
-						<Text className="qb-caption">
-							Active concurrent channels across carrier trunks
-						</Text>
+						<Text className="qb-caption">Enabled of configured trunks</Text>
 					</Stack>
 				</SurfaceCard>
 			</SimpleGrid>
@@ -256,7 +252,11 @@ function DashboardPage() {
 									key={b.label}
 									align="center"
 									gap={6}
-									style={{ flex: 1, height: "100%", justifyContent: "flex-end" }}
+									style={{
+										flex: 1,
+										height: "100%",
+										justifyContent: "flex-end",
+									}}
 								>
 									<Box
 										style={{
@@ -368,9 +368,6 @@ function DashboardPage() {
 										</Text>
 									</Box>
 									<Stack align="flex-end" gap={2}>
-										<Text size="sm" fw={700}>
-											Priority #{trunk.priority}
-										</Text>
 										<Text
 											size="xs"
 											fw={600}
@@ -380,7 +377,7 @@ function DashboardPage() {
 													: "var(--qb-text-secondary)",
 											}}
 										>
-											{trunk.enabled ? "Registered" : "Disabled"}
+											{trunk.enabled ? "Enabled" : "Disabled"}
 										</Text>
 									</Stack>
 								</Group>
@@ -497,16 +494,18 @@ function DashboardPage() {
 													minute: "2-digit",
 												})}
 											</Text>
-											<ActionIcon
-												variant="subtle"
-												radius="xl"
-												size={38}
-												onClick={() => startCall(peer, displayPeer)}
-												aria-label={`Call ${displayPeer}`}
-												style={{ color: "var(--qb-accent-text)" }}
-											>
-												<IconPhone size={17} />
-											</ActionIcon>
+											{phone && (
+												<ActionIcon
+													variant="subtle"
+													radius="xl"
+													size={38}
+													onClick={() => phone.startCall(peer, displayPeer)}
+													aria-label={`Call ${displayPeer}`}
+													style={{ color: "var(--qb-accent-text)" }}
+												>
+													<IconPhone size={17} />
+												</ActionIcon>
+											)}
 										</Group>
 									</Group>
 								);
@@ -534,7 +533,9 @@ function DashboardPage() {
 									)}
 								</Group>
 								<Text className="qb-caption">
-									Transcribed messages and instant audio playback
+									{voicemails.isError
+										? "Voicemail management is not available on this server"
+										: "Latest messages left for your extensions"}
 								</Text>
 							</Box>
 							<Button
@@ -583,18 +584,20 @@ function DashboardPage() {
 													<Text className="qb-caption">{vm.callerNumber}</Text>
 												</Box>
 											</Group>
-											<UnstyledButton
-												onClick={() =>
-													startCall(vm.callerNumber, vm.callerName)
-												}
-												style={{
-													color: "var(--qb-accent-text)",
-													fontSize: 13,
-													fontWeight: 700,
-												}}
-											>
-												Call back
-											</UnstyledButton>
+											{phone && (
+												<UnstyledButton
+													onClick={() =>
+														phone.startCall(vm.callerNumber, vm.callerName)
+													}
+													style={{
+														color: "var(--qb-accent-text)",
+														fontSize: 13,
+														fontWeight: 700,
+													}}
+												>
+													Call back
+												</UnstyledButton>
+											)}
 										</Group>
 
 										<Text

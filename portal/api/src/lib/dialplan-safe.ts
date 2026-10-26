@@ -78,6 +78,16 @@ export function unsafeDialplanFields(
     if (body[field] != null && body[field] !== "" && !diallable(body[field]))
       return `${field} must be diallable digits`;
   }
+  // Names reach a dialplan `set` (I03); `$` would be read as a back-reference or variable there.
+  for (const field of ["callerIdName", "defaultCallerIdName"]) {
+    const value = body[field];
+    if (
+      value != null &&
+      value !== "" &&
+      (typeof value !== "string" || value.length > 64 || value.includes("$"))
+    )
+      return `${field} must be at most 64 characters without $`;
+  }
   for (const field of ["greetingSound", "invalidSound"]) {
     if (body[field] != null && body[field] !== "" && !safeSound(body[field]))
       return `${field} must be a relative sound path without ..`;

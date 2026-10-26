@@ -136,7 +136,16 @@ local function context_xml(context, body)
   return string.format('    <context name="%s">\n%s\n    </context>', xml_escape(context), body)
 end
 
+-- Returns nil to decline to the API tier when the caller's cached state is missing on an
+-- ordinary call, so the two tiers cannot present different caller IDs (I03). An emergency call
+-- never declines: it goes out with whatever identity is available.
 local function build_outbound(route, destination, tenant, caller, domain)
+  local profile = caller and json_decode(redis_get("qwixbox:call:" .. domain .. ":" .. caller))
+  if not profile and not route.isEmergency then
+    log("warning", "no call state for %s@%s - declining outbound to the API", tostring(caller), domain)
+    return nil
+  end
+  profile = profile or {}
   local number = destination
   if route.stripDigits and route.stripDigits > 0 then
     number = number:sub(route.stripDigits + 1)
@@ -170,8 +179,16 @@ local function build_outbound(route, destination, tenant, caller, domain)
     table.insert(actions, action("set", "ignore_early_media=true"))
   end
 
-  if route.callerIdOverride and route.callerIdOverride ~= "" then
-    table.insert(actions, action("set", "effective_caller_id_number=" .. route.callerIdOverride))
+  -- Route override, else the extension's, else the tenant default (resolved by the API into
+  -- the call state); unset leaves the call's own. Must match callerIdActions in fs-xml.ts.
+  local caller_number = route.callerIdOverride
+  if not caller_number or caller_number == "" then caller_number = profile.callerIdNumber end
+  local caller_name = profile.callerIdName
+  if type(caller_name) == "string" and caller_name ~= "" then
+    table.insert(actions, action("set", "effective_caller_id_name=" .. caller_name))
+  end
+  if type(caller_number) == "string" and caller_number ~= "" then
+    table.insert(actions, action("set", "effective_caller_id_number=" .. caller_number))
   end
 
   table.insert(actions, action("set", "hangup_after_bridge=true"))
@@ -199,31 +216,55 @@ function M.dialplan(req, p)
     return nil
   end
 
+  -- A forward set by qwixbox.go (R11): the forwarding extension, not the caller, places the
+  -- outbound leg. Without one in the cache (a tenant-configured external destination) the
+  -- caller ID is the tenant default, which this tier does not hold - the API answers.
+  local outbound_as = caller
+  local forward_to = p:getHeader("variable_qwixbox_forward_to")
+  if forward_to and forward_to == destination then
+    local via = p:getHeader("variable_qwixbox_forward_from")
+    if p:getHeader("variable_qwixbox_forward_domain") ~= domain or not via or not via:match("^[0-9A-Za-z_.-]+$") then
+      return nil
+    end
+    outbound_as = via
+  end
+
   local tenant = json_decode(redis_get("qwixbox:tenant:" .. domain))
   if not tenant then
     log("warning", "dialplan MISS: no tenant for %s - falling through", domain)
     return nil
+  end
+
+  -- Kamailio-forwarded calls arrive in the SIP profile's context ("default"): user_context is only
+  -- applied when FreeSWITCH authenticates the caller, and auth-calls=false means it never does.
+  -- mod_dialplan_xml ignores an answer in any other context, so a call outside its tenant's context
+  -- is first moved there. The CDR attributes the call by this context name, and qwixbox.go
+  -- re-enters the same context on transfer.
+  local context = "tenant_" .. tenant.organizationId
+  local hunt = p:getHeader("Hunt-Context")
+  if hunt and hunt ~= context then
+    return document("dialplan", context_xml(hunt,
+      extension_xml("enter_tenant", destination, { action("transfer", destination .. " XML " .. context) })))
   end
   if tenant.enabled == false then
     log("warning", "tenant %s is disabled - rejecting", domain)
     return document(
       "dialplan",
       context_xml(
-        "tenant_" .. tenant.organizationId,
+        context,
         extension_xml("disabled", destination, { action("hangup", "SERVICE_UNAVAILABLE") })
       )
     )
   end
 
-  local context = "tenant_" .. tenant.organizationId
   local routes = json_decode(redis_get("qwixbox:routes:" .. domain)) or {}
 
   for _, route in ipairs(routes) do
-    if caller and route.trunk and route.patternSyntax == "pcre" and route.isEmergency == true and qwixbox.regex_match(destination, route.pattern) then
+    if outbound_as and route.trunk and route.patternSyntax == "pcre" and route.isEmergency == true and qwixbox.regex_match(destination, route.pattern) then
       log("notice", "EMERGENCY call to %s from %s", destination, domain)
       return document(
         "dialplan",
-        context_xml(context, extension_xml("emergency", destination, build_outbound(route, destination, tenant, caller, domain)))
+        context_xml(context, extension_xml("emergency", destination, build_outbound(route, destination, tenant, outbound_as, domain)))
       )
     end
   end
@@ -311,13 +352,15 @@ function M.dialplan(req, p)
   end
 
   for _, route in ipairs(routes) do
-    if caller and route.trunk and route.patternSyntax == "pcre" and route.isEmergency == false and qwixbox.regex_match(destination, route.pattern) then
+    if outbound_as and route.trunk and route.patternSyntax == "pcre" and route.isEmergency == false and qwixbox.regex_match(destination, route.pattern) then
       if not route.trunk then
         log("warning", "route %s matched but has no trunk", route.id)
       else
+        local actions = build_outbound(route, destination, tenant, outbound_as, domain)
+        if not actions then return nil end
         return document(
           "dialplan",
-          context_xml(context, extension_xml("outbound", destination, build_outbound(route, destination, tenant, caller, domain)))
+          context_xml(context, extension_xml("outbound", destination, actions))
         )
       end
     end

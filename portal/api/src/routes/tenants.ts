@@ -5,8 +5,16 @@ import { changeMembership } from "../services/membership";
 import { db } from "../db";
 import { tenantSettings } from "../db/schema";
 import { recordAudit } from "../lib/audit";
-import { rebuildTenant } from "../services/cache";
-import { syncDomain, reloadKamailio } from "../services/kamailio-sync";
+import { unenforcedWrite } from "../lib/capabilities";
+import { env } from "../env";
+import {
+  enqueue,
+  listProjections,
+  projectionStatus,
+  runNow,
+  writeAndPublish,
+  type Projection,
+} from "../services/projections";
 import {
   requireTenant,
   requireRole,
@@ -38,6 +46,13 @@ tenants.post("/", requireRole("owner", "admin"), async (c) => {
 
   const unsafe = unsafeTenantSettings(body);
   if (unsafe) return c.json({ error: unsafe }, 400);
+  const unenforced = unenforcedWrite(
+    "tenant_settings",
+    body,
+    undefined,
+    env.stirSigning,
+  );
+  if (unenforced) return c.json({ error: unenforced }, 400);
   if (typeof body.sipDomain !== "string" || !body.sipDomain)
     return c.json({ error: "sipDomain is required" }, 400);
 
@@ -73,11 +88,21 @@ tenants.post("/", requireRole("owner", "admin"), async (c) => {
     defaultCallerIdNumber: body.defaultCallerIdNumber ?? null,
   };
 
-  const [row] = await db
-    .insert(tenantSettings)
-    .values(values)
-    .onConflictDoNothing()
-    .returning();
+  // A dedicated tenant has nothing to route until its dispatcher set is assigned, so it is
+  // published by the PATCH that assigns one.
+  const [row] = await writeAndPublish(
+    organizationId,
+    (tx) =>
+      tx
+        .insert(tenantSettings)
+        .values(values)
+        .onConflictDoNothing()
+        .returning(),
+    ([row]): Projection[] =>
+      row && row.dispatcherSetId !== 0
+        ? [{ kind: "domain" }, { kind: "cache", target: "all" }]
+        : [],
+  );
   if (!row)
     return c.json({ error: "Tenant or domain already provisioned" }, 409);
 
@@ -92,10 +117,6 @@ tenants.post("/", requireRole("owner", "admin"), async (c) => {
       202,
     );
   }
-
-  await syncDomain(row.sipDomain);
-  await reloadKamailio();
-  await rebuildTenant(organizationId);
 
   await recordAudit(c, {
     action: existing ? "update" : "create",
@@ -139,6 +160,13 @@ tenants.patch("/", requirePermission("tenant", "update"), async (c) => {
     where: eq(tenantSettings.organizationId, organizationId),
   });
   if (!existing) return c.json({ error: "Tenant is not provisioned" }, 404);
+  const unenforced = unenforcedWrite(
+    "tenant_settings",
+    body,
+    existing,
+    env.stirSigning,
+  );
+  if (unenforced) return c.json({ error: unenforced }, 400);
 
   const patch: Partial<typeof tenantSettings.$inferInsert> = {};
   if ("faxNotifyEmail" in body) {
@@ -182,14 +210,22 @@ tenants.patch("/", requirePermission("tenant", "update"), async (c) => {
     return c.json({ error: "No recognised fields to update" }, 400);
   }
 
-  const [row] = await db
-    .update(tenantSettings)
-    .set(patch)
-    .where(eq(tenantSettings.organizationId, organizationId))
-    .returning();
+  const [row] = await writeAndPublish(
+    organizationId,
+    (tx) =>
+      tx
+        .update(tenantSettings)
+        .set(patch)
+        .where(eq(tenantSettings.organizationId, organizationId))
+        .returning(),
+    ([row]): Projection[] =>
+      !row
+        ? []
+        : patch.dispatcherSetId !== undefined && row.dispatcherSetId !== 0
+          ? [{ kind: "domain" }, { kind: "cache", target: "all" }]
+          : [{ kind: "cache", target: "all" }],
+  );
   if (!row) return c.json({ error: "Update failed" }, 500);
-
-  await rebuildTenant(organizationId);
   await recordAudit(c, {
     action: "update",
     entityType: "tenant_settings",
@@ -258,13 +294,28 @@ tenants.delete("/members/:id", requireRole("owner", "admin"), async (c) => {
   return c.body(null, 204);
 });
 
+// Work committed but not yet live in Redis/Kamailio, with the last error (R06).
+tenants.get("/projections", requireRole("owner", "admin"), async (c) => {
+  const organizationId = c.get("organizationId");
+  return c.json({
+    ...(await projectionStatus(organizationId)),
+    jobs: await listProjections(organizationId),
+  });
+});
+
 tenants.post("/rebuild-cache", requireRole("owner", "admin"), async (c) => {
   const organizationId = c.get("organizationId");
-  await rebuildTenant(organizationId);
+  const keys = await enqueue(db, organizationId, [
+    { kind: "cache", target: "all" },
+  ]);
+  const rebuilt = await runNow(keys);
   await recordAudit(c, {
     action: "rebuild-cache",
     entityType: "tenant_settings",
     entityId: organizationId,
   });
-  return c.json({ status: "rebuilt" });
+  // Queued, not failed: the worker retries until it succeeds.
+  return rebuilt
+    ? c.json({ status: "rebuilt" })
+    : c.json({ status: "queued" }, 202);
 });

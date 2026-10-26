@@ -1,175 +1,53 @@
 # Path to MVP
 
-What is left before this can carry a paying customer's phone calls. Ordered by what blocks what.
+Last reviewed **2026-10-25** against `eca43d7`. These are acceptance gates before carrying
+customer calls. [Project status](status.md) records current checks, [issues](issues.md) owns
+findings and priorities, and [the change log](changelog.md) records changes and deletions.
+[The delivery plan](mvp-plan.md) orders the work that closes these gates.
 
-Last updated 2026-10-24. Earlier container results below are historical. Current source changes and
-verification limits are tracked in the repository-root REVIEW-PLAN.md and CHANGELOG.md.
+## What the evidence establishes
 
-The SIP authentication regression now runs real Kamailio 6.0.1 against synthetic PostgreSQL
-credentials: valid REGISTER/INVITE credentials pass and wrong/empty passwords fail across two
-tenants. This validates the digest configuration, not audio, NAT, a full installer run or a real carrier.
+Older project records report a complete Debian arm64 install, service startup, provisioning,
+registration, extension/DID/outbound signalling, ring groups, IVR timeout handling, feature codes,
+portal authorization, password reset and signed outbound email. Those are historical results,
+not acceptance of the current revision. Historical amd64 FreeSWITCH builds also exist; a full
+current-stack amd64 run remains owed.
 
-## What is proven
+The 2026-10-25 review reran API validation/security, portal mock/client checks, real Kamailio
+digest/risk-prefix tests, installer safety, shell/Lua checks and portal/site builds. See
+[status](status.md#verification-on-2026-10-25) for environments, counts and mocked boundaries.
+**No call has been confirmed to carry two-way audio in the retained evidence.** A received
+INVITE or a listening rtpengine control socket does not establish working media.
 
-Verified by doing it, in a Debian 13 arm64 container, not by reading code:
+## Acceptance gates
 
-| | How it was proven |
+| Gate | Work and evidence required |
 |---|---|
-| Install from bare Debian | 28 steps, exit 0, idempotent re-run, 38 postflight checks |
-| All services start | postgres, redis, freeswitch, kamailio, rtpengine, nginx, api, postfix, opendkim |
-| FreeSWITCH boots clean | zero `[ERR]`/`[CRIT]` scoped to the run; Opus loaded |
-| Tenant provisioning | CLI creates org + tenant, projects domain and subscribers into Kamailio |
-| Extension creation | via the API, encrypted SIP secret, HA1 projected to Kamailio's `subscriber` |
-| **Extension-to-extension** | INVITE delivered to the registered contact |
-| **Inbound DID → extension** | DID resolved, INVITE delivered to the registered contact |
-| **Outbound → carrier** | INVITE delivered to the carrier with the translated number |
-| Portal auth and isolation | anonymous `/` login page, app routes 404, `/api/*` 401, `viewer` refused writes |
-| Outbound mail | Postfix loopback-only, OpenDKIM signature confirmed on the sendmail path |
-| **Registration** | A real softphone completes digest auth against the projected HA1 |
-| First sign-in | The installer creates the account and tenant; password shown once, absent from every log |
-| Password reset | Emailed link validated end to end: reset works, old password refused, token single-use |
-| Portal surface | Extensions, trunks, routing, call flows, calls, faxes, users, audit, settings |
+| 1. Remote two-way audio | Register two real endpoints, call between them, listen in both directions and repeat across internet/NAT. Inspect rtpengine sessions and codec negotiation. Follow [hardware testing](testing-on-real-hardware.md). |
+| 2. Call features | Record and retrieve voicemail, deliver its email, choose IVR digits including `#`, test DND/forwarding/call waiting and every ring-group strategy. I04–I06 remain source gaps. Receive a fax and verify its delivered attachment. |
+| 3. Carrier paths and identity | Verify inbound DID, outbound caller ID/translation, trusted-peer direct-dial denial, and inbound DID → external/extension forwarding. R11 and I03 are fixed and owe a real-carrier check. Enabled registration trunks stay unavailable until registration/challenge handling exists. |
+| 4. Emergency behavior | Classify authorized emergency calls before ingress capacity checks; wire dispatchable location/callback/notification behavior. Test saturation against a provider-approved test destination. Do not dial live emergency services for routine tests. Current E911 UI records are synthetic. Deployment obligations need separate jurisdiction/provider review. |
+| 5. Restore | Restore databases, roles, matching `config.env` encryption key, runtime config and service credentials onto a fresh host. Decrypt an existing SIP secret, register and place a call. Prove failed/offsite-failed backups preserve good history. Backup creation alone does not pass. |
+| 6. Current target-host install | Full Debian 13 amd64 install, idempotent rerun, interrupted-step recovery and service rebuild/SSH/TLS checks. Historical arm64 safety tests or amd64 FreeSWITCH-only builds are insufficient. Record component versions, including PostgreSQL 18 target versus PostgreSQL 17 regression fixture. |
+| 7. Consistent published state | Close durable projection/revocation (R06), configured capacity (R08), authorized forwarding (R11) and atomic cache publication (R13). Inject dependency failures and restart services to prove convergence. |
+| 8. Accurate production surface | Remove production seed fallbacks (I01), disable unsupported controls, triage/patch lockfile advisories (I15), and verify a live missing API cannot display invented emergency locations/messages. |
 
-## The one thing that makes everything above less than it sounds
+## Operational work before customer onboarding
 
-**No call has been confirmed to carry audio.** Every call test so far has read SIP *signalling*.
-The media path — rtpengine relaying RTP, codec negotiation, who actually hears whom — has not
-been verified end to end. `rtpengine_manage()` is wired into the Kamailio config and rtpengine
-answers on its control socket, but "the INVITE arrived" and "the two parties can hear each other"
-are different claims and only the first has been made.
+- **STIR/SHAKEN:** off by default. An earlier Debian build failed on deprecated OpenSSL APIs;
+  the current build was not rerun. Reproduce and repair it if platform signing is required, or
+  verify the selected carrier's signing path. A `carrierSigns` field alone is not proof.
+- **DNS/certificates/mail:** live Cloudflare publication and Domain Connect provider approval
+  remain unaccepted. DNS failure/mode handling, HTTP/DNS renewal and supported SMTP modes need
+  checks; see I11/I12. Password-reset/email fixture results do not prove your relay works.
+- **Monitoring:** send service/backup/certificate failures to a human and verify receipt.
+- **Upgrade safety:** review schema changes and rollback/data handling before `db:push --force`.
+  Resolve duplicate exact DIDs with their owners before adding uniqueness on an older install.
+- **Postflight:** align SSH/role checks and provisioning guidance with the installer (I10).
 
-Everything that depends on audio is therefore unproven: voicemail recording and delivery, IVR
-DTMF selection, fax. Close this before anything else on the list.
+## Outside the core MVP
 
-~~No phone has ever actually registered.~~ **Closed.** A real softphone now completes digest
-authentication against the HA1 projection, so that projection is proven to authenticate somebody
-rather than merely to exist.
-
-## Blockers
-
-Step-by-step instructions for items 1 and 6 are in
-**[testing-on-real-hardware.md](testing-on-real-hardware.md)**.
-
-### 1. Confirm two-way audio
-
-Registration is done. What remains is the media path: register two extensions, call between them,
-and confirm both parties hear each other. Then repeat over the internet rather than a LAN — the
-NAT and `advertise` handling in the Kamailio config has not been exercised by a remote endpoint.
-
-Nothing else on this list is worth doing before this passes. Voicemail recording, IVR DTMF and
-fax all sit behind it, and a failure here invalidates the assumptions the rest rests on.
-
-### ~~2. Verify the call features that already have code~~ — done, and four bugs fixed
-
-Ring groups, IVR, time conditions and the forwarding feature codes are now verified by placing
-calls. Getting there required fixing four things that had never worked:
-
-- **The XML tiers were the wrong way round.** The autoload sed reversed the module list, so
-  `mod_xml_curl` loaded before `mod_lua` and the API answered every lookup — `extension.lua` never
-  ran, meaning DND, forwarding, call waiting and voicemail treatment were all skipped, and the
-  Redis cache was bypassed on every call.
-- **No language files.** The minimal config ships no `lang/` tree and no `languages` section, and
-  neither `mod_say_en` nor `mod_tone_stream` autoloads — so every prompt and every tone failed.
-- **`mod_curl` is not the curl command line.** The feature-code and fax notifications were built
-  with `-X/-H/-u/-d`, which it ignores, so they went out as unauthenticated GETs and always
-  returned `unauthorized`.
-- **Extension destinations cached the UUID, not the number**, so an IVR option or ring-group
-  failover pointing at an extension resolved to nothing (inbound DIDs worked, because the API
-  resolves it in SQL — the two tiers disagreed).
-- **`external` destinations skipped outbound routing**, so every call forwarded to an outside
-  number was dropped by Kamailio with no trunk selected.
-
-Still open here: **voicemail has been reached and answered but no message has been recorded or
-delivered**, and IVR **DTMF selection** is untested — both need real audio, so they fold into
-item 1.
-
-### ~~3. A second user per tenant~~ — done
-
-`provision-tenant.ts` queried membership by organization alone, so a second `--owner` was
-silently ignored and a tenant was permanently one user. It is now scoped by user, and
-`add-tenant-user.ts` adds or re-roles someone on an existing tenant. Verified end to end: a user
-added as `viewer` is refused a write (403) where the owner passes to validation (400).
-
-### 4. Emergency calling
-
-`emergencyLocation` exists in `schema.ts` and **nothing else in the codebase references it**.
-Outbound route resolution marks a matching emergency route with `X-Emergency`;
-Kamailio has an egress bypass. Ingress call-cap handling still precedes that classification:
-reading `route[INGRESS]` confirms it calls `route(FRAUD)` unconditionally, so a 911 call from an
-account at `MAX_CONCURRENT_CALLS` is refused with `486`. Bug 3 in
-[comprehensive-implementation-plan.md](comprehensive-implementation-plan.md) has the fix, and the
-bypass must then be tested under saturation. Dispatchable location and notification
-are unwired; comments about an ESL listener do not implement them.
-
-This is a legal obligation in the US (RAY BAUM'S Act, Kari's Law) and Canada, not a feature.
-Either wire it or make it explicit to the first customer that the platform must not be their
-only means of reaching emergency services.
-
-### 5. Prove the restore
-
-`51-backups.sh` runs `pg_dump` on a timer and has never been restored from. A backup that has
-not been restored is a hypothesis. Restore into a fresh container and confirm a tenant, its
-extensions and its registrations come back.
-
-Note the ordering trap the backup script itself warns about: restoring the database without
-`/etc/qwixbox/config.env` leaves `ENCRYPTION_KEY` mismatched, and every stored SIP secret and
-voicemail PIN becomes undecryptable. The config file is part of the backup set.
-
-### 6. An amd64 pass
-
-Every run this session was arm64. Production is GCP C4 (x86_64), and CLAUDE.md records a real
-production failure caused by exactly this gap. The `mod_hiredis` patch, Postfix, OpenDKIM and the
-new Kamailio routing have never been built or run on x86_64.
-
-## Before the first paying customer
-
-Not blockers for a working phone system, but they will be asked for immediately.
-
-- ~~**Portal coverage.**~~ Done. Faxes, users and audit now have pages, alongside extensions,
-  trunks, routing, call flows, calls and settings. Still no voicemail page — there is no voicemail
-  API either, and no message has been recorded to put in one.
-- ~~**Self-service password reset.**~~ Done. better-auth's flow is wired to the local MTA and
-  verified end to end. Account creation is also no longer a CLI-only path: the installer creates
-  the first account and tenant, and the Users page adds the rest.
-- **A voicemail API and page.** The one portal gap left, and it is blocked on item 1 rather than
-  on effort — there is nothing to list until a message can be recorded.
-- **STIR/SHAKEN.** Required for US and Canadian PSTN origination. `33-stir-shaken.sh` currently
-  fails to build `libstirshaken` on Debian 13 (deprecated OpenSSL API under `-Werror`). It is off
-  by default so it does not block an install, but "we can turn it on" is not true right now.
-  Note `trunk.carrierSigns` exists for the case where the carrier signs on your behalf, which is
-  the realistic path for a small operator and avoids the STI-CA procurement entirely.
-- **DNS automation against a real provider.** Domain Connect discovery is verified against live
-  records (IONOS answers; a domain without the record falls through in about a second), but no
-  template has been onboarded with a DNS provider yet, so the approval flow has never completed.
-  Onboarding is a per-provider agreement, not code. **The Cloudflare token path has never spoken
-  to the real API** — earlier notes claimed "unit-tested against stubs (9/9)", but there is no
-  DNS stub suite in this repository and no such DNS tests exist. Zone selection was exercised against a
-  throwaway stub while fixing the override bug; nothing else has been.
-- **Monitoring that reaches a human.** `52-monitoring.sh` installs `prometheus-node-exporter` and
-  a healthcheck timer; nothing consumes the metrics and nothing pages anyone.
-
-## Explicitly not MVP
-
-Documented under `docs/design/` so they are cheap to start later, and deliberately not started on the backend:
-call centre, billing, resellers, SMS, conferences, device provisioning, contacts,
-music-on-hold management, parking lots, AI receptionist.
-
-> **Web Portal UI Note:** The portal (`portal/web`) has UI screens for messages, voicemail and
-> recordings, contacts, queues, E911, conferences/parking/MoH, devices and the webphone, all
-> backed by seed data in `portal/web/mock/data.ts`. **That includes production builds.**
-> `getWithFallback()` serves the seed data whenever the API answers 404, and the API answers 404
-> for every one of these paths. So a live tenant sees invented records, including invented E911
-> addresses, under a banner. Gate the fallback to dev mode before a customer sees the portal. See
-> [roadmap.md](roadmap.md#portal-ui-mock-to-live-todo) and Bug 11 in
-> [comprehensive-implementation-plan.md](comprehensive-implementation-plan.md).
-
-## A note on how to verify things here
-
-Four separate bugs this session had the same shape: code that read as correct and did nothing —
-`dr_gateways` with nothing populating it, `mod_hiredis` corrupting every cached `%`, the
-directory dial-string duplicated in two files with only one fixed, and `kamcmd` failing silently
-because it exits 0 when it cannot connect.
-
-Static review found none of them. Each was found by running the thing and watching what came out
-the other end. Anything on this list should be closed the same way: make the call, capture the
-packet, restore the backup.
+Queues, billing, resellers, SMS, conferences, contacts, device provisioning, MoH/parking management
+and AI features remain future backend work. Their preview screens are not implemented services.
+The browser phone has no SIP stack. Voicemail/recording management APIs and user-to-extension
+ownership are also absent. See the [roadmap](roadmap.md) and [design notes](design/implementation-plan.md).

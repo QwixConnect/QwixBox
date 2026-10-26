@@ -1,8 +1,9 @@
 # Testing on real hardware
 
-Two things cannot be tested in the container and are the remaining blockers in
-[mvp.md](mvp.md): confirmed two-way remote audio and an x86_64 build. These are
-the steps.
+Reviewed 2026-10-25. This procedure covers remote two-way audio and a full current amd64
+installation. Other release gates remain in [mvp.md](mvp.md), especially emergency behavior,
+carrier forwarding and restore. Record revision, OS, architecture and observed results in
+[status.md](status.md); a passing signalling fixture does not close these gates.
 
 ---
 
@@ -15,7 +16,13 @@ through rtpengine, NAT and the installed stack.
 ### Prepare the server
 
 ```bash
-sudo ./install.sh                       # setup wizard; skip manual account creation if step 44 already created it
+sudo ./install.sh                       # setup wizard; step 44 can create account + tenant
+```
+
+If step 44 already created the account and tenant, sign in with `/etc/qwixbox/first-login`.
+Only run these fallback commands if you still need to provision them:
+
+```bash
 cd /opt/qwixbox-api
 sudo -u qwixbox bun run src/cli/create-user.ts --email you@example.com --name "You"
 sudo -u qwixbox bun run src/cli/provision-tenant.ts \
@@ -51,9 +58,9 @@ sudo kamctl ul show                     # should list 1001@pbx.example.com with 
 sudo journalctl -u kamailio -f          # watch it happen
 ```
 
-If it fails, the useful signal is in the Kamailio log. A `401` followed by nothing means the
-phone never answered the challenge (wrong password). Repeated `401`s mean the HA1 does not match —
-re-save the extension in the portal to re-project it.
+If it fails, the useful signal is in the Kamailio log. An initial `401` is an expected digest challenge. If no authenticated request follows, inspect
+the client configuration and connectivity. Repeated challenges can reflect credentials, realm or
+identity mismatch; compare the SIP exchange before re-projecting the extension.
 
 ### The calls that matter
 
@@ -68,7 +75,9 @@ already known to work.
 4. **Inbound DID**, once a carrier is pointed at you. Rings the mapped extension.
 5. **Outbound to a real number.** Confirm the carrier sees the translated digits and there is
    two-way audio.
-6. **`*72<number>` then call 1001.** It should follow the forward out to the carrier. `*73` cancels.
+6. **`*72<number>` then call 1001 internally and through its carrier DID.** Both should forward
+   through the authorized outbound route. The carrier-originated path is a known open R11 gap;
+   capture a failure as evidence. `*73` cancels.
 7. **Ring group and IVR**, if configured — the group rings all members; the IVR plays its greeting
    and responds to a DTMF keypress.
 
@@ -92,13 +101,16 @@ If the server is behind 1:1 NAT (GCP, EC2), confirm Kamailio is advertising the 
 
 ## 2. The x86_64 build
 
-Production is GCP C4 (x86_64); everything verified so far has been arm64. The concrete risk is
+The intended production target includes GCP C4 (x86_64). Historical FreeSWITCH-only builds
+covered amd64; the full current-stack acceptance pass remains owed. The concrete risk is
 documented in `CLAUDE.md`: libvpx needs an external assembler on x86_64 and does not on arm64, so
 a missing dependency is invisible until an amd64 build. The `mod_hiredis` patch, Postfix, OpenDKIM
 and the Kamailio routing have never been compiled there.
 
-The cheapest real test is a throwaway cloud instance, because an emulated amd64 container has
-broken systemd and cannot verify the services:
+Use a disposable amd64 Debian 13 VM with systemd and the provider firewall configured as in
+the repository README. The older emulated-container run could not validate systemd services.
+The following is an example provisioning command; verify current image, zone and sizing in your
+provider account before creating a billable instance:
 
 ```bash
 gcloud compute instances create qwix-amd64-test \
@@ -119,7 +131,7 @@ sudo ./install.sh
 What to check afterwards — each of these has caught a real bug before:
 
 ```bash
-echo $?                                              # 0, or 1 only from postflight
+echo $?                                              # must be 0; investigate every failed check
 ls /usr/local/freeswitch/bin/freeswitch               # exists
 grep -c 'libs/libvpx' /var/log/qwixbox/install-*.log  # 0 - libvpx must never be entered
 grep -i 'Patched mod_hiredis' /var/log/qwixbox/install-*.log
@@ -134,8 +146,9 @@ And the one that matters most on a fresh architecture — a clean FreeSWITCH boo
 sudo -u freeswitch grep -cE '\[(ERR|CRIT)\]' /usr/local/freeswitch/log/freeswitch.log
 ```
 
-Then delete the instance. If it also has a public FQDN pointed at it, this is the natural place to
-do the softphone test above with a real certificate instead of a self-signed one.
+Before deleting the instance, complete media and restore checks if it has the required public
+FQDN/certificate. A current postflight check incorrectly rejects intentional root-key SSH policy
+(I10); record that failure explicitly instead of treating exit 1 as acceptance.
 
 ```bash
 gcloud compute instances delete qwix-amd64-test --zone=us-east1-b
@@ -146,7 +159,6 @@ gcloud compute instances delete qwix-amd64-test --zone=us-east1-b
 ## After both pass
 
 The backup restore (item 5 in [mvp.md](mvp.md)) is the next one, and it is worth doing on the
-instance from step 2 before deleting it — a restore into the same architecture it was dumped from
-is the case that actually matters. Note the ordering trap: `/etc/qwixbox/config.env` must be
+instance from step 2 before deleting it — validate both database/configuration recovery and the restored services. Note the ordering trap: `/etc/qwixbox/config.env` must be
 restored *with* the database, or `ENCRYPTION_KEY` no longer matches and every stored SIP secret
 and voicemail PIN is undecryptable.

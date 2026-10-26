@@ -9,14 +9,7 @@ import {
 	Text,
 	UnstyledButton,
 } from "@mantine/core";
-import {
-	createContext,
-	type ReactNode,
-	useCallback,
-	useContext,
-	useEffect,
-	useState,
-} from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
 	IconBackspace,
 	IconLock,
@@ -32,27 +25,10 @@ import {
 	IconKeypad,
 } from "./Icons";
 import { InitialsAvatar } from "./Resource";
+import { WebphoneContext } from "./webphone-context";
 
-interface WebphoneContextValue {
-	opened: boolean;
-	openKeypad: (prefillNumber?: string, prefillName?: string) => void;
-	startCall: (number: string, name?: string) => void;
-	close: () => void;
-	inCall: boolean;
-}
-
-const WebphoneContext = createContext<WebphoneContextValue>({
-	opened: false,
-	openKeypad: () => {},
-	startCall: () => {},
-	close: () => {},
-	inCall: false,
-});
-
-// eslint-disable-next-line react-refresh/only-export-components
-export function useWebphone() {
-	return useContext(WebphoneContext);
-}
+// Mock mode only: _app.tsx lazy-loads this module behind the mock-mode check, so it never reaches a
+// production bundle. Nothing here places a call; see webphone-context.ts (I23).
 
 const KEYPAD_KEYS: Array<{ digit: string; sub: string }> = [
 	{ digit: "1", sub: "OO" },
@@ -94,16 +70,19 @@ export function WebphoneProvider({ children }: { children: ReactNode }) {
 		return () => window.clearInterval(timer);
 	}, [inCall, onHold]);
 
-	const openKeypad = useCallback((prefillNumber?: string, prefillName?: string) => {
-		if (prefillNumber !== undefined) {
-			setNumber(prefillNumber);
-		}
-		if (prefillName !== undefined) {
-			setContactName(prefillName);
-		}
-		setInCall(false);
-		setOpened(true);
-	}, []);
+	const openKeypad = useCallback(
+		(prefillNumber?: string, prefillName?: string) => {
+			if (prefillNumber !== undefined) {
+				setNumber(prefillNumber);
+			}
+			if (prefillName !== undefined) {
+				setContactName(prefillName);
+			}
+			setInCall(false);
+			setOpened(true);
+		},
+		[],
+	);
 
 	const startCall = useCallback((dialNumber: string, dialName?: string) => {
 		setNumber(dialNumber || "+1 (415) 555-0132");
@@ -393,7 +372,7 @@ export function WebphoneProvider({ children }: { children: ReactNode }) {
 								}}
 							>
 								<IconLock size={13} />
-								<span>Encrypted call</span>
+								<span>Simulated call · no audio (mock mode)</span>
 							</Group>
 						</Stack>
 
@@ -436,7 +415,11 @@ export function WebphoneProvider({ children }: { children: ReactNode }) {
 									className={`qb-call-action-circle ${speaker ? "active" : ""}`}
 									onClick={() => setSpeaker((s) => !s)}
 								>
-									{speaker ? <IconSpeaker size={22} /> : <IconVolume size={22} />}
+									{speaker ? (
+										<IconSpeaker size={22} />
+									) : (
+										<IconVolume size={22} />
+									)}
 								</button>
 								<Text
 									size="xs"

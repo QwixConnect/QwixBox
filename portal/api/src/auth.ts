@@ -155,7 +155,9 @@ export const auth = betterAuth({
     max: 60,
     customRules: {
       "/sign-in/email": { window: 300, max: 10 },
-      "/forget-password": { window: 300, max: 5 },
+      // The path the portal's requestPasswordReset() calls. This rule used to name
+      // "/forget-password", which nothing here requests, so it limited nothing (I21).
+      "/request-password-reset": { window: 300, max: 5 },
     },
   },
 

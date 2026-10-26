@@ -172,6 +172,20 @@ invalidate_step() {
   info "Invalidated $name: its inputs were replaced"
 }
 
+# Prints 1 when this host's Kamailio will actually sign outbound calls, else 0. Read from the
+# deployed files rather than ENABLE_STIR_SHAKEN, because the flag can be set while the module
+# failed to build or no key was supplied. The API refuses the per-tenant signing toggle unless
+# this is 1; a host without Kamailio (split roles) has neither file and answers 0.
+stir_signing_ready() {
+  local dir="${KAMAILIO_ETC:-/etc/kamailio}"
+  if grep -qx '#!define WITH_STIRSHAKEN' "$dir/kamailio.cfg" 2>/dev/null \
+     && grep -q 'as_default_key' "$dir/stirshaken.cfg" 2>/dev/null; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
 internal_bind_addr() {
   if is_all_in_one; then
     printf '127.0.0.1'

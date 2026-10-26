@@ -97,6 +97,18 @@ test("roles and failure scenarios stay local and unknown paths do not fall throu
   ).toBeNull();
 });
 
+test("unavailable scenario answers preview collections with 404 like the real API", async () => {
+  const request = client();
+  await request("/__mock/settings", "POST", { scenario: "unavailable" });
+  for (const name of ["emergency-locations", "voicemails", "devices"]) {
+    expect((await request(`/api/${name}`)).status).toBe(404);
+  }
+  // Live resources keep working, so the rest of the portal stays usable in this scenario.
+  const extensions = await request("/api/extensions");
+  expect(extensions.status).toBe(200);
+  expect((await extensions.json()).length).toBeGreaterThan(0);
+});
+
 test("mock provides unified inbox, contacts, queues, emergency, conferences, and devices collections", async () => {
   const request = client();
   for (const name of [
@@ -126,3 +138,61 @@ test("mock provides unified inbox, contacts, queues, emergency, conferences, and
   expect(updatedThread.preview).toBe("You: Confirmed for 2 PM!");
 });
 
+test("mock serves the API's own unenforced-settings table", async () => {
+  const { UNENFORCED } = await import("../portal/api/src/lib/capabilities");
+  const res = await client()("/api/capabilities");
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({
+    unenforced: UNENFORCED,
+    stirSigning: false,
+  });
+});
+
+test("projection status: empty normally, a failing job when changes are not live, owners/admins only", async () => {
+  const request = client();
+  const quiet = await (await request("/api/tenant/projections")).json();
+  expect(quiet).toMatchObject({ pending: 0, failing: 0, jobs: [] });
+  await request("/__mock/settings", "POST", { scenario: "unpublished" });
+  const stuck = await (await request("/api/tenant/projections")).json();
+  expect(stuck.failing).toBe(1);
+  expect(stuck.jobs[0].lastError).toContain("ECONNREFUSED");
+  await request("/__mock/settings", "POST", { role: "viewer" });
+  expect((await request("/api/tenant/projections")).status).toBe(403);
+});
+
+test("a destination still pointed at cannot be deleted, as the API refuses it (I04)", async () => {
+  const request = client();
+  const used = await request("/api/extensions/ext-6", "DELETE");
+  expect(used.status).toBe(409);
+  const { error } = await used.json();
+  expect(error).toContain("ring group Support team (failover)");
+  expect(error).toContain("IVR Main welcome menu option #");
+  expect((await request("/api/ring-groups/rg-sales", "DELETE")).status).toBe(
+    409,
+  );
+  expect((await request("/api/ivr-menus/ivr-main", "DELETE")).status).toBe(409);
+  // Ring-group membership is not a destination pointer; nothing else names ext-1.
+  expect((await request("/api/extensions/ext-1", "DELETE")).status).toBe(204);
+});
+
+test("a number belongs to one dialable collection, as the API requires (I19)", async () => {
+  const request = client();
+  // Ring group 600 is a fixture.
+  const clash = await request("/api/ivr-menus", "POST", {
+    number: "600",
+    name: "X",
+  });
+  expect(clash.status).toBe(409);
+  expect(
+    (
+      await request("/api/extensions", "POST", {
+        number: "600",
+        displayName: "X",
+      })
+    ).status,
+  ).toBe(409);
+  expect(
+    (await request("/api/ivr-menus", "POST", { number: "750", name: "X" }))
+      .status,
+  ).toBe(201);
+});

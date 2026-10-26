@@ -153,6 +153,25 @@ export async function removeTrunkAddress(trunkId: string): Promise<boolean> {
   }
 }
 
+/**
+ * Whether a kamcmd run failed. kamcmd exits 0 even when the RPC fails, and reports two kinds of
+ * failure on different streams: a socket it cannot open on stderr, and an RPC error on STDOUT
+ * (`error: 500 - ongoing reload`, which permissions and dispatcher return for a reload within
+ * five seconds of the last). Reading stderr alone reported that refusal as success, so the
+ * projection job completed and a new trunk's address never became trusted.
+ */
+export function kamcmdFailed(
+  exitCode: number | null,
+  stdout: string,
+  stderr: string,
+): boolean {
+  return (
+    exitCode !== 0 ||
+    /ERROR|Permission denied/i.test(stderr) ||
+    /^error\b/im.test(stdout)
+  );
+}
+
 export async function reloadKamailio(): Promise<boolean> {
   const commands = [
     "permissions.addressReload",
@@ -167,12 +186,15 @@ export async function reloadKamailio(): Promise<boolean> {
         stdout: "pipe",
         stderr: "pipe",
       });
-      const stderr = await new Response(proc.stderr).text();
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
       await proc.exited;
 
-      if (proc.exitCode !== 0 || /ERROR|Permission denied/i.test(stderr)) {
+      if (kamcmdFailed(proc.exitCode, stdout, stderr)) {
         console.warn(
-          `[kamailio-sync] ${command} failed: ${stderr.trim() || `exit ${proc.exitCode}`}`,
+          `[kamailio-sync] ${command} failed: ${stderr.trim() || stdout.trim() || `exit ${proc.exitCode}`}`,
         );
         ok = false;
       }
