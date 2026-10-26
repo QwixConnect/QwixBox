@@ -1,6 +1,6 @@
 # Project status
 
-Last reviewed **2026-10-25**. Source baseline: **`eca43d7`** (clean working tree at review start).
+Last reviewed **2026-10-26** against **`08313f3`**. The source review began at `eca43d7` on 2026-10-25; rows below record the remediation since.
 Scope: installer/helpers/templates, API/auth/schema/projections, Lua/SIP/media configuration,
 portal/mock mode, public site/bootstrap, documentation and dependency advisories. This was a
 source review with regression checks, not an exhaustive security audit or production acceptance test.
@@ -12,15 +12,15 @@ emergency behavior and a full current amd64 install remain unproven. See [active
 
 | Area | Current state | Evidence boundary |
 |---|---|---|
-| Installer | 28 ordered steps; source/template hashes, dependent invalidation, locked portal installs and first-login recovery | Safety harness passes; no complete install/rebuild/re-run in this review |
-| API/auth | Tenant-scoped CRUD, live membership roles, serialized owner mutations, expected HTTP errors, encrypted credentials | 19 integration tests pass against PostgreSQL 17; sessions, Redis and ESL are mocked |
+| Installer | 28 ordered steps; source/template hashes, dependent invalidation, locked portal installs and first-login recovery | Safety harness passes; partial-step arm64 container installs (m2) ran for the gate 7, call-path and restore harnesses; no complete current install on amd64 |
+| API/auth | Tenant-scoped CRUD, live membership roles, serialized owner mutations, expected HTTP errors, encrypted credentials | 38 security integration tests pass against PostgreSQL 17, in CI too; sessions, Redis and ESL are mocked |
 | SIP authentication | HA1/HA1b projection and `calculate_ha1=0` | Real Kamailio 6.0.1 passes 12 two-tenant credential cases plus six destination-policy cases |
-| Telephony | Extensions, exact DIDs, IP trunks, outbound PCRE routes, ring groups, IVR, schedules and feature codes have source implementations | Older records report signalling tests; current media/carrier call matrix was not run |
+| Telephony | Extensions, exact DIDs, IP trunks, outbound PCRE routes, ring groups, IVR, schedules and feature codes have source implementations | Container harnesses pass for caller ID, forwarding, emergency ingress, loopback trust and ring-group policy against a fake carrier; the media/real-carrier call matrix was not run |
 | Media / WebRTC | rtpengine and WSS configured; no browser phone in production (the simulation is mock-only, I23) | Two-way remote audio and browser SIP remain unverified |
 | Emergency | Emergency outbound route classification and egress bypass; location schema exists | Ingress cap precedes classification; location/notifications have no backend workflow |
 | Portal | Live extensions, trunks, routing, call flows, CDR, faxes, users, audit and settings; preview screens report "Not available on this server"; unenforced settings are refused by the API and disabled in the UI | Typecheck/lint/build pass; fixture fallback removed and build-guarded (I01); invented capability claims removed (I22); simulated webphone confined to mock mode and build-guarded (I23) |
 | Local mock | Vite-only middleware, synthetic auth/roles, editable fixture collections | Four mock tests and one real client URL test pass; not evidence of backend enforcement |
-| Backup / operations | Required config archive, failure-safe retention, timers, host metrics | Safety harness passes; restore, offsite failure injection and human alert delivery remain open |
+| Backup / operations | Required config archive, failure-safe retention, timers, host metrics | Safety harness passes; `restore.sh` restored a snapshot onto a fresh arm64 container (I13); a failed offsite copy keeps prune-eligible snapshots; alert receipt through a real relay and a real-host restore remain open |
 | Site / bootstrap | Static Astro site, Worker routing, immutable generated installer ref | Eight Worker checks, build and bootstrap-artifact check pass; no publication or fresh-host release install |
 | Dependencies | In-range patches applied (I15): portal audit clean; API and site residuals are build/deploy tooling only | [Before](reviews/dependencies-2026-10-25.json), [after](reviews/dependencies-2026-10-25-patched.json), triage in [issues](issues.md#dependency-interpretation); Astro 7 not yet adopted; no exploit reproduction |
 
@@ -30,7 +30,7 @@ target version. Historical FreeSWITCH builds covered both architectures, but the
 stack has not been accepted on amd64. Ubuntu is accepted by preflight; current Ubuntu validation
 is absent. Capacity figures in older prose are estimates, not benchmarks.
 
-## Verification on 2026-10-25
+## Verification, 2026-10-25 to 2026-10-26
 
 Host checks ran on macOS arm64 using existing installed dependencies; Linux checks used the
 existing disposable Debian 13 arm64 review container. No application or production database was
@@ -82,8 +82,9 @@ The dedicated synthetic `qwixbox_sip_test` fixture was reloaded for the SIP harn
 
 The SIP harness initially failed because Docker's default bridge did not resolve the database
 container name. Re-running against its inspected bridge IP passed. No product change was needed.
-Checks above do not establish two-way audio, audible DTMF, fax delivery, STIR signing, remote SSH,
-atomic cache/projection recovery, upgrades on existing customer data or restore.
+Checks above do not establish two-way audio, audible DTMF, fax delivery, STIR signing, real-carrier
+behavior, upgrades on existing customer data, or a restore on a real host. Convergence (gate 7) and
+restore were exercised only in arm64 containers.
 
 ## Acceptance runs
 
@@ -100,22 +101,16 @@ evidence, not acceptance runs.
 
 The [MVP delivery plan](mvp-plan.md) sequences this work into milestones with owner decisions.
 
-1. M2 items 1 to 4 are done (R06 durable outbox, R13 atomic cache publication, I04 referenced
-   destinations cannot be deleted, I19 one dialable-number namespace). The M2 exit check passed on
-   arm64 (gate 7 harness 14/14) and found I26, now fixed. amd64 and call-level checks are owed (M7).
-   M3 item 1 is done: outbound caller ID (I03). Verifying it found I27, now fixed: no endpoint call
-   had ever been routed. That fix makes the first real calls through Kamailio possible.
-   M3 item 2 is done: authorized forwarding of carrier calls (R11, D5). It found I30 (refused
-   Kamailio reloads were reported as success), now fixed.
-   M1 code work is done: fixture fallbacks (I01), unenforced settings (I07 controls), static
-   claims (I22), simulated webphone (I23), dependency advisories (I15, residuals accepted), the
-   auth limiter split (I21) and the unused api-key dependency (I16). Its exit check on a deployed
-   portal is still owed.
-2. Close durable projection/revocation, emergency capacity, peer forwarding and cache publication
-   gaps (R08 in [issues](issues.md); R06, R11 and R13 are fixed and owe service-level checks).
-3. Fix postflight policy/setup drift and ring-group/concurrency behavior; test actual services.
-4. Execute [MVP acceptance](mvp.md): remote audio, voicemail/IVR/fax, trusted carrier flows,
-   emergency test-provider scenarios, restore and current amd64 installation.
+1. Done in code, with container evidence: M1 (I01, I07 controls, I15, I16, I21, I22, I23), M2
+   (R06, R13, I04, I19; found I25, I26), M3 (I03, R11; found I27, I30), I02 ingress, I05, I10,
+   I11, I12, I13, I14, I17, I24, I28, I29 and the CI workflow (shell, api, web, site,
+   integration, sip; green on GitHub). Each row in [issues](issues.md) names the check still owed.
+2. Open in source: caller concurrency (I06), configured capacity (R08), tenant emergency-pattern
+   limits (I31), trunk fields without enforcement (I08), remaining unenforced settings (I07),
+   split-role Redis defaults (I20) and the missing features in I09.
+3. Waiting on owner decisions in the [delivery plan](mvp-plan.md): D1, D2, D4 and D6.
+4. Execute [MVP acceptance](mvp.md) on a real amd64 host: remote audio, voicemail/IVR/fax,
+   carrier flows, emergency test-provider scenarios, restore and a full current install. No
+   acceptance run is recorded yet.
 
-No runtime bug listed here is marked fixed by this documentation cleanup. Changes and deletions
-are recorded in the [change log](changelog.md).
+Changes and deletions are recorded in the [change log](changelog.md).

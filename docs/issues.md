@@ -1,6 +1,6 @@
 # Active project issues
 
-Reviewed **2026-10-25** against `eca43d7`. **Open** means source confirms a gap; it does not imply
+Reviewed **2026-10-25** against `eca43d7`; rows updated through **2026-10-26** (`08313f3`). **Open** means source confirms a gap; it does not imply
 that an exploit or failed live call was reproduced. **Verification owed** means implementation
 exists but the acceptance evidence is missing. P1 = release/security/availability/recovery risk;
 P2 = functional or operational gap. No new P0 exploit was established in this review.

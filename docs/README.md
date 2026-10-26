@@ -1,7 +1,7 @@
 # Project documentation
 
-Start with [project status](status.md) for readiness and the latest verification. Updated 2026-10-25
-against commit `eca43d7` and this documentation cleanup. No production deployment was performed.
+Start with [project status](status.md) for readiness and the latest verification. Updated 2026-10-26
+against commit `08313f3`. No production deployment was performed.
 
 | Document | Purpose |
 |---|---|

@@ -7,7 +7,7 @@ checked against the code rather than copied.
 
 For what blocks a shippable product, see **[mvp.md](mvp.md)** — this file is the long view.
 
-Inventory re-checked against `eca43d7` on 2026-10-25. Current test evidence is in
+Inventory re-checked against `08313f3` on 2026-10-26. Current test evidence is in
 [status](status.md); open findings are in [issues](issues.md).
 
 ## Status key
@@ -35,8 +35,8 @@ complete their code looks. [mvp.md](mvp.md) item 1 is that test.
 | 1 | Multi-tenancy & administration | **Implemented** | Tenant = better-auth organization; `requireTenant` refuses an unscoped request |
 | 2 | User management & authentication | **Implemented** | better-auth, RBAC via `createAccessControl`, no self-service registration by design. Users page in the portal, roles enforced server-side per request, password reset by email verified end to end. The installer creates the first account and tenant |
 | 3 | Extension & device management | **Partial** | Extensions work; one credential set per extension. Multi-device in [backlog](design/backlog.md) |
-| 4 | Dialplan & call routing | **Partial** | Historical extension/DID/outbound signalling; caller ID, peer forwarding and cross-resource number collisions remain open (I03/R11/I19) |
-| 5 | Call features | **Partial** | Historical ring-group/time-condition/feature-code signalling. Member DND/call-waiting and caller concurrency remain open (I05/I06); no MoH management or parking |
+| 4 | Dialplan & call routing | **Partial** | Historical extension/DID/outbound signalling. Outbound caller ID (I03), authorized peer forwarding (R11) and one number namespace per tenant (I19) are fixed and pass container harnesses; real-carrier checks are owed |
+| 5 | Call features | **Partial** | Historical ring-group/time-condition/feature-code signalling. Ring-group member DND/call waiting and sequential timing fixed (I05); caller concurrency remains open (I06); no MoH management or parking |
 | 6 | Voicemail | **Partial** | Reached and answered (`*97`, ring-group failover) with prompts loading; no message has been left or delivered to email, and that needs real audio |
 | 7 | IVR | **Partial** | A call traverses the menu and the timeout destination is honoured; DTMF selection needs a real endpoint |
 | 8 | Conference rooms | **Not started** | [backlog](design/backlog.md) |
@@ -46,7 +46,7 @@ complete their code looks. [mvp.md](mvp.md) item 1 is that test.
 | 12 | Trunks & providers | **Implemented** | IP trunks and Kamailio projection; outbound signalling historically verified. Enabled registration trunks are rejected until their registration/challenge path exists |
 | 13 | Contacts & directory | **Not started** | [backlog](design/backlog.md); `mod_cidlookup` is built and unused |
 | 14 | WebRTC & softphone | **Untested** | WSS listens and rtpengine is in the media path in config; no browser client has connected. A native softphone does register |
-| 15 | System administration | **Partial** | Installer, setup wizard, pinned bootstrap, health checks and log rotation exist. Cloudflare publication is implemented; Domain Connect discovery exists but provider approval is unverified. Backups now reject missing encryption config; a full restore remains unproven |
+| 15 | System administration | **Partial** | Installer, setup wizard, pinned bootstrap, health checks and log rotation exist. Cloudflare publication is implemented; Domain Connect discovery exists but provider approval is unverified. Backups reject missing encryption config; `restore.sh` restored a snapshot onto a fresh arm64 container (I13), and a real-host restore (gate 5) is owed |
 | 16 | Integration & APIs | **Partial** | The REST API is the integration surface and the portal is a client of it. Audit trail readable via `/api/audit`. No webhooks |
 | 17 | Billing & invoicing | **Not started** | v1 marked this complete; it was not — [design](design/billing.md) |
 | 18 | Call transcription & AI | **Not started** | Premium in v1's plan |

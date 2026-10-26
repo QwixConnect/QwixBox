@@ -198,5 +198,4 @@ systemctl enable kamailio >/dev/null 2>&1 || true
 restart_service kamailio
 
 ok "Kamailio listening on ${SIP_PORT} (UDP/TCP)$( [ "$TLS_READY" = "1" ] && echo " and ${SIPS_PORT} (TLS)" )"
-warn "The routing config is a safe baseline, not a finished dialplan."
-warn "Number translation, outbound trunks and billing hooks still need to be added."
+info "Outbound routes and number translation are applied in FreeSWITCH. Registration trunks and billing are not supported yet."

@@ -1,5 +1,19 @@
 # Change log
 
+## 2026-10-26 — Summary documents brought up to `08313f3`
+
+- `docs/status.md`: header, implementation table, verification heading and caveats, and "Next
+  work" now reflect the M1–M3, M5 and M6 remediation, I05 and CI. The old list still named
+  postflight and ring-group fixes as outstanding.
+- `docs/mvp.md` gate 2: I04 and I05 are fixed, and only I06 remains a source gap.
+- `docs/roadmap.md` rows 4, 5 and 15: I03, R11, I19 and I05 are fixed, and the container restore
+  (I13) is recorded.
+- The `docs/README.md`, `docs/issues.md` and `README.md` review headers name `08313f3`.
+- `steps/34-kamailio-config.sh` no longer warns that number translation and outbound trunks
+  "still need to be added". Both exist in FreeSWITCH. The new message names what is actually
+  unsupported: registration trunks and billing. The script changed, so step 34 re-runs once on
+  existing installs and restarts Kamailio.
+
 ## 2026-10-26 — I24 auth-schema.ts is the generator's output
 
 - `portal/api/src/db/auth-schema.ts` is replaced by `auth@1.6.25 generate` output. On upgrade,

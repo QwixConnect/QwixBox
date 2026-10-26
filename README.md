@@ -26,7 +26,7 @@ PostgreSQL, Redis, nginx, Postfix/OpenDKIM, and a Bun/Hono API with a React port
 
 ## Status
 
-Reviewed 2026-10-25. The install, registration and signalling rows below summarize historical
+Reviewed 2026-10-26. The install, registration and signalling rows below summarize historical
 acceptance records; they do not certify a fresh install of the current revision. Current checks,
 open findings and cleanup history are tracked in [docs/](docs/README.md).
 
