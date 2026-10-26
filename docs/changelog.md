@@ -26,6 +26,8 @@
   `sip-auth.py` against Debian's Kamailio. Both refuse a URL that does not name a `*_test`
   database.
 - `.github/workflows/ci.yml` runs both against service containers created for the job.
+- The api job installs `pcre2-utils`, and the shell job marks the checkout as a git
+  `safe.directory`. The first GitHub run failed on both. All six jobs are green at `d0309ee`.
 
 ## 2026-10-26 — I12 implicit-TLS relay, sender validation and IPv6 admin access
 

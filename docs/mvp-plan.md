@@ -64,12 +64,11 @@ Goal: make every later milestone measurable. Size: **M**.
    PostgreSQL and Kamailio service containers for `security.test.ts` and `tests/sip-auth.py`.
    Production databases must never be reachable from CI.
    **Offline part written 2026-10-26** (YYZ-14): `.github/workflows/ci.yml` calls `tests/ci.sh
-   shell|api|web|site`. It passes and fails as expected locally, but has not yet run on GitHub.
+   shell|api|web|site`. It passes and fails as expected locally. **All six jobs green on GitHub at `d0309ee`.**
    The installer harnesses run in it as well.
    **Service-container jobs written 2026-10-26** (YYZ-15): `integration` (Postgres + Redis:
    security and cache-publication suites) and `sip` (Debian Kamailio + Postgres: `sip-auth.py`).
-   Both pass against fresh containers locally and fail on an injected regression; not yet run on
-   GitHub.
+   Both pass against fresh containers locally and fail on an injected regression; green on GitHub.
 5. **Evidence template.** Add an "Acceptance runs" section to [status](status.md): one row per
    run, with revision, host, architecture, component versions, procedure link and result. Every
    later closure writes there. **Done 2026-10-26 (YYZ-16):** the section exists; no run is
