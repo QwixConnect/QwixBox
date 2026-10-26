@@ -24,12 +24,17 @@ jobs:
           apt-get install -y --no-install-recommends \
             git ca-certificates shellcheck lua5.4 python3 nginx openssl jq
       - uses: actions/checkout@v4
+      # The checkout belongs to the runner's user and this container runs as root, so git refuses
+      # it ("dubious ownership") and the docs-link check's `git ls-files` fails.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: tests/ci.sh shell
 
   api:
     name: API typecheck, format and validation
     runs-on: ubuntu-latest
     steps:
+      # validation.test.ts checks outbound-route patterns with pcre2grep, as step 41 installs it.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pcre2-utils
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:

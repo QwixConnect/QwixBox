@@ -7,7 +7,8 @@
 #
 #   shell  Debian 13 as root, with shellcheck, lua5.4, python3, nginx, openssl and jq installed.
 #          It binds loopback 80/443 for the nginx check, so use a disposable container.
-#   api    bun and network (auth:check fetches the auth generator); portal/api
+#   api    bun, pcre2grep and network (auth:check fetches the auth generator); portal/api
+#   (shell runs git ls-files: as root on another user's checkout, set git's safe.directory)
 #   web    bun; portal/web, then the root portal tests that import it
 #   site   node/npm; site, then the generated-site link check
 #   integration  bun; TEST_DATABASE_URL (Postgres, database *_test) and TEST_REDIS_URL. Pushes the
