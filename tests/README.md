@@ -38,7 +38,7 @@ the check that role passwords reach psql on stdin, never argv (I14), and that po
 step 10's SSH policy and probes ports without a SIGPIPE-prone pipe (I10), and that the DNS mode
 resolves once, a provider failure prints the manual records and the webroot `cli.ini` is HTTP-01
 only (I11), and the admin SSH rule split by address family and the mail sender/mode checks
-(I12). It does
+(I12), and that no multi-line producer pipes into `grep -q` under pipefail (I32). It does
 not install the whole PBX or prove remote login/service availability.
 
 Run `python3 tests/nginx-auth-limits.py` as root in the same kind of container, with `nginx` and

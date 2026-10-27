@@ -106,7 +106,7 @@ valid_timezone() {
       echo "'$1' is not a timezone name. Use Region/City, e.g. Europe/London."; return 1 ;;
   esac
 
-  if timedatectl list-timezones 2>/dev/null | grep -qxF "$1"; then return 0; fi
+  if grep -qxF "$1" <<<"$(timedatectl list-timezones 2>/dev/null)"; then return 0; fi
   [ -f "/usr/share/zoneinfo/$1" ] && return 0
 
   echo "'$1' is not a known timezone. Use Region/City, e.g. Europe/London."

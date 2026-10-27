@@ -70,7 +70,9 @@ if [ -f "$legacy" ] && head -1 "$legacy" | grep -qx '# Managed by the QwixBox in
   info "Removed superseded QwixBox SSH drop-in: $legacy"
 fi
 
-if [ -f /etc/ssh/moduli ] && awk '$5 < 3071' /etc/ssh/moduli | grep -q .; then
+# Not "awk | grep -q": under pipefail grep's early exit killed awk with SIGPIPE, so Debian 13's
+# 60 stock 2047-bit moduli were never found and never removed.
+if [ -f /etc/ssh/moduli ] && awk '$5 < 3071 { weak = 1; exit } END { exit !weak }' /etc/ssh/moduli; then
   awk '$5 >= 3071' /etc/ssh/moduli > /etc/ssh/moduli.strong
   mv /etc/ssh/moduli.strong /etc/ssh/moduli
   info "Removed weak DH moduli"

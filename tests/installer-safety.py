@@ -322,6 +322,27 @@ assert "| grep -q" not in probe, "port_listening pipes into grep -q"
 assert "kamctl add" not in postflight, "postflight still advises kamctl provisioning"
 print("PASS postflight agrees with the SSH policy and probes ports without SIGPIPE")
 
+# Every step runs under pipefail, so `producer | grep -q` fails whenever grep exits before the
+# producer's last write. That left Debian's 2047-bit moduli in place (0 of 50 runs found them) and
+# made step 20 test a unit list that never names the cluster. Only producers that write a line or
+# two may pipe into grep -q; a `bash -c "..."` child does not inherit pipefail.
+ONE_LINE = {"dpkg-query", "tr", "head", "printf", "redis-cli", "su", '"$PREFIX/bin/fs_cli"'}
+pipes = []
+for path in sorted(repo.glob("steps/*.sh")) + sorted(repo.glob("lib/*.sh")) + [repo / "install.sh", repo / "restore.sh"]:
+    for n, line in enumerate(path.read_text().splitlines(), 1):
+        code = re.sub(r"\s+#\s.*$", "", line)
+        if code.lstrip().startswith("#"):
+            continue
+        for m in re.finditer(r"(?<!\|)\|(?!\|)\s*grep\s+-[A-Za-z]*q", code):
+            before = code[:m.start()]
+            if 'bash -c "' in before:
+                continue
+            words = re.split(r"\||&&|\bif\b|!|\$\(", before)[-1].split()
+            if not words or words[0] not in ONE_LINE:
+                pipes.append(f"{path.relative_to(repo)}:{n}")
+assert not pipes, f"multi-line producer piped into grep -q under pipefail: {pipes}"
+print("PASS no multi-line producer pipes into grep -q under pipefail")
+
 # I11: the DNS mode is resolved once per step, even though dns_publish/dns_commit run it from
 # command substitutions; and a provider failure queues the record for the manual fallback rather
 # than aborting the step under set -e.

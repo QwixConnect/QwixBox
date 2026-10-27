@@ -48,7 +48,7 @@ enable_service rtpengine-daemon
 restart_service rtpengine-daemon
 
 sleep 2
-if ss -lun 2>/dev/null | grep -q ":${RTPENGINE_NG_PORT}"; then
+if grep -q ":${RTPENGINE_NG_PORT}\b" <<<"$(ss -lun 2>/dev/null)"; then  # not ss | grep -q: SIGPIPE under pipefail
   ok "rtpengine control socket listening on 127.0.0.1:${RTPENGINE_NG_PORT}"
 else
   warn "rtpengine does not appear to be listening on ${RTPENGINE_NG_PORT} - check: journalctl -u rtpengine"

@@ -1,5 +1,18 @@
 # Change log
 
+## 2026-10-27 — I32 pipelines that raced SIGPIPE under pipefail
+
+- `steps/10-ssh-hardening.sh` detects weak DH moduli with awk's own exit status. Under pipefail,
+  the old `awk | grep -q` never found the 60 2047-bit moduli that Debian 13 ships, so they were
+  never removed.
+- `steps/20-postgresql.sh` checks for the cluster unit with `systemctl cat`. `list-unit-files`
+  never names an instance, so the old check always restarted the umbrella `postgresql` unit.
+- The listener probes in steps 35 and 41, and `valid_timezone` in `lib/tui.sh`, test a captured
+  value.
+- `tests/installer-safety.py` refuses any multi-line producer piped into `grep -q` in the steps,
+  `lib/`, `install.sh` and `restore.sh`.
+- Steps 10, 20, 35 and 41 re-run once on existing installs because their scripts changed.
+
 ## 2026-10-26 — Summary documents brought up to `08313f3`
 
 - `docs/status.md`: header, implementation table, verification caveats, and "Next

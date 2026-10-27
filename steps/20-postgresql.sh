@@ -49,7 +49,9 @@ fi
 deploy_template "$TPL/pg_hba.conf" "${CLUSTER_DIR}/pg_hba.conf" 0640 postgres:postgres || true
 
 systemctl enable postgresql >/dev/null 2>&1 || true
-if systemctl list-unit-files | grep -q "postgresql@${PG_VERSION}-main"; then
+# list-unit-files names only the postgresql@ template, never this instance, so grepping it always
+# fell through to the umbrella unit (and the pipe raced SIGPIPE under pipefail).
+if systemctl cat "postgresql@${PG_VERSION}-main" >/dev/null 2>&1; then
   restart_service "postgresql@${PG_VERSION}-main"
 else
   restart_service postgresql

@@ -145,7 +145,7 @@ enable_service qwixbox-api
 restart_service qwixbox-api
 
 sleep 3
-if ss -ltn 2>/dev/null | grep -q ":${API_PORT}"; then
+if grep -q ":${API_PORT}\b" <<<"$(ss -ltn 2>/dev/null)"; then  # not ss | grep -q: SIGPIPE under pipefail
   ok "API listening on 127.0.0.1:${API_PORT}"
 else
   warn "Nothing listening on ${API_PORT} yet - check: journalctl -u qwixbox-api -n 50"
