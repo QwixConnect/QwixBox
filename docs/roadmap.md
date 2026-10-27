@@ -7,7 +7,7 @@ checked against the code rather than copied.
 
 For what blocks a shippable product, see **[mvp.md](mvp.md)** — this file is the long view.
 
-Inventory re-checked against `08313f3` on 2026-10-26. Current test evidence is in
+Inventory re-checked against `bbbad56` on 2026-10-27. Current test evidence is in
 [status](status.md); open findings are in [issues](issues.md).
 
 ## Status key

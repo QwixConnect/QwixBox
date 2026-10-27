@@ -1,5 +1,20 @@
 # Change log
 
+## 2026-10-27 — Docs re-aligned with the code at `bbbad56`
+
+- `CLAUDE.md`: the extension-number translation is `destinationNumber()` in
+  `services/call-state.ts` (it named `resolveDestinationId()` in `services/cache.ts`, which no
+  longer exists), and `lib/common.sh` also sources `dns-domainconnect.sh` and `dns.sh`.
+- `docs/issues.md` R06/R13: the "Owed" checks credit the gate 7 container run, and R06 no longer
+  calls cache publication non-atomic (R13 fixed it).
+- `docs/status.md`: the offline CI row no longer says "Not yet run on GitHub", the
+  `installer-safety.py` row counts 17 groups (was 7), and I32 is in the done list.
+- `tests/README.md`: `outbound-callerid.py`'s note no longer says Kamailio trusts all of loopback (I28).
+- `README.md` layout lists `lib/step-state.sh`. The public site's portal row no longer says
+  previews show sample data (I01).
+- Review headers in `README.md`, `docs/README.md`, `status.md`, `issues.md`, `mvp.md` and
+  `roadmap.md` name `bbbad56`.
+
 ## 2026-10-27 — I32 pipelines that raced SIGPIPE under pipefail
 
 - `steps/10-ssh-hardening.sh` detects weak DH moduli with awk's own exit status. Under pipefail,

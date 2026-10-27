@@ -1,6 +1,6 @@
 # Path to MVP
 
-Last reviewed **2026-10-26** against `08313f3`. These are acceptance gates before carrying
+Last reviewed **2026-10-27** against `bbbad56`. These are acceptance gates before carrying
 customer calls. [Project status](status.md) records current checks, [issues](issues.md) owns
 findings and priorities, and [the change log](changelog.md) records changes and deletions.
 [The delivery plan](mvp-plan.md) orders the work that closes these gates.

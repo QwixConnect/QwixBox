@@ -69,8 +69,8 @@ In the same container, `python3 tests/outbound-callerid.py` checks outbound call
 carrier sees it (I03). It adds a trunk to a fake carrier on UDP 127.0.0.1:5090, then places
 digest-authenticated calls through Kamailio, first with only the Redis tier able to answer and
 then with only the API tier. It stops the API and Redis in turn and deletes what it created on
-exit. Its caller sends from the container's own address, not loopback: Kamailio treats
-`127.0.0.1` as FreeSWITCH and skips authentication (I28). It can run straight after gate 7: a
+exit. Its caller sends from the container's own address, not loopback: Kamailio trusts only
+FreeSWITCH's address and profile ports (I28), so the harness sends as an ordinary endpoint would. It can run straight after gate 7: a
 database outage no longer leaves the caller's address banned (I29).
 
 `python3 tests/forwarding.py` checks carrier-originated forwarding (R11, D5) in the same container.
