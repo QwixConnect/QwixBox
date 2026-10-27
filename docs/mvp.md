@@ -15,7 +15,7 @@ current-stack amd64 run remains owed.
 
 The 2026-10-25 review reran API validation/security, portal mock/client checks, real Kamailio
 digest/risk-prefix tests, installer safety, shell/Lua checks and portal/site builds. See
-[status](status.md#verification-on-2026-10-25) for environments, counts and mocked boundaries.
+[status](status.md#verification) for environments, counts and mocked boundaries.
 **No call has been confirmed to carry two-way audio in the retained evidence.** A received
 INVITE or a listening rtpengine control socket does not establish working media.
 

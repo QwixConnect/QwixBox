@@ -2,7 +2,7 @@
 
 ## 2026-10-26 — Summary documents brought up to `08313f3`
 
-- `docs/status.md`: header, implementation table, verification heading and caveats, and "Next
+- `docs/status.md`: header, implementation table, verification caveats, and "Next
   work" now reflect the M1–M3, M5 and M6 remediation, I05 and CI. The old list still named
   postflight and ring-group fixes as outstanding.
 - `docs/mvp.md` gate 2: I04 and I05 are fixed, and only I06 remains a source gap.
@@ -13,6 +13,8 @@
   "still need to be added". Both exist in FreeSWITCH. The new message names what is actually
   unsupported: registration trunks and billing. The script changed, so step 34 re-runs once on
   existing installs and restarts Kamailio.
+- The status heading is now `## Verification`, with no date. `mvp.md` links to it, and the dated
+  heading broke that anchor (caught by the CI site job).
 
 ## 2026-10-26 — I24 auth-schema.ts is the generator's output
 

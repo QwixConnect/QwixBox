@@ -30,9 +30,9 @@ target version. Historical FreeSWITCH builds covered both architectures, but the
 stack has not been accepted on amd64. Ubuntu is accepted by preflight; current Ubuntu validation
 is absent. Capacity figures in older prose are estimates, not benchmarks.
 
-## Verification, 2026-10-25 to 2026-10-26
+## Verification
 
-Host checks ran on macOS arm64 using existing installed dependencies; Linux checks used the
+Checks from 2026-10-25 to 2026-10-26. Host checks ran on macOS arm64 using existing installed dependencies; Linux checks used the
 existing disposable Debian 13 arm64 review container. No application or production database was
 used: API tests ran in newly created `qwixbox_docs_review_20261025`, then that database was removed.
 The dedicated synthetic `qwixbox_sip_test` fixture was reloaded for the SIP harness.
