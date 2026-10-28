@@ -26,7 +26,7 @@ PostgreSQL, Redis, nginx, Postfix/OpenDKIM, and a Bun/Hono API with a React port
 
 ## Status
 
-Reviewed 2026-10-26. The install, registration and signalling rows below summarize historical
+Reviewed 2026-10-27. The install, registration and signalling rows below summarize historical
 acceptance records; they do not certify a fresh install of the current revision. Current checks,
 open findings and cleanup history are tracked in [docs/](docs/README.md).
 
@@ -78,6 +78,7 @@ bootstrap.sh            one-line installer - clones the repo and runs install.sh
 install.sh              master installer - runs the steps in order
 config.env.example      site configuration template
 lib/common.sh           shared helpers (logging, idempotency, apt, files, services)
+lib/step-state.sh       step input hashing for the idempotency markers
 lib/tui.sh              whiptail wrappers and the input validators
 lib/wizard.sh           the first-run configuration wizard
 lib/detect.sh           host self-detection (public IP, FQDN, timezone, admin CIDR)
