@@ -1,5 +1,14 @@
 # Change log
 
+## 2026-10-28 — I06 the caller counts against its own call slot
+
+- `resources/lua/xml_handler.lua` and `portal/api/src/routes/fs-xml.ts` start every tenant-context
+  dialplan answer for an authenticated caller with `limit hash <domain> <caller>`. Call waiting off
+  now treats an extension that is placing a call as busy. Carrier calls are never counted.
+- New `tests/caller-concurrency.lua` runs the warm tier against a stubbed Redis; a security test
+  covers the cold tier. The CI shell job now runs every `tests/*.lua`, including `ivr-choice.lua`.
+- Step 31 re-runs once on existing installs because `xml_handler.lua` changed.
+
 ## 2026-10-27 — Docs re-aligned with the code at `bbbad56`
 
 - `CLAUDE.md`: the extension-number translation is `destinationNumber()` in

@@ -36,7 +36,7 @@ complete their code looks. [mvp.md](mvp.md) item 1 is that test.
 | 2 | User management & authentication | **Implemented** | better-auth, RBAC via `createAccessControl`, no self-service registration by design. Users page in the portal, roles enforced server-side per request, password reset by email verified end to end. The installer creates the first account and tenant |
 | 3 | Extension & device management | **Partial** | Extensions work; one credential set per extension. Multi-device in [backlog](design/backlog.md) |
 | 4 | Dialplan & call routing | **Partial** | Historical extension/DID/outbound signalling. Outbound caller ID (I03), authorized peer forwarding (R11) and one number namespace per tenant (I19) are fixed and pass container harnesses; real-carrier checks are owed |
-| 5 | Call features | **Partial** | Historical ring-group/time-condition/feature-code signalling. Ring-group member DND/call waiting and sequential timing fixed (I05); caller concurrency remains open (I06); no MoH management or parking |
+| 5 | Call features | **Partial** | Historical ring-group/time-condition/feature-code signalling. Ring-group member DND/call waiting and sequential timing fixed (I05); caller concurrency fixed in code (I06), live check owed; no MoH management or parking |
 | 6 | Voicemail | **Partial** | Reached and answered (`*97`, ring-group failover) with prompts loading; no message has been left or delivered to email, and that needs real audio |
 | 7 | IVR | **Partial** | A call traverses the menu and the timeout destination is honoured; DTMF selection needs a real endpoint |
 | 8 | Conference rooms | **Not started** | [backlog](design/backlog.md) |

@@ -120,6 +120,9 @@ and full-install evidence separate from syntax/mocked tests in [project status](
 and that a live `404` on each preview endpoint raises `FeatureUnavailableError` rather than
 returning fixture records (I01).
 `lua tests/ivr-choice.lua /work` exercises the actual Lua IVR with synthetic menu/session objects.
+`lua tests/caller-concurrency.lua .` runs the real `xml_handler.lua` against a stubbed Redis and
+checks that an authenticated caller's own slot is counted first (I06). The shell CI job runs every
+`tests/*.lua` from the repository root.
 The SIP harness also checks six international/emergency destination cases using the real
 Kamailio risk-prefix expression. These checks do not replace an audible DTMF/media test.
 

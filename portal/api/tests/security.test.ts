@@ -1292,6 +1292,54 @@ test("a carrier call reaches outbound routing only through a forward the tenant 
   ).toBe(false);
 });
 
+test("an authenticated caller counts against its own slot, a carrier never does (I06)", async () => {
+  const { handleDialplan } = await import("../src/routes/fs-xml");
+  await db.insert(schema.trunk).values({
+    id: "trunk",
+    organizationId: "a",
+    name: "Carrier",
+    host: "192.0.2.1",
+  });
+  await db.insert(schema.outboundRoute).values({
+    id: "route",
+    organizationId: "a",
+    name: "NANP",
+    pattern: "^1[0-9]{10}$",
+    patternSyntax: "pcre",
+    trunkId: "trunk",
+  });
+  await request("/extensions", { number: "101", displayName: "Alice" });
+  await request("/extensions", { number: "102", displayName: "Bob" });
+  await db.insert(schema.inboundRoute).values({
+    id: "did",
+    organizationId: "a",
+    didPattern: "+14165550199",
+    destinationType: "hangup",
+  });
+  const slot = '<action application="limit" data="hash a.test 101"/>';
+  const firstAction = (xml: string) =>
+    xml.slice(
+      xml.indexOf("<action"),
+      xml.indexOf("/>", xml.indexOf("<action")) + 2,
+    );
+  for (const dialled of ["102", "14165551234", "*78"]) {
+    const xml = await handleDialplan({
+      "variable_sip_h_X-Tenant-Domain": "a.test",
+      "variable_sip_h_X-Auth-User": "101",
+      "Hunt-Context": "tenant_a",
+      "Caller-Destination-Number": dialled,
+    });
+    expect(firstAction(xml)).toBe(slot);
+  }
+  const carrier = await handleDialplan({
+    "variable_sip_h_X-Trusted-Peer": "1",
+    "Hunt-Context": "tenant_a",
+    "Caller-Destination-Number": "+14165550199",
+  });
+  expect(carrier).toContain("destination.lua");
+  expect(carrier).not.toContain('application="limit"');
+});
+
 test("a kamcmd RPC error on stdout is a failed reload, so the projection retries", async () => {
   const { kamcmdFailed } = await import("../src/services/kamailio-sync");
   expect(kamcmdFailed(0, "Reload OK\n", "")).toBe(false);
