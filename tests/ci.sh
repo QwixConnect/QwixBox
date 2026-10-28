@@ -32,6 +32,7 @@ job_shell() {
   echo "shell syntax and ShellCheck: ${#scripts[@]} scripts"
   for script in resources/lua/*.lua; do luac5.4 -p "$script"; done
   echo "luac: $(find resources/lua -name '*.lua' | wc -l) scripts"
+  for script in tests/*.lua; do lua5.4 "$script" .; done
   python3 tests/installer-safety.py
   python3 tests/nginx-auth-limits.py
   python3 tests/docs-links.py

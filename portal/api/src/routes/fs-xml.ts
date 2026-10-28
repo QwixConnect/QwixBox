@@ -180,7 +180,14 @@ export async function handleDialplan(
       `<context name="${escapeXml(context)}"><extension name="resolved"><condition field="destination_number" expression="^${escapeXml(destination.replace(/[.*+?^$()|[\]{}\\]/g, "\\$&"))}$">${actions.join("\n")}</condition></extension></context>`,
     );
   const context = `tenant_${org}`;
-  const result = (actions: string[]) => answer(context, actions);
+  // The caller is on a call too (I06); a transfer back in does not count it twice. Same as xml_handler.lua.
+  const result = (actions: string[]) =>
+    answer(
+      context,
+      authenticated
+        ? [action("limit", `hash ${domain} ${caller}`), ...actions]
+        : actions,
+    );
   // Kamailio-forwarded calls arrive in the SIP profile's context ("default"): user_context is only
   // applied when FreeSWITCH authenticates the caller, which auth-calls=false means it never does,
   // and mod_dialplan_xml ignores an answer in any other context. Move the call into its tenant's

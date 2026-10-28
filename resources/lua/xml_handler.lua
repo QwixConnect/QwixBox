@@ -246,15 +246,16 @@ function M.dialplan(req, p)
     return document("dialplan", context_xml(hunt,
       extension_xml("enter_tenant", destination, { action("transfer", destination .. " XML " .. context) })))
   end
+
+  -- The caller is on a call too (I06); a transfer back in does not count it twice. Same as fs-xml.ts.
+  local function answer(name, actions)
+    if caller then table.insert(actions, 1, action("limit", string.format("hash %s %s", domain, caller))) end
+    return document("dialplan", context_xml(context, extension_xml(name, destination, actions)))
+  end
+
   if tenant.enabled == false then
     log("warning", "tenant %s is disabled - rejecting", domain)
-    return document(
-      "dialplan",
-      context_xml(
-        context,
-        extension_xml("disabled", destination, { action("hangup", "SERVICE_UNAVAILABLE") })
-      )
-    )
+    return answer("disabled", { action("hangup", "SERVICE_UNAVAILABLE") })
   end
 
   local routes = json_decode(redis_get("qwixbox:routes:" .. domain)) or {}
@@ -262,10 +263,7 @@ function M.dialplan(req, p)
   for _, route in ipairs(routes) do
     if outbound_as and route.trunk and route.patternSyntax == "pcre" and route.isEmergency == true and qwixbox.regex_match(destination, route.pattern) then
       log("notice", "EMERGENCY call to %s from %s", destination, domain)
-      return document(
-        "dialplan",
-        context_xml(context, extension_xml("emergency", destination, build_outbound(route, destination, tenant, outbound_as, domain)))
-      )
+      return answer("emergency", build_outbound(route, destination, tenant, outbound_as, domain))
     end
   end
 
@@ -279,11 +277,11 @@ function M.dialplan(req, p)
       end
       vm_args = string.format("check default %s", domain)
     end
-    return document("dialplan", context_xml(context, extension_xml("voicemail_check", destination, {
+    return answer("voicemail_check", {
       action("answer", ""),
       action("sleep", "500"),
       action("voicemail", vm_args),
-    })))
+    })
   end
 
   local FEATURE_CODES = {
@@ -312,27 +310,19 @@ function M.dialplan(req, p)
     if not caller then
       log("warning", "feature code %s from %s with no authenticated user - refusing",
         destination, domain)
-      return document("dialplan", context_xml(context,
-        extension_xml("feature_denied", destination, { action("hangup", "CALL_REJECTED") })))
+      return answer("feature_denied", { action("hangup", "CALL_REJECTED") })
     end
-    return document("dialplan", context_xml(context,
-      extension_xml("feature_code", destination, {
-        action("lua", string.format("feature_code.lua %s %s %s %s",
-          domain, caller, feature_action, feature_value or "")),
-      })))
+    return answer("feature_code", {
+      action("lua", string.format("feature_code.lua %s %s %s %s",
+        domain, caller, feature_action, feature_value or "")),
+    })
   end
 
   local ext = redis_get("qwixbox:dir:" .. domain .. ":" .. destination)
   if ext then
-    return document(
-      "dialplan",
-      context_xml(
-        context,
-        extension_xml("internal", destination, {
-          action("lua", string.format("extension.lua %s %s", domain, destination)),
-        })
-      )
-    )
+    return answer("internal", {
+      action("lua", string.format("extension.lua %s %s", domain, destination)),
+    })
   end
 
   local function destination_actions(dtype, did_id)
@@ -341,14 +331,12 @@ function M.dialplan(req, p)
 
   local did = json_decode(redis_get("qwixbox:did:" .. domain .. ":" .. destination))
   if did then
-    return document("dialplan", context_xml(context,
-      extension_xml("did", destination, { action("set", "qwixbox_did=" .. destination), (table.unpack or unpack)(destination_actions(did.destinationType, did.destinationId)) })))
+    return answer("did", { action("set", "qwixbox_did=" .. destination), (table.unpack or unpack)(destination_actions(did.destinationType, did.destinationId)) })
   end
 
   local feature = json_decode(redis_get("qwixbox:num:" .. domain .. ":" .. destination))
   if feature then
-    return document("dialplan", context_xml(context,
-      extension_xml("feature", destination, destination_actions(feature.type, feature.id))))
+    return answer("feature", destination_actions(feature.type, feature.id))
   end
 
   for _, route in ipairs(routes) do
@@ -358,19 +346,13 @@ function M.dialplan(req, p)
       else
         local actions = build_outbound(route, destination, tenant, outbound_as, domain)
         if not actions then return nil end
-        return document(
-          "dialplan",
-          context_xml(context, extension_xml("outbound", destination, actions))
-        )
+        return answer("outbound", actions)
       end
     end
   end
 
   debug("no route for %s@%s", destination, domain)
-  return document(
-    "dialplan",
-    context_xml(context, extension_xml("no_route", destination, { action("hangup", "UNALLOCATED_NUMBER") }))
-  )
+  return answer("no_route", { action("hangup", "UNALLOCATED_NUMBER") })
 end
 
 local section = XML_REQUEST["section"]

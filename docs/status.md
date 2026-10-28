@@ -75,6 +75,7 @@ The dedicated synthetic `qwixbox_sip_test` fixture was reloaded for the SIP harn
 | Debian `python3 tests/sip-auth.py` | 21 real Kamailio/PostgreSQL cases pass (18 before I29 added the ban and outage cases); isolated loopback listener |
 | Shell `bash -n`, ShellCheck `--severity=warning`; Lua `luac -p` | Pass for installer/helpers/steps, executable templates and call-time scripts |
 | Debian `lua tests/ivr-choice.lua /work` | Pass; synthetic session dispatches `#` |
+| I06: `tests/ci.sh integration` against a disposable PostgreSQL 16 and Redis; `lua5.4 tests/caller-concurrency.lua`, `ivr-choice.lua`; `luac -p`; API typecheck/format | Security 39/39 (new I06 test fails on the old `fs-xml.ts`: first action was `extension.lua`), cache-publish 3/3; the warm-tier harness passes and fails on the old `xml_handler.lua`. Not run: a live call in the full-install container |
 | Portal `bun run typecheck`, `bun run lint`, `bun run build` | Pass |
 | Site `npm test`, `npm run build` | 8 Worker cases and bootstrap artifact check pass |
 | Dependency audits (baseline) | All return exit 1 with advisories; API 3 package groups, portal 7, site 15 |
@@ -106,7 +107,7 @@ The [MVP delivery plan](mvp-plan.md) sequences this work into milestones with ow
    (R06, R13, I04, I19; found I25, I26), M3 (I03, R11; found I27, I30), I02 ingress, I05, I10,
    I11, I12, I13, I14, I17, I24, I28, I29, I32 and the CI workflow (shell, api, web, site,
    integration, sip; green on GitHub). Each row in [issues](issues.md) names the check still owed.
-2. Open in source: caller concurrency (I06), configured capacity (R08), tenant emergency-pattern
+2. Open in source: configured capacity (R08), tenant emergency-pattern
    limits (I31), trunk fields without enforcement (I08), remaining unenforced settings (I07),
    split-role Redis defaults (I20) and the missing features in I09.
 3. Waiting on owner decisions in the [delivery plan](mvp-plan.md): D1, D2, D4 and D6.

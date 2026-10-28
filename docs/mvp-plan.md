@@ -211,6 +211,8 @@ means deleting its entry in the same change; the portal re-enables its input fro
 4. **Caller-side concurrency (I06).** Reserve the caller's slot on outbound and internal calls,
    not only the called extension's in `extension.lua`, with a symmetric release. Read
    `limit_usage` before incrementing; the `limit` application hangs up on exceed.
+   **Done in code 2026-10-28:** both tiers count an authenticated caller with a maxless `limit`
+   (never refuses); mod_hash releases it on hangup. A live call is owed (M7).
 5. **Ring-group member policy (I05).** [`ring_group.lua`](../resources/lua/ring_group.lua) bridges
    `user/` legs directly, skipping DND and call waiting. Apply member policy when building the
    dial string, and project member state. Test each strategy with a DND member, a busy member and
